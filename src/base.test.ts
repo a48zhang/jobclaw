@@ -1011,3 +1011,78 @@ describe('状态转换', () => {
     expect(agent.getState().state).toBe('error')
   })
 })
+
+// ============================================================================
+// requestIntervention() / resolveIntervention() 测试
+// ============================================================================
+
+describe('requestIntervention', () => {
+  test('挂起并等待外部解决', async () => {
+    const agent = new TestAgent({
+      openai: createMockOpenAI(),
+      agentName: 'test',
+      model: 'gpt-4o',
+      workspaceRoot: TEST_WORKSPACE,
+    })
+
+    let resolved = false
+    const interventionPromise = agent.requestIntervention('请确认操作').then((input) => {
+      resolved = true
+      return input
+    })
+
+    // Promise 应尚未解决
+    expect(resolved).toBe(false)
+
+    // 外部调用 resolveIntervention 解除挂起
+    agent.resolveIntervention('用户已确认')
+
+    const result = await interventionPromise
+    expect(resolved).toBe(true)
+    expect(result).toBe('用户已确认')
+  })
+
+  test('发出 intervention_required 事件并携带 prompt', async () => {
+    const agent = new TestAgent({
+      openai: createMockOpenAI(),
+      agentName: 'test',
+      model: 'gpt-4o',
+      workspaceRoot: TEST_WORKSPACE,
+    })
+
+    let emittedPrompt = ''
+    let emittedResolve: ((input: string) => void) | undefined
+
+    agent.on('intervention_required', (payload: { prompt: string; resolve: (input: string) => void }) => {
+      emittedPrompt = payload.prompt
+      emittedResolve = payload.resolve
+    })
+
+    const interventionPromise = agent.requestIntervention('需要人工介入')
+
+    expect(emittedPrompt).toBe('需要人工介入')
+    expect(typeof emittedResolve).toBe('function')
+
+    // 通过事件中的 resolve 函数解除挂起
+    emittedResolve?.('通过事件解决')
+
+    const result = await interventionPromise
+    expect(result).toBe('通过事件解决')
+  })
+
+  test('resolveIntervention 调用后清除内部 resolve 引用', async () => {
+    const agent = new TestAgent({
+      openai: createMockOpenAI(),
+      agentName: 'test',
+      model: 'gpt-4o',
+      workspaceRoot: TEST_WORKSPACE,
+    })
+
+    const p = agent.requestIntervention('test')
+    agent.resolveIntervention('done')
+    await p
+
+    // 再次调用 resolveIntervention 不应抛出异常
+    expect(() => agent.resolveIntervention('extra')).not.toThrow()
+  })
+})

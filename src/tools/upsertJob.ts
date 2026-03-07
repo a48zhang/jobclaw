@@ -40,13 +40,23 @@ export async function upsertJob(args: UpsertJobArgs, workspaceRoot: string): Pro
     
     const timeStr = args.time || new Date().toISOString().split('T')[0];
     
-    // 精准查重逻辑 (Index 3: URL)
+    // 精准查重逻辑 (Index 3: URL)，遇到格式损坏的行时记录警告但不中断
+    // 表格列结构: '' | 公司(1) | 职位(2) | 链接(3) | 状态(4) | 时间(5) | ''
+    const MIN_COLUMNS = 6; // split('|') 后至少要有 6 个元素才包含所有字段
     let existingIndex = -1;
     for (let i = 0; i < dataLines.length; i++) {
-      const columns = dataLines[i].split('|').map(c => c.trim());
-      if (columns[3] === args.url) {
-        existingIndex = i;
-        break;
+      try {
+        const columns = dataLines[i].split('|').map(c => c.trim());
+        if (columns.length < MIN_COLUMNS) {
+          console.warn(`[upsertJob] jobs.md 第 ${i + 1} 行格式异常，已跳过：${dataLines[i]}`);
+          continue;
+        }
+        if (columns[3] === args.url) {
+          existingIndex = i;
+          break;
+        }
+      } catch (lineError) {
+        console.warn(`[upsertJob] jobs.md 第 ${i + 1} 行解析失败，已跳过：${(lineError as Error).message}`);
       }
     }
 
