@@ -7,11 +7,15 @@ import type {
 } from 'openai/resources/chat/completions'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { executeTool, TOOLS, type ToolContext, type ToolResult } from '../../tools/index'
 import type { AgentState, Session, Task } from '../../types'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants'
 import { ContextCompressor } from './context-compressor'
 import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types'
+
+/** 工具调用超时时间（2 分钟） */
+const TOOL_CALL_TIMEOUT_MS = 120_000
 
 export abstract class BaseAgent {
   protected openai: OpenAI
@@ -62,52 +66,7 @@ export abstract class BaseAgent {
       this.initMessages(input)
       const tools = await this.getAvailableTools()
 
-      let result: string | null = null
-
-      while (this.iterations < this.maxIterations) {
-        this.iterations++
-        this.lastAction = 'llm_call'
-
-        const response = await this.callLLM(tools)
-        const message = response.choices[0]?.message
-
-        if (!message) {
-          throw new Error('LLM 返回空响应')
-        }
-
-        if (message.content) {
-          result = message.content
-        }
-
-        if (message.tool_calls && message.tool_calls.length > 0) {
-          this.lastAction = 'tool_call'
-
-          this.messages.push({
-            role: 'assistant',
-            content: message.content,
-            tool_calls: message.tool_calls,
-          })
-
-          const toolResults = await this.executeToolCalls(message.tool_calls)
-          for (const toolResult of toolResults) {
-            this.messages.push(toolResult)
-          }
-
-          continue
-        }
-
-        if (result) {
-          this.state = 'idle'
-          this.lastAction = 'completed'
-          break
-        }
-      }
-
-      if (this.iterations >= this.maxIterations) {
-        this.state = 'waiting'
-        this.lastAction = 'max_iterations'
-        result = `已达到最大迭代次数 (${this.maxIterations})，当前任务可能未完成。`
-      }
+      const result = await this.runMainLoop(tools)
 
       this.messages = await this.compressor.checkAndCompress(this.messages)
       await this.saveSession()
@@ -117,6 +76,110 @@ export abstract class BaseAgent {
       this.state = 'error'
       this.lastAction = `error: ${(error as Error).message}`
       throw error
+    }
+  }
+
+  /**
+   * 主循环逻辑（不加载/保存 session）
+   * 供 run() 和 runEphemeral() 共用
+   */
+  protected async runMainLoop(tools: ChatCompletionTool[]): Promise<string | null> {
+    let result: string | null = null
+
+    while (this.iterations < this.maxIterations) {
+      this.iterations++
+      this.lastAction = 'llm_call'
+
+      const response = await this.callLLM(tools)
+      const message = response.choices[0]?.message
+
+      if (!message) {
+        throw new Error('LLM 返回空响应')
+      }
+
+      if (message.content) {
+        result = message.content
+      }
+
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        this.lastAction = 'tool_call'
+
+        this.messages.push({
+          role: 'assistant',
+          content: message.content,
+          tool_calls: message.tool_calls,
+        })
+
+        const toolResults = await this.executeToolCalls(message.tool_calls)
+        for (const toolResult of toolResults) {
+          this.messages.push(toolResult)
+        }
+
+        continue
+      }
+
+      if (result) {
+        this.state = 'idle'
+        this.lastAction = 'completed'
+        break
+      }
+    }
+
+    if (this.iterations >= this.maxIterations) {
+      this.state = 'waiting'
+      this.lastAction = 'max_iterations'
+      result = `已达到最大迭代次数 (${this.maxIterations})，当前任务可能未完成。`
+    }
+
+    return result
+  }
+
+  /**
+   * 无状态单次执行（Ephemeral 模式）
+   * 不加载/保存 session，执行完后恢复原有消息上下文
+   */
+  async runEphemeral(
+    initialPrompt: string,
+    options: { timeoutMs?: number } = {}
+  ): Promise<string> {
+    const savedMessages = this.messages
+    const savedState = this.state
+
+    this.messages = []
+    this.state = 'running'
+    this.iterations = 0
+    this.lastAction = 'ephemeral_start'
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+    try {
+      this.initMessages(initialPrompt)
+      const tools = await this.getAvailableTools()
+      const runPromise = this.runMainLoop(tools)
+
+      const result = options.timeoutMs
+        ? await Promise.race([
+            runPromise,
+            new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      `[${this.agentName}] runEphemeral timed out after ${options.timeoutMs}ms`
+                    )
+                  ),
+                options.timeoutMs
+              )
+            }),
+          ])
+        : await runPromise
+
+      return result ?? '任务完成'
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId)
+      // 销毁临时上下文，不调用 saveSession()
+      this.messages = savedMessages
+      this.state = savedState
     }
   }
 
@@ -224,7 +287,24 @@ export abstract class BaseAgent {
   }
 
   protected async executeToolCalls(toolCalls: ChatCompletionMessageToolCall[]): Promise<ChatCompletionMessageParam[]> {
-    return Promise.all(toolCalls.map((tc) => this.executeToolCall(tc)))
+    return Promise.all(
+      toolCalls.map((tc) =>
+        Promise.race([
+          this.executeToolCall(tc),
+          new Promise<ChatCompletionMessageParam>((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  role: 'tool',
+                  tool_call_id: tc.id,
+                  content: `错误: 工具调用超时 (${TOOL_CALL_TIMEOUT_MS / 1000}s)`,
+                }),
+              TOOL_CALL_TIMEOUT_MS
+            )
+          ),
+        ])
+      )
+    )
   }
 
   /** 工具执行结果钩子 - 子类可覆盖实现副作用（如发送通知） */
@@ -274,6 +354,22 @@ export abstract class BaseAgent {
     }
 
     fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2), 'utf-8')
+  }
+
+  /**
+   * 加载 Skill 文件（SOP）
+   * workspace/skills/ 中的用户版本优先于 src/agents/skills/ 中的代码版本
+   */
+  protected loadSkill(name: string): string {
+    const userPath = path.join(this.workspaceRoot, 'skills', `${name}.md`)
+    const codePath = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../skills',
+      `${name}.md`
+    )
+    if (fs.existsSync(userPath)) return fs.readFileSync(userPath, 'utf-8')
+    if (fs.existsSync(codePath)) return fs.readFileSync(codePath, 'utf-8')
+    return ''
   }
 
   protected extractContext(): Record<string, unknown> {
