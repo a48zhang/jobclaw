@@ -72,9 +72,30 @@
 
 ## 4. BaseAgent 实现
 
-**文件**: `src/agents/base.ts`
+**目录**: `src/agents/base/`
 
-### 4.1 属性
+### 4.1 文件结构
+
+```
+src/agents/base/
+├── index.ts              # 导出入口，重新导出所有公共 API
+├── agent.ts              # BaseAgent 核心类（约 300 行）
+├── types.ts              # 类型定义（MCPClient、AgentSnapshot、BaseAgentConfig）
+├── constants.ts          # 常量定义（上下文窗口、压缩阈值等）
+└── context-compressor.ts # 上下文压缩模块
+```
+
+### 4.2 模块职责
+
+| 模块 | 职责 |
+|------|------|
+| `agent.ts` | BaseAgent 核心逻辑：主循环、工具调用、会话管理 |
+| `types.ts` | MCPClient、AgentSnapshot、BaseAgentConfig 接口定义 |
+| `constants.ts` | CONTEXT_WINDOW、COMPRESS_THRESHOLD 等常量 |
+| `context-compressor.ts` | ContextCompressor 类：token 计算、消息压缩、摘要生成 |
+| `index.ts` | 统一导出，保持向后兼容 |
+
+### 4.3 属性
 
 - `openai`：OpenAI 客户端实例
 - `mcpClient`：MCP 客户端
@@ -83,8 +104,9 @@
 - `model`：使用的模型
 - `state`：当前运行状态
 - `maxIterations`：最大循环次数（默认 50）
+- `compressor`：ContextCompressor 实例
 
-### 4.2 方法
+### 4.4 方法
 
 #### getAvailableTools()
 
@@ -129,11 +151,64 @@ Agent 主循环：
 
 ---
 
+## 4.5 ContextCompressor（上下文压缩模块）
+
+**文件**: `src/agents/base/context-compressor.ts`
+
+独立的压缩模块，通过组合方式与 BaseAgent 配合：
+
+### 接口定义
+
+```typescript
+export interface ContextCompressorConfig {
+  openai: OpenAI
+  summaryModel: string
+  keepRecentMessages: number
+}
+
+export class ContextCompressor {
+  constructor(config: ContextCompressorConfig)
+  
+  calculateTokens(messages: ChatCompletionMessageParam[]): number
+  async checkAndCompress(messages: ChatCompletionMessageParam[]): Promise<ChatCompletionMessageParam[]>
+}
+```
+
+### 方法说明
+
+#### calculateTokens(messages)
+
+计算消息列表的 token 数：
+- 统计每条消息的 content
+- 统计 tool_calls 和 tool_call_id
+- 使用 gpt-tokenizer 的 encode 函数
+
+#### checkAndCompress(messages)
+
+检查并执行压缩：
+- 未达阈值：原样返回
+- 超过阈值：调用 compressMessages 压缩后返回
+
+#### compressMessages(messages)
+
+压缩消息历史：
+- 保留 system 消息
+- 保留最近 keepRecentMessages 条消息
+- 中间消息生成摘要替换
+
+#### generateSummary(messages)
+
+调用 LLM 生成摘要：
+- 摘要内容：已完成任务、已知事实、待办事项
+- 使用 summaryModel（默认 gpt-4o-mini）
+
+---
+
 ## 5. 具体 Agent 实现
 
 ### 5.1 MainAgent
 
-**文件**: `src/agents/main.ts`
+**目录**: `src/agents/main/`
 
 主 Agent：
 - 继承 BaseAgent
@@ -143,7 +218,7 @@ Agent 主循环：
 
 ### 5.2 SearchAgent
 
-**文件**: `src/agents/search.ts`
+**目录**: `src/agents/search/`
 
 - 继承 BaseAgent
 - 构造函数接收 MCP 客户端和可选的 Channel
@@ -153,7 +228,7 @@ Agent 主循环：
 
 ### 5.3 DeliveryAgent
 
-**文件**: `src/agents/delivery.ts`
+**目录**: `src/agents/delivery/`
 
 - 继承 BaseAgent
 - 构造函数接收 MCP 客户端和 Channel

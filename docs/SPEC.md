@@ -49,13 +49,26 @@ jobclaw/
 │   ├── index.ts             # 入口
 │   ├── types.ts             # 类型定义
 │   ├── tools/
-│   │   ├── readFile.ts      # 读取文件工具
-│   │   └── index.ts         # 工具介绍与声明
+│   │   ├── index.ts         # 工具执行器入口与 Schema 定义
+│   │   ├── utils.ts         # 工具共享函数
+│   │   ├── readFile.ts      # 读取文件工具实现
+│   │   ├── writeFile.ts     # 写入文件工具实现
+│   │   ├── appendFile.ts    # 追加文件工具实现
+│   │   ├── listDirectory.ts # 列出目录工具实现
+│   │   └── lockFile.ts      # 文件锁工具实现
 │   ├── agents/
-│   │   ├── base.ts          # BaseAgent
-│   │   ├── main.ts          # MainAgent
-│   │   ├── search.ts        # SearchAgent
-│   │   └── delivery.ts      # DeliveryAgent
+│   │   ├── base/            # BaseAgent 核心包
+│   │   │   ├── index.ts     # 导出入口
+│   │   │   ├── agent.ts     # BaseAgent 核心类
+│   │   │   ├── types.ts     # Agent 相关类型定义
+│   │   │   ├── constants.ts # 常量定义
+│   │   │   └── context-compressor.ts  # 上下文压缩模块
+│   │   ├── main/            # MainAgent
+│   │   │   └── index.ts
+│   │   ├── search/          # SearchAgent
+│   │   │   └── index.ts
+│   │   └── delivery/        # DeliveryAgent
+│   │       └── index.ts
 │   ├── web/
 │   │   └── server.ts        # Hono 服务端
 │   └── channel/

@@ -1,11 +1,15 @@
 // 类型定义 - Phase 1a 实现
 
-// 从 OpenAI SDK 重导出类型
-export type {
-  ChatCompletionMessageParam,
-  ChatCompletionTool,
-  ChatCompletionMessageToolCall,
+import type {
+  ChatCompletionMessageParam as OpenAIChatCompletionMessageParam,
+  ChatCompletionTool as OpenAIChatCompletionTool,
+  ChatCompletionMessageToolCall as OpenAIChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions'
+
+// 从 OpenAI SDK 重导出类型
+export type ChatCompletionMessageParam = OpenAIChatCompletionMessageParam
+export type ChatCompletionTool = OpenAIChatCompletionTool
+export type ChatCompletionMessageToolCall = OpenAIChatCompletionMessageToolCall
 
 /**
  * Agent 状态类型
