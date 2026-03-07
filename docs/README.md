@@ -23,3 +23,14 @@
 | Phase 3 | [dev/phases/phase3.md](dev/phases/phase3.md) | 具体 Agent 实现 - Main/Search/Delivery Agent |
 | Phase 4 | [dev/phases/phase4.md](dev/phases/phase4.md) | Channel 通知 - 邮件通知模块集成 |
 | Phase 5 | [dev/phases/phase5.md](dev/phases/phase5.md) | Web UI - 可视化看板与实时推送 |
+
+# 开发进度
+
+| 阶段 | 状态 | 说明 |
+|------|------|------|
+| Phase 0 | ✅ 完成 | 项目脚手架 - 环境搭建与目录结构初始化 |
+| Phase 1 | ⏳ 待开始 | 类型定义与工具层 |
+| Phase 2 | ⏳ 待开始 | BaseAgent |
+| Phase 3 | ⏳ 待开始 | 具体 Agent 实现 |
+| Phase 4 | ⏳ 待开始 | Channel 通知 |
+| Phase 5 | ⏳ 待开始 | Web UI |
