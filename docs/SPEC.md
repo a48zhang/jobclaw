@@ -31,12 +31,14 @@
 └────────────────────────────────────────────────────────────┘
                               ▲
                               │ 继承
-        ┌─────────────────────┼─────────────────────┐
-        │                     │                     │
-┌───────────────┐    ┌───────────────┐    ┌───────────────┐
-│  MainAgent    │    │ SearchAgent   │    │ DeliveryAgent │
-│  (用户交互)    │    │  (职位抓取)   │    │  (自动投递)   │
-└───────────────┘    └───────────────┘    └───────────────┘
+                 ┌────────────┴────────────┐
+                 │                         │
+        ┌───────────────┐        ┌───────────────┐
+        │  MainAgent    │        │ DeliveryAgent │
+        │ (搜索+交互)   │        │  (自动投递)   │
+        └───────┬───────┘        └───────────────┘
+                │ spawnAgent(deliveryAgent, ...)
+                └──────串行，共享 MCP 实例──────▶
 ```
 
 ---
@@ -46,7 +48,9 @@
 ```
 jobclaw/
 ├── src/
-│   ├── index.ts             # 入口
+│   ├── index.ts             # 入口（检测 config.yaml，决定是否 Bootstrap）
+│   ├── bootstrap.ts         # Bootstrap 引导流程（首次运行）
+│   ├── cron.ts              # CronJob 单次任务脚本（外部调度器触发）
 │   ├── types.ts             # 类型定义
 │   ├── tools/
 │   │   ├── index.ts         # 工具执行器入口与 Schema 定义
@@ -63,28 +67,28 @@ jobclaw/
 │   │   │   ├── types.ts     # Agent 相关类型定义
 │   │   │   ├── constants.ts # 常量定义
 │   │   │   └── context-compressor.ts  # 上下文压缩模块
-│   │   ├── main/            # MainAgent
+│   │   ├── main/            # MainAgent（搜索+交互）
 │   │   │   └── index.ts
-│   │   ├── search/          # SearchAgent
+│   │   ├── delivery/        # DeliveryAgent（表单投递）
 │   │   │   └── index.ts
-│   │   └── delivery/        # DeliveryAgent
-│   │       └── index.ts
+│   │   └── skills/          # 代码级默认 Skill（只读）
+│   │       └── jobclaw-skills.md
 │   ├── web/
 │   │   └── server.ts        # Hono 服务端
 │   └── channel/
 │       ├── base.ts          # Channel 抽象接口
 │       └── email.ts         # 邮件通知实现
 ├── workspace/
+│   ├── config.yaml          # Bootstrap 完成标志（首次运行后生成）
+│   ├── skills/              # 用户级 Skill（可覆盖代码默认，优先级更高）
+│   │   └── jobclaw-skills.md
 │   ├── agents/              # Agent 私有文件
 │   │   ├── main/
 │   │   │   ├── session.json # 会话记忆（会压缩）
 │   │   │   └── notebook.md  # 笔记本（持久化）
-│   │   ├── search/
-│   │   │   ├── session.json
-│   │   │   └── notebook.md
 │   │   └── delivery/
-│   │       ├── session.json
-│   │       └── notebook.md
+│   │       ├── session.json # ephemeral 模式下不读写
+│   │       └── notebook.md  # 笔记本（持久化）
 │   └── data/                # 共享数据（持久化，不压缩）
 │       ├── userinfo.md
 │       ├── targets.md
@@ -109,33 +113,26 @@ jobclaw/
 
 ### 4.2 MainAgent
 
-主 Agent：
+主 Agent（同时也是"搜索 Agent"）：
 
 - 继承 BaseAgent
-- 负责用户交互
-- 管理任务队列，分发任务到其他 Agent
-- 协调 Agent 间通信
+- 负责用户交互（交互模式）
+- **直接**通过 Playwright MCP 工具搜索职位，无独立 SearchAgent
+- 通过 `spawnAgent(deliveryAgent, instruction)` 将投递委托给 DeliveryAgent（串行）
+- 支持 `runEphemeral(instruction)` 被 CronJob 无状态拉起，执行完毕后上下文销毁
+- `systemPrompt` 通过 `loadSkill('jobclaw-skills')` 内嵌搜索 SOP 和去重 SOP
 
-### 4.3 SearchAgent（信息搜集）
-
-职责：自动抓取职位信息
-
-- 继承 BaseAgent
-- 构造函数接收 MCP 客户端和可选的 Channel
-- 通过 Playwright MCP 访问招聘页面
-- 解析页面提取职位信息
-- 写入 workspace/data/jobs.md
-- 发现匹配职位后通过 Channel 发送"新职位匹配"通知
-
-### 4.4 DeliveryAgent（投递）
+### 4.3 DeliveryAgent（投递）
 
 职责：自动投递匹配职位
 
 - 继承 BaseAgent
-- 匹配职位与用户意向
+- **仅**通过 `spawnAgent` 以子进程形式运行（`runEphemeral`），永不直接 `run()`
+- 最多执行 50 步，用尽后不重试，返回结果给 MainAgent
 - 通过 Playwright MCP 填写表单投递
-- 写入 workspace/data/jobs.md
+- 写入 workspace/data/jobs.md（状态更新：applied/failed/login_required）
 - 通过 Channel 发送通知
+- `systemPrompt` 通过 `loadSkill('jobclaw-skills')` 内嵌投递 SOP
 
 ---
 
@@ -145,16 +142,16 @@ jobclaw/
 
 ```
 workspace/
+├── config.yaml              # Bootstrap 完成标志（首次运行后生成）
+├── skills/                  # 用户级 Skill（可覆盖代码默认）
+│   └── jobclaw-skills.md    # 统一 Skill 文件（含搜索/去重/投递 SOP）
 ├── agents/                  # Agent 私有文件
 │   ├── main/
 │   │   ├── session.json     # 会话记忆（会压缩）
 │   │   └── notebook.md      # 笔记本（持久化）
-│   ├── search/
-│   │   ├── session.json
-│   │   └── notebook.md
 │   └── delivery/
-│       ├── session.json
-│       └── notebook.md
+│       ├── session.json     # ephemeral 模式下不读写
+│       └── notebook.md      # 笔记本（持久化）
 │
 └── data/                    # 共享数据（持久化，不压缩）
     ├── userinfo.md          # 用户信息
@@ -229,22 +226,40 @@ Channel (abstract)
     └── SmsChannel      # 短信通知（预留）
 ```
 
+**职责边界**：Channel 仅用于向**外部用户**推送通知（邮件/Webhook 等），不用于 Agent 间通信。Agent 间通过 `jobs.md` + 文件锁交换数据。
+
 ### 7.2 接口定义
 
 ```typescript
-interface Channel {
-  send(title: string, content: string, options?: Record<string, unknown>): Promise<boolean>;
+export type ChannelMessageType =
+  | 'new_job'           // MainAgent 发现新职位
+  | 'delivery_start'    // DeliveryAgent 开始投递
+  | 'delivery_success'  // 成功投递
+  | 'delivery_failed'   // 投递失败
+  | 'delivery_blocked'  // 需要登录/人工介入
+  | 'cron_complete'     // CronJob 执行完毕汇总
+
+export interface ChannelMessage {
+  type: ChannelMessageType
+  payload: Record<string, unknown>
+  timestamp: Date
+}
+
+export interface Channel {
+  send(message: ChannelMessage): Promise<void>
 }
 ```
 
 ### 7.3 触发场景
 
-| 场景 | 通知内容 |
-|------|----------|
-| 投递成功 | 公司 + 职位 + 时间 |
-| 投递失败 | 公司 + 职位 + 错误原因 |
-| 需要登录 | 公司 + 登录入口 |
-| 新职位匹配 | 职位数量 + 匹配度 |
+| 场景 | type | payload 字段 |
+|------|------|-------------|
+| 发现新职位 | `new_job` | `company`, `title`, `url` |
+| 开始投递 | `delivery_start` | `company`, `title`, `url` |
+| 投递成功 | `delivery_success` | `company`, `title`, `url`, `time` |
+| 投递失败 | `delivery_failed` | `company`, `title`, `url`, `reason?` |
+| 需要登录 | `delivery_blocked` | `company`, `title`, `url`, `reason` |
+| CronJob 汇总 | `cron_complete` | `newJobs`, `summary` |
 
 ### 7.4 邮件配置
 
@@ -258,7 +273,43 @@ NOTIFY_EMAIL=target@example.com
 
 ---
 
-## 8. 配置
+## 8. Bootstrap 首次运行
+
+`src/index.ts` 启动时检查 `workspace/config.yaml` 是否存在：
+
+- **不存在** → 进入 Bootstrap 引导流程（`src/bootstrap.ts`）
+- **存在** → 跳过 Bootstrap，正常启动 MainAgent
+
+Bootstrap 是一次引导性对话，引导用户：
+1. 填写 `workspace/data/userinfo.md`（姓名、邮箱、简历链接等）
+2. 填写 `workspace/data/targets.md`（至少添加一个公司的招聘页 URL）
+3. 告知如何配置外部定时任务（`bun src/cron.ts` + 系统 cron 或 PM2）
+
+对话结束后写入 `workspace/config.yaml`：
+```yaml
+version: "1"
+bootstrapped_at: "2026-03-07T09:00:00Z"
+```
+
+`config.yaml` 是 Bootstrap 完成的**标志位**，不包含运行时配置。这从设计上保证了 CronJob 触发时 `targets.md` 不为空。
+
+---
+
+## 9. CronJob 定时任务
+
+`src/cron.ts` 是**单次任务脚本**，由外部调度器（系统 cron、PM2、Task Scheduler 等）按需触发。**调度时机由用户或运维在系统层面决定，代码中不包含任何调度表达式、不存储 cron 配置**。
+
+```bash
+# 外部调度示例（由用户配置，不在代码中指定）
+# 系统 crontab — 每天早上 9 点
+0 9 * * * /usr/bin/bun /path/to/jobclaw/src/cron.ts
+```
+
+`cron.ts` 调用 `mainAgent.runEphemeral(instruction)` 而非 `mainAgent.run()`，不读写 session.json，执行完毕后上下文销毁。
+
+---
+
+## 10. 配置
 
 ```bash
 # AI
@@ -274,13 +325,14 @@ NOTIFY_EMAIL=target@example.com
 
 ---
 
-## 9. 开发路线
+## 11. 开发路线
 
 | Phase | 内容 |
 |-------|------|
 | 1 | Agent Loop + Playwright MCP 集成 |
-| 2 | 抓取功能（读取 targets.md → 写入 jobs.md） |
+| 2 | 抓取功能（读取 targets.md → 写入 jobs.md）|
 | 3 | 投递功能（读取 userinfo.md → 填表 → 写入 jobs.md） |
 | 4 | 匹配、错误处理、状态追踪 |
-| 5 | Web UI 面板 |
+| 5 | Bootstrap 引导流程 + CronJob 脚本 |
 | 6 | Channel 通知（邮件优先） |
+| 7 | Web UI 面板 |
