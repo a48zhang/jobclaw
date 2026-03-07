@@ -120,6 +120,84 @@ export abstract class BaseAgent {
     }
   }
 
+  /**
+   * 无状态单次执行模式（供 CronJob 使用）
+   * 不读写 session.json，执行完毕后上下文销毁
+   */
+  async runEphemeral(input: string): Promise<string> {
+    const savedMessages = this.messages
+    const savedTask = this.currentTask
+
+    // 使用干净的上下文执行
+    this.messages = []
+    this.currentTask = null
+    this.state = 'running'
+    this.iterations = 0
+    this.lastAction = 'start'
+
+    try {
+      this.initMessages(input)
+      const tools = await this.getAvailableTools()
+
+      let result: string | null = null
+
+      while (this.iterations < this.maxIterations) {
+        this.iterations++
+        this.lastAction = 'llm_call'
+
+        const response = await this.callLLM(tools)
+        const message = response.choices[0]?.message
+
+        if (!message) {
+          throw new Error('LLM 返回空响应')
+        }
+
+        if (message.content) {
+          result = message.content
+        }
+
+        if (message.tool_calls && message.tool_calls.length > 0) {
+          this.lastAction = 'tool_call'
+
+          this.messages.push({
+            role: 'assistant',
+            content: message.content,
+            tool_calls: message.tool_calls,
+          })
+
+          const toolResults = await this.executeToolCalls(message.tool_calls)
+          for (const toolResult of toolResults) {
+            this.messages.push(toolResult)
+          }
+
+          continue
+        }
+
+        if (result) {
+          this.state = 'idle'
+          this.lastAction = 'completed'
+          break
+        }
+      }
+
+      if (this.iterations >= this.maxIterations) {
+        this.state = 'waiting'
+        this.lastAction = 'max_iterations'
+        result = `已达到最大迭代次数 (${this.maxIterations})，当前任务可能未完成。`
+      }
+
+      return result ?? '任务完成，但没有生成响应。'
+    } catch (error) {
+      this.state = 'error'
+      this.lastAction = `error: ${(error as Error).message}`
+      throw error
+    } finally {
+      // 恢复原有会话上下文，保证不污染交互会话
+      this.messages = savedMessages
+      this.currentTask = savedTask
+    }
+  }
+
   /** 获取当前状态快照 */
   getState(): AgentSnapshot {
     return {
