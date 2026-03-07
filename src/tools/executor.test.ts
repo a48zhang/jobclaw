@@ -191,7 +191,7 @@ describe('write_file 工具', () => {
       new_string: 'This is modified',
     })
     expect(result.success).toBe(true)
-    expect(result.content).toBe('替换完成')
+    expect(result.content).toBe('This is modified')
 
     const newContent = fs.readFileSync(testFile, 'utf-8')
     expect(newContent).toBe('Hello World\nThis is modified\nGoodbye World')
