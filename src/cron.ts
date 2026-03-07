@@ -1,12 +1,10 @@
 /**
- * src/cron.ts — 单次任务脚本，由外部调度器触发
- *
- * 调度示例（由用户在系统层面配置）:
- *   # 系统 crontab — 每天早上 9 点
- *   0 9 * * * /usr/bin/bun /path/to/jobclaw/src/cron.ts
- *
- *   # PM2 ecosystem.config.js
- *   { cron_restart: '0 9 * * *', script: 'src/cron.ts' }
+ * src/cron.ts — 定时任务脚本
+ * 支持两种模式：
+ * 1. search: 搜索新职位 (默认)
+ *    # bun src/cron.ts search
+ * 2. digest: 发送日报汇总
+ *    # bun src/cron.ts digest
  */
 import OpenAI from 'openai'
 import { MainAgent } from './agents/main'
@@ -16,7 +14,9 @@ import { validateEnv } from './env'
 import { createMCPClient } from './mcp'
 
 async function main() {
-  validateEnv(['smtp'])
+  const mode = process.argv[2] === 'digest' ? 'digest' : 'search';
+  
+  validateEnv(['smtp', 'openai']);
 
   const channel = new EmailChannel({
     smtpHost: process.env.SMTP_HOST!,
@@ -25,12 +25,12 @@ async function main() {
     to: process.env.NOTIFY_EMAIL!,
     user: process.env.SMTP_USER!,
     password: process.env.SMTP_PASSWORD!,
-  })
+  });
 
-  const mcpClient = await createMCPClient()
+  const mcpClient = await createMCPClient();
 
   try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     const deliveryAgent = new DeliveryAgent({
       openai,
@@ -38,7 +38,7 @@ async function main() {
       workspaceRoot: './workspace',
       mcpClient,
       channel,
-    })
+    });
 
     const mainAgent = new MainAgent({
       openai,
@@ -47,29 +47,30 @@ async function main() {
       deliveryAgent,
       mcpClient,
       channel,
-    })
+    });
 
-    const result = await mainAgent.runEphemeral(
-      '搜索 targets.md 中所有公司的最新职位，将发现的新职位写入 jobs.md'
-    )
-
-    // 解析 result 中的 newJobs 数量（约定 LLM 回复结尾包含 "发现 N 个新职位"）
-    const countMatch = result.match(/发现\s*(\d+)\s*个新职位/)
-    const newJobs = countMatch ? parseInt(countMatch[1], 10) : 0
-
-    if (newJobs > 0) {
-      await channel.send({
-        type: 'cron_complete',
-        payload: { newJobs, summary: result },
-        timestamp: new Date(),
-      })
+    if (mode === 'search') {
+      console.log('[cron] 正在启动搜索任务...');
+      // 搜索模式保持静默，upsert_job 会负责写入，但不触发单条通知
+      await mainAgent.runEphemeral(
+        '搜索 targets.md 中所有公司的最新职位，使用 upsert_job 将发现的新职位写入 jobs.md。此过程无需发送邮件通知。'
+      );
+      console.log('[cron] 搜索任务完成。');
+    } else {
+      console.log('[cron] 正在生成日报汇总...');
+      // 日报模式由 Agent 读取 jobs.md 并通过 channel 发送汇总
+      await mainAgent.runEphemeral(
+        '分析 jobs.md 中的新增岗位并发送日报汇总。如果没有新岗位，请直接回复"今日无新增"。'
+      );
+      console.log('[cron] 日报任务完成。');
     }
+
   } finally {
-    await mcpClient.close()
+    await mcpClient.close();
   }
 }
 
 main().catch((err) => {
-  console.error('[cron] 任务失败:', err)
-  process.exit(1)
-})
+  console.error(`[cron] ${process.argv[2] || 'search'} 任务失败:`, err);
+  process.exit(1);
+});
