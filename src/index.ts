@@ -4,7 +4,8 @@ import { DeliveryAgent } from './agents/delivery'
 import { needsBootstrap, BOOTSTRAP_PROMPT } from './bootstrap'
 import { validateEnv } from './env'
 import { createMCPClient } from './mcp'
-import * as readline from 'node:readline'
+import { TUI } from './web/tui'
+import { TUIChannel } from './channel/tui'
 
 const WORKSPACE_ROOT = './workspace'
 
@@ -16,51 +17,80 @@ async function main() {
   try {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
+    // Bootstrap 引导循环：持续运行直到用户完成配置并生成 config.yaml
+    // During bootstrap we use a no-op channel since TUI is not yet running
+    if (needsBootstrap(WORKSPACE_ROOT)) {
+      // During bootstrap we use a stderr-backed channel since TUI is not yet running
+      const bootstrapChannel = new TUIChannel((line) => process.stderr.write(line + '\n'))
+      const bootstrapDelivery = new DeliveryAgent({
+        openai,
+        agentName: 'delivery',
+        model: process.env.MODEL ?? 'gpt-4o',
+        workspaceRoot: WORKSPACE_ROOT,
+        mcpClient,
+        channel: bootstrapChannel,
+      })
+      const bootstrapAgent = new MainAgent({
+        openai,
+        agentName: 'main',
+        model: process.env.MODEL ?? 'gpt-4o',
+        workspaceRoot: WORKSPACE_ROOT,
+        deliveryAgent: bootstrapDelivery,
+        mcpClient,
+      })
+      while (needsBootstrap(WORKSPACE_ROOT)) {
+        const result = await bootstrapAgent.run(BOOTSTRAP_PROMPT)
+        process.stderr.write(`[JobClaw] ${result}\n`)
+      }
+    }
+
+    // ── Launch TUI ──────────────────────────────────────────────────────────
+    let mainAgent: MainAgent
+
+    const tui = new TUI({
+      workspaceRoot: WORKSPACE_ROOT,
+      onCommand: async (input) => {
+        const response = await mainAgent.run(input)
+        tui.tuiChannel.send({
+          type: 'cron_complete',
+          payload: { message: response },
+          timestamp: new Date(),
+        })
+      },
+    })
+
     const deliveryAgent = new DeliveryAgent({
       openai,
+      agentName: 'delivery',
       model: process.env.MODEL ?? 'gpt-4o',
       workspaceRoot: WORKSPACE_ROOT,
       mcpClient,
+      channel: tui.tuiChannel,
     })
 
-    const mainAgent = new MainAgent({
+    mainAgent = new MainAgent({
       openai,
+      agentName: 'main',
       model: process.env.MODEL ?? 'gpt-4o',
       workspaceRoot: WORKSPACE_ROOT,
       deliveryAgent,
       mcpClient,
+      channel: tui.tuiChannel,
     })
 
-    // Bootstrap 引导循环：持续运行直到用户完成配置并生成 config.yaml
-    while (needsBootstrap(WORKSPACE_ROOT)) {
-      console.log('[JobClaw] 首次启动，进入初始化引导流程...')
-      const result = await mainAgent.run(BOOTSTRAP_PROMPT)
-      console.log('\n[JobClaw]', result)
-    }
-
-    // 正常交互模式
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    })
-
-    console.log('JobClaw 已启动。输入指令开始搜索职位（Ctrl+C 退出）。')
-
-    const askQuestion = (prompt: string): Promise<string> =>
-      new Promise((resolve) => rl.question(prompt, resolve))
-
-    while (true) {
-      const input = await askQuestion('> ')
-      if (!input.trim()) continue
-      const response = await mainAgent.run(input)
-      console.log(response)
-    }
-  } finally {
+    // Wire up HITL: intervention_required → TUI modal
+    tui.attachAgent(mainAgent)
+    tui.startWatching()
+    tui.render()
+  } catch (err) {
     await mcpClient.close()
+    throw err
   }
 }
 
 main().catch((err) => {
-  console.error('[JobClaw] 启动失败:', err)
+  process.stderr.write(`[JobClaw] 启动失败: ${(err as Error).message}\n`)
   process.exit(1)
 })
+
+
