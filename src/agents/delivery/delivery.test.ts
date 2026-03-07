@@ -73,7 +73,17 @@ describe('DeliveryAgent', () => {
 
   // TC-C-02: onToolResult - write_file jobs.md applied → 发送 delivery_success
   test('TC-C-02: write_file applied → channel.send delivery_success', async () => {
-    await (agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }).onToolResult('write_file', {
+    const agentInternal = agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }
+
+    // First navigate to the job to set currentJobUrl
+    await agentInternal.onToolResult('browser_navigate', {
+      success: true,
+      content: '已导航至 https://acme.com/j/1',
+    })
+    mockChannel.sentMessages.length = 0
+    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+
+    await agentInternal.onToolResult('write_file', {
       success: true,
       content: '| Acme Corp | SWE | https://acme.com/j/1 | applied | 2026-03-07 14:30 |',
     })
@@ -87,7 +97,16 @@ describe('DeliveryAgent', () => {
 
   // TC-C-03: onToolResult - write_file jobs.md failed → 发送 delivery_failed
   test('TC-C-03: write_file failed → channel.send delivery_failed', async () => {
-    await (agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }).onToolResult('write_file', {
+    const agentInternal = agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }
+
+    await agentInternal.onToolResult('browser_navigate', {
+      success: true,
+      content: '已导航至 https://foo.com/j/2',
+    })
+    mockChannel.sentMessages.length = 0
+    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+
+    await agentInternal.onToolResult('write_file', {
       success: true,
       content: '| Foo Inc | Backend Dev | https://foo.com/j/2 | failed | 2026-03-07 15:00 |',
     })
@@ -98,7 +117,16 @@ describe('DeliveryAgent', () => {
 
   // TC-C-04: onToolResult - write_file jobs.md login_required → 发送 delivery_blocked
   test('TC-C-04: write_file login_required → channel.send delivery_blocked', async () => {
-    await (agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }).onToolResult('write_file', {
+    const agentInternal = agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }
+
+    await agentInternal.onToolResult('browser_navigate', {
+      success: true,
+      content: '已导航至 https://bar.com/j/3',
+    })
+    mockChannel.sentMessages.length = 0
+    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+
+    await agentInternal.onToolResult('write_file', {
       success: true,
       content: '| Bar LLC | PM | https://bar.com/j/3 | login_required | 2026-03-07 16:00 |',
     })
@@ -147,9 +175,16 @@ describe('DeliveryAgent', () => {
       }),
     }
     const throwingAgent = new DeliveryAgent(createConfig(throwingChannel))
+    const agentInternal = throwingAgent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }
+
+    // Set currentJobUrl first via browser_navigate (which also throws, caught internally)
+    await agentInternal.onToolResult('browser_navigate', {
+      success: true,
+      content: '已导航至 https://acme.com/j/1',
+    })
 
     await expect(
-      (throwingAgent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }).onToolResult('write_file', {
+      agentInternal.onToolResult('write_file', {
         success: true,
         content: '| Acme Corp | SWE | https://acme.com/j/1 | applied | 2026-03-07 14:30 |',
       })
@@ -168,26 +203,35 @@ describe('DeliveryAgent', () => {
     expect(prompt).toContain('login_required')
   })
 
-  // TC-C-10: extractContext / restoreContext 保存恢复已投递 URL
-  test('TC-C-10: extractContext / restoreContext 保存恢复已投递 URL', () => {
-    const agentInternal = agent as unknown as {
-      deliveredUrls: Set<string>
-      extractContext(): Record<string, unknown>
-      restoreContext(ctx: Record<string, unknown>): void
-    }
+  // TC-C-10: write_file 在无 currentJobUrl 时不触发通知
+  test('TC-C-10: write_file 在 browser_navigate 之前不触发 channel.send', async () => {
+    // No browser_navigate has been called → currentJobUrl is null
+    await (agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }).onToolResult('write_file', {
+      success: true,
+      content: '| Acme Corp | SWE | https://acme.com/j/1 | applied | 2026-03-07 14:30 |',
+    })
 
-    agentInternal.deliveredUrls.add('https://acme.com/j/1')
+    expect(mockChannel.send).not.toHaveBeenCalled()
+  })
 
-    const context = agentInternal.extractContext()
-    expect(context.deliveredUrls).toContain('https://acme.com/j/1')
+  // TC-C-11: browser_navigate 设置 currentJobUrl，后续 write_file 只匹配该 URL
+  test('TC-C-11: write_file 仅匹配当前 currentJobUrl，其他 URL 不触发通知', async () => {
+    const agentInternal = agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }
 
-    const newAgent = new DeliveryAgent(createConfig(mockChannel))
-    const newAgentInternal = newAgent as unknown as {
-      deliveredUrls: Set<string>
-      restoreContext(ctx: Record<string, unknown>): void
-    }
+    // Navigate to job A
+    await agentInternal.onToolResult('browser_navigate', {
+      success: true,
+      content: '已导航至 https://acme.com/j/1',
+    })
 
-    newAgentInternal.restoreContext(context)
-    expect(newAgentInternal.deliveredUrls.has('https://acme.com/j/1')).toBe(true)
+    // write_file for a DIFFERENT URL should NOT trigger a notification
+    await agentInternal.onToolResult('write_file', {
+      success: true,
+      content: '| Other Corp | Dev | https://other.com/j/9 | applied | 2026-03-07 14:30 |',
+    })
+
+    // Only delivery_start was sent; no delivery_success for the wrong URL
+    expect(mockChannel.send).toHaveBeenCalledTimes(1)
+    expect(mockChannel.sentMessages[0].type).toBe('delivery_start')
   })
 })

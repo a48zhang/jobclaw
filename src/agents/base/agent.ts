@@ -276,6 +276,20 @@ export abstract class BaseAgent {
     fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2), 'utf-8')
   }
 
+  /** 加载 Skill 文件内容。workspace/skills/ 覆盖优先；其次 src/agents/skills/ 默认 */
+  protected loadSkill(skillName: string): string {
+    const overridePath = path.resolve(this.workspaceRoot, 'skills', `${skillName}.md`)
+    if (fs.existsSync(overridePath)) {
+      return fs.readFileSync(overridePath, 'utf-8')
+    }
+    const defaultPath = path.resolve(import.meta.dir, '../skills', `${skillName}.md`)
+    if (fs.existsSync(defaultPath)) {
+      return fs.readFileSync(defaultPath, 'utf-8')
+    }
+    console.warn(`[BaseAgent] Skill 文件未找到: ${skillName}.md`)
+    return ''
+  }
+
   protected extractContext(): Record<string, unknown> {
     return {}
   }
