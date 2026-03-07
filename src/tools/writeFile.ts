@@ -69,7 +69,7 @@ export async function executeWriteFile(args: Record<string, unknown>, context: T
     const newContent = content.replace(oldString, newString)
     fs.writeFileSync(normalizedPath, newContent, 'utf-8')
 
-    return { success: true, content: '替换完成' }
+    return { success: true, content: newString }
   } catch (err) {
     return { success: false, content: '', error: `写入文件失败：${(err as Error).message}` }
   }
