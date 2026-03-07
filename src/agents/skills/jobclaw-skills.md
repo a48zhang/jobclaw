@@ -1,55 +1,29 @@
 # JobClaw Skills
 
-## 搜索职位 SOP
-1. 读取 workspace/data/targets.md，获取所有待搜索公司和 URL
-2. 若 targets.md 无任何 URL，立即停止并报告"无监测目标"
-3. 对每个目标 URL：
-   a. browser_navigate 访问
-   b. browser_snapshot 获取页面内容
-   c. 提取职位列表（公司名、职位名、完整链接）
-4. 对每个发现的职位，执行去重 SOP（见下）
-5. 通过合格职位遵循 jobs.md 写入约定（lock → append → unlock）
+## 搜索职位 SOP (MainAgent)
+1. **读取目标**: 读取 `workspace/data/targets.md`，获取所有待搜索公司和 URL。
+2. **监测巡回**: 对每个目标 URL，使用 `browser_navigate` 访问并使用 `browser_snapshot` 提取职位列表（公司、职位名、完整链接）。
+3. **数据写入**: 对每个发现的职位，使用 `upsert_job` 工具进行登记。工具会自动处理查重和格式化。
+   - `status`: 固定为 `discovered`。
 
-## 写入 jobs.md 前去重 SOP
-1. 先 read_file data/jobs.md，提取所有已有链接（第 3 列 URL）
-2. 对比当前职位链接
-3. 若链接已存在（任意状态），跳过，不写入
-4. 若不存在，执行写入：lock_file → append_file → unlock_file
-规则：先 read 再 lock，减少持锁时间，不要在持锁期间读取文件
+## 投递职位 SOP (DeliveryAgent)
+1. **环境检查**: 读取 `workspace/data/userinfo.md` 确认个人信息（姓名、简历等）完整。
+2. **任务获取**: 读取 `workspace/data/jobs.md`，筛选出状态为 `discovered` 的职位。
+3. **自动化投递**: 对每个待投递职位：
+   - 访问 URL，填写表单并提交。
+   - **特殊情况**: 若页面需要登录且无法自动完成，调用 `upsert_job` 将状态更新为 `login_required`。
+4. **状态更新**: 投递完成后，调用 `upsert_job` 更新状态为 `applied` 或 `failed`。
 
-## 投递职位 SOP
-你是 JobClaw 的投递执行 Agent（DeliveryAgent）。
+## 日报汇总 SOP (Daily Digest)
+### 场景
+当收到指令“分析 jobs.md 中的新增岗位并发送日报汇总”时，执行此 SOP。
 
-### 职责
-读取待投递职位列表，自动操作浏览器完成简历投递，并更新每笔投递的结果状态。
-
-### 数据文件
-- workspace/data/jobs.md — 读取 discovered 职位；完成后更新状态
-- workspace/data/userinfo.md — 读取用户信息用于填写表单
-
-### 工作流程
-1. 读取 workspace/data/userinfo.md，确认用户信息完整
-   - 如缺少关键字段（姓名、邮箱、简历），立即停止并报告
-2. 读取 workspace/data/jobs.md，筛选出所有状态为 discovered 的职位
-   - 如没有 discovered 职位，报告"暂无待投递职位"后结束
-3. 对每个 discovered 职位（按顺序逐一处理）：
-   a. 使用 browser_navigate 访问招聘链接
-   b. 使用 browser_snapshot 获取页面内容，识别表单字段
-   c. 如果页面需要登录：
-      - 跳过此职位
-      - lock_file → write_file（状态改为 login_required，时间记录当前时间）→ unlock_file
-      - 继续下一个
-   d. 使用表单工具填写用户信息并提交
-   e. 等待响应，判断是否提交成功
-   f. lock_file → write_file（更新状态为 applied 或 failed，记录当前时间）→ unlock_file
-4. 汇报本次投递结果：X 个成功，Y 个失败，Z 个需要登录
-
-### 重要规则
-- write_file 前必须先 lock_file，写完立即 unlock_file
-- 使用 old_string/new_string 精确替换行，old_string 须与文件中的行完全一致
-- 投递时间格式：YYYY-MM-DD HH:mm
-- 状态只能改为：applied / failed / login_required（不能改回 discovered）
-- 遇到验证码或复杂人机验证时，将状态改为 failed，在摘要中单独列出
-
-### 我的记忆文件
-- workspace/agents/delivery/notebook.md — 跨会话笔记（如：哪些网站需要特殊处理）
+### 步骤
+1. **数据读取**: 读取 `workspace/data/jobs.md`。
+2. **筛选策略**: 筛选出状态为 `discovered` 且日期为“今日”的职位。
+3. **内容生成**:
+   - 若无新增：回复“今日无新增职位”并结束。
+   - 若有新增：撰写一份总结邮件，使用 Markdown 列表展示职位详情，并调用 `channel.send` 发送。
+4. **邮件模板建议**:
+   - **标题**: `JobClaw 职位日报 - [日期] (共 N 个新机会)`
+   - **正文**: 简要开场白 + 职位列表 + 提示用户可以使用 `start delivery` 开始投递。
