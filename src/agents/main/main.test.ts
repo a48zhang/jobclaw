@@ -74,6 +74,17 @@ const createConfig = (overrides: Partial<MainAgentConfig> = {}): MainAgentConfig
   ...overrides,
 })
 
+/** 类型安全地调用 MainAgent 的 protected onToolResult */
+const callOnToolResult = (
+  agent: MainAgent,
+  toolName: string,
+  result: { success: boolean; content: string }
+) =>
+  (agent as unknown as { onToolResult(n: string, r: typeof result): Promise<void> }).onToolResult(
+    toolName,
+    result
+  )
+
 // ============================================================================
 // 测试套件
 // ============================================================================
@@ -251,11 +262,7 @@ describe('MainAgent', () => {
           '已追加到 data/jobs.md\n| ByteDance | 前端工程师 | https://jobs.bytedance.com/1234 | discovered | |',
       }
 
-      // 通过类型断言访问 protected 方法
-      await (a as unknown as { onToolResult(n: string, r: typeof result): Promise<void> }).onToolResult(
-        'append_file',
-        result
-      )
+      await callOnToolResult(a, 'append_file', result)
 
       expect(mockChannel.send).toHaveBeenCalledTimes(1)
       const sentMsg = (mockChannel.send as ReturnType<typeof mock>).mock.calls[0]?.[0] as ChannelMessage
@@ -274,12 +281,46 @@ describe('MainAgent', () => {
         content: '已追加到 data/jobs.md\n| ByteDance | 前端工程师 | https://jobs.bytedance.com/1234 | applied | |',
       }
 
-      await (a as unknown as { onToolResult(n: string, r: typeof result): Promise<void> }).onToolResult(
-        'append_file',
-        result
-      )
+      await callOnToolResult(a, 'append_file', result)
 
       expect(mockChannel.send).not.toHaveBeenCalled()
+    })
+
+    test('多个 discovered 行时发送多条通知', async () => {
+      const mockChannel = createMockChannel()
+      const a = new MainAgent(createConfig({ channel: mockChannel }))
+
+      const result = {
+        success: true,
+        content: [
+          '已追加到 data/jobs.md',
+          '| ByteDance  |  前端工程师  |  https://jobs.bytedance.com/1234  | discovered |',
+          '|  Tencent  |  后端工程师  |  https://careers.tencent.com/5678  |  discovered  |  |',
+        ].join('\n'),
+      }
+
+      await callOnToolResult(a, 'append_file', result)
+
+      expect(mockChannel.send).toHaveBeenCalledTimes(2)
+    })
+
+    test('列间多余空格不影响匹配（对齐格式）', async () => {
+      const mockChannel = createMockChannel()
+      const a = new MainAgent(createConfig({ channel: mockChannel }))
+
+      // 故意使用多余空格对齐的 Markdown 表格行
+      const result = {
+        success: true,
+        content:
+          '|  ByteDance  |  前端工程师  |  https://jobs.bytedance.com/1234  |  discovered  |  |',
+      }
+
+      await callOnToolResult(a, 'append_file', result)
+
+      expect(mockChannel.send).toHaveBeenCalledTimes(1)
+      const sentMsg = (mockChannel.send as ReturnType<typeof mock>).mock.calls[0]?.[0] as ChannelMessage
+      expect(sentMsg.payload.company).toBe('ByteDance')
+      expect(sentMsg.payload.url).toBe('https://jobs.bytedance.com/1234')
     })
   })
 
@@ -296,12 +337,7 @@ describe('MainAgent', () => {
           '| ByteDance | 前端工程师 | https://jobs.bytedance.com/1234 | discovered | |',
       }
 
-      await expect(
-        (a as unknown as { onToolResult(n: string, r: typeof result): Promise<void> }).onToolResult(
-          'append_file',
-          result
-        )
-      ).resolves.toBeUndefined()
+      await expect(callOnToolResult(a, 'append_file', result)).resolves.toBeUndefined()
     })
   })
 
@@ -446,6 +482,28 @@ describe('MainAgent', () => {
       expect(prompt).toContain('lock_file')
       expect(prompt).toContain('discovered')
       expect(prompt).toContain('targets.md')
+    })
+
+    test('systemPrompt 包含 [FOUND: N] 统计标记说明', () => {
+      const prompt = (agent as unknown as { systemPrompt: string }).systemPrompt
+      expect(prompt).toContain('[FOUND:')
+    })
+
+    test('未提供 mcpClient 时 systemPrompt 包含 MCP 警告', () => {
+      // createConfig 默认不传 mcpClient
+      const a = new MainAgent(createConfig())
+      const prompt = (a as unknown as { systemPrompt: string }).systemPrompt
+      expect(prompt).toContain('MCP 未连接')
+    })
+
+    test('提供 mcpClient 时 systemPrompt 不包含 MCP 警告', () => {
+      const mockMcpClient = {
+        listTools: mock(() => Promise.resolve([])),
+        callTool: mock(() => Promise.resolve('')),
+      }
+      const a = new MainAgent(createConfig({ mcpClient: mockMcpClient }))
+      const prompt = (a as unknown as { systemPrompt: string }).systemPrompt
+      expect(prompt).not.toContain('MCP 未连接')
     })
   })
 
