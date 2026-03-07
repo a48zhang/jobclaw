@@ -12,8 +12,12 @@ import OpenAI from 'openai'
 import { MainAgent } from './agents/main'
 import { DeliveryAgent } from './agents/delivery'
 import { EmailChannel } from './channel/email'
+import { validateEnv } from './env'
+import { createMCPClient } from './mcp'
 
 async function main() {
+  validateEnv(['smtp'])
+
   const channel = new EmailChannel({
     smtpHost: process.env.SMTP_HOST!,
     smtpPort: parseInt(process.env.SMTP_PORT ?? '587', 10),
@@ -23,37 +27,45 @@ async function main() {
     password: process.env.SMTP_PASSWORD!,
   })
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  const mcpClient = await createMCPClient()
 
-  const deliveryAgent = new DeliveryAgent({
-    openai,
-    model: process.env.MODEL ?? 'gpt-4o',
-    workspaceRoot: './workspace',
-    channel,
-  })
+  try {
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
-  const mainAgent = new MainAgent({
-    openai,
-    model: process.env.MODEL ?? 'gpt-4o',
-    workspaceRoot: './workspace',
-    deliveryAgent,
-    channel,
-  })
-
-  const result = await mainAgent.runEphemeral(
-    '搜索 targets.md 中所有公司的最新职位，将发现的新职位写入 jobs.md'
-  )
-
-  // 解析 result 中的 newJobs 数量（约定 LLM 回复结尾包含 "发现 N 个新职位"）
-  const countMatch = result.match(/发现\s*(\d+)\s*个新职位/)
-  const newJobs = countMatch ? parseInt(countMatch[1], 10) : 0
-
-  if (newJobs > 0) {
-    await channel.send({
-      type: 'cron_complete',
-      payload: { newJobs, summary: result },
-      timestamp: new Date(),
+    const deliveryAgent = new DeliveryAgent({
+      openai,
+      model: process.env.MODEL ?? 'gpt-4o',
+      workspaceRoot: './workspace',
+      mcpClient,
+      channel,
     })
+
+    const mainAgent = new MainAgent({
+      openai,
+      model: process.env.MODEL ?? 'gpt-4o',
+      workspaceRoot: './workspace',
+      deliveryAgent,
+      mcpClient,
+      channel,
+    })
+
+    const result = await mainAgent.runEphemeral(
+      '搜索 targets.md 中所有公司的最新职位，将发现的新职位写入 jobs.md'
+    )
+
+    // 解析 result 中的 newJobs 数量（约定 LLM 回复结尾包含 "发现 N 个新职位"）
+    const countMatch = result.match(/发现\s*(\d+)\s*个新职位/)
+    const newJobs = countMatch ? parseInt(countMatch[1], 10) : 0
+
+    if (newJobs > 0) {
+      await channel.send({
+        type: 'cron_complete',
+        payload: { newJobs, summary: result },
+        timestamp: new Date(),
+      })
+    }
+  } finally {
+    await mcpClient.close()
   }
 }
 

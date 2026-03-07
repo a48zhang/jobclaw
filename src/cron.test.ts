@@ -1,6 +1,11 @@
 // CronJob 单元测试 — Team B
-import { describe, test, expect, mock, beforeEach } from 'bun:test'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import * as os from 'node:os'
+import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test'
 import type { Channel, ChannelMessage } from './channel/base'
+import { validateEnv } from './env'
+import { needsBootstrap } from './bootstrap'
 
 // ─── 辅助：创建 mock Channel ──────────────────────────────────────────────
 function makeMockChannel() {
@@ -77,11 +82,49 @@ describe('cron main()', () => {
   })
 })
 
-// ─── TC-B-09 / TC-B-10: needsBootstrap ────────────────────────────────────
-import { needsBootstrap } from './bootstrap'
-import * as fs from 'node:fs'
-import * as path from 'node:path'
-import * as os from 'node:os'
+// ─── validateEnv ────────────────────────────────────────────────────────────
+describe('validateEnv', () => {
+  const originalEnv = process.env
+
+  beforeEach(() => {
+    // 隔离环境变量
+    process.env = { ...originalEnv }
+  })
+
+  afterEach(() => {
+    process.env = originalEnv
+  })
+
+  test('所有必须变量都存在时不抛出异常', () => {
+    process.env.OPENAI_API_KEY = 'sk-test'
+    expect(() => validateEnv()).not.toThrow()
+  })
+
+  test('缺少 OPENAI_API_KEY 时抛出友好错误', () => {
+    delete process.env.OPENAI_API_KEY
+    expect(() => validateEnv()).toThrow(/OPENAI_API_KEY/)
+  })
+
+  test('smtp 模式下缺少 SMTP_HOST 时抛出友好错误', () => {
+    process.env.OPENAI_API_KEY = 'sk-test'
+    delete process.env.SMTP_HOST
+    expect(() => validateEnv(['smtp'])).toThrow(/SMTP_HOST/)
+  })
+
+  test('smtp 模式下所有变量都存在时不抛出异常', () => {
+    process.env.OPENAI_API_KEY = 'sk-test'
+    process.env.SMTP_HOST = 'smtp.example.com'
+    process.env.SMTP_USER = 'noreply@example.com'
+    process.env.SMTP_PASSWORD = 'secret'
+    process.env.NOTIFY_EMAIL = 'user@example.com'
+    expect(() => validateEnv(['smtp'])).not.toThrow()
+  })
+
+  test('错误信息引用 .env.example', () => {
+    delete process.env.OPENAI_API_KEY
+    expect(() => validateEnv()).toThrow(/.env.example/)
+  })
+})
 
 describe('needsBootstrap', () => {
   let tmpDir: string
