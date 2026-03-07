@@ -1,42 +1,40 @@
-# Phase 3：具体 Agent 实现
+# Phase 3：核心功能与基础设施实现
 
-**目标**：基于逻辑协作构建具体 Agent 功能。
+**目标**：基于“两 Agent 架构”实现具体功能逻辑，并构建系统运行所需的基础设施（通知、定时任务、引导流程）。
 
 ### 任务清单
 
-#### 3.1 MainAgent（`src/agents/main.ts`）
+#### 3.1 MainAgent（`src/agents/main/index.ts`）
+- **核心职责**：用户交互、职位搜索、任务调度。
+- **搜索逻辑**：直接通过 Playwright MCP 工具在浏览器中发现职位，不再设有独立的 SearchAgent。
+- **任务委派**：通过 `spawnAgent` 工具启动 DeliveryAgent 执行投递（串行，独立上下文）。
+- **SOP 遵循**：通过 `loadSkill('jobclaw-skills')` 内嵌搜索与去重 SOP。
+- **状态监控**：覆盖 `onToolResult`，检测到写入 `jobs.md` 的新职位时通过 Channel 发送通知。
 
-- 继承 BaseAgent
-- `systemPrompt` 说明：用户交互 Agent，负责理解用户意图、协调跨 Agent 任务执行
-- 直接持有 `SearchAgent` 和 `DeliveryAgent` 实例
-- 任务执行逻辑：根据意图直接调用对应 Agent 的 `run()` 方法，并将其返回值作为自己的响应内容
-- 支持任务上下文传递：将当前交互中的关键信息存入 `context` 共享给子 Agent
+#### 3.2 基础设施（Channel / Cron / Bootstrap）
+- **Channel**：定义统一的通知接口 `src/channel/base.ts` 及邮件实现 `src/channel/email.ts`。
+- **CronJob**：实现 `src/cron.ts` 单次任务脚本，支持外部调度器无状态拉起 `mainAgent.runEphemeral()`。
+- **Bootstrap**：实现 `src/bootstrap.ts` 首次运行引导流程，确保 `userinfo.md` 和 `targets.md` 正确配置。
+- **入口集成**：更新 `src/index.ts` 支持交互模式与引导模式的切换。
 
-#### 3.2 SearchAgent（`src/agents/search.ts`）
-
-- 继承 BaseAgent
-- 构造函数额外接收可选的 `channel?: Channel`
-- `systemPrompt` 说明：信息搜集 Agent，核心职责是通过 Playwright 工具在浏览器中发现职位。必须将发现的职位追加写入 `jobs.md`（初始状态 `discovered`），写入前必须使用 `lock_file`
-- 观察者模式：覆盖 `onToolResult`，每当 `write_file` 或 `append_file` 成功更新了 `jobs.md` 时，解析出新职位通过 `channel` 发送通知
-
-#### 3.3 DeliveryAgent（`src/agents/delivery.ts`）
-
-- 继承 BaseAgent
-- 构造函数额外接收 `channel: Channel`
-- `systemPrompt` 说明：投递执行 Agent，核心职责是执行实际的申请流程。读取 `jobs.md` 获取待投递列表，匹配 `userinfo.md`，操作浏览器填写表单。完成后必须更新 `jobs.md` 对应条目的状态
-- 实时反馈：覆盖 `onToolResult`，每当捕获到投递相关的工具执行结果（成功/失败/异常阻断）时，立即通过 `channel` 发送状态快照给用户
+#### 3.3 DeliveryAgent（`src/agents/delivery/index.ts`）
+- **核心职责**：表单自动投递。
+- **执行模式**：仅作为子进程（`runEphemeral`）被拉起，单次运行上限 50 步。
+- **投递反馈**：实时监控 `write_file` 动作，通过 Channel 发送投递结果（成功/失败/阻塞）。
+- **SOP 遵循**：通过 `loadSkill('jobclaw-skills')` 内嵌投递 SOP。
 
 #### 3.4 jobs.md 字段约定
 
 | 字段 | 写入方 | 说明 |
 |------|--------|------|
-| 公司 | SearchAgent | 公司名称 |
-| 职位 | SearchAgent | 职位名称 |
-| 链接 | SearchAgent | 招聘页面 URL |
+| 公司 | MainAgent | 公司名称 |
+| 职位 | MainAgent | 职位名称 |
+| 链接 | MainAgent | 招聘页面 URL |
 | 状态 | DeliveryAgent | discovered / applied / failed / login_required |
-| 时间 | DeliveryAgent | 投递时间 |
+| 时间 | DeliveryAgent | 投递时间 (YYYY-MM-DD HH:mm) |
 
 ### 验收标准
-
-- SearchAgent 能读取 `targets.md`，访问招聘页，将职位写入 `jobs.md`（状态为 `discovered`）
-- DeliveryAgent 能读取 `jobs.md` 中 `discovered` 条目，填表投递，更新状态
+- **搜索**：MainAgent 能读取 `targets.md`，使用浏览器发现职位并去重写入 `jobs.md`。
+- **投递**：DeliveryAgent 能自动读取 `discovered` 条目，匹配 `userinfo.md` 完成投递并更新状态。
+- **通知**：发现新职位或投递状态变更时，用户能收到邮件通知。
+- **自动化**：`cron.ts` 能在不污染对话 Session 的情况下独立运行。
