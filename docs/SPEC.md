@@ -93,9 +93,22 @@ jobclaw/
 │       ├── userinfo.md
 │       ├── targets.md
 │       └── jobs.md
-├── package.json
-├── tsconfig.json
-└── README.md
+### 3.4 专用工具 (Specialized Tools)
+
+为了确保数据一致性并简化 Agent 逻辑，系统提供专用工具处理核心业务数据：
+
+- **`upsert_job`**: 职位数据管理工具（Phase 3 核心）。
+  - **职责**: 负责 `data/jobs.md` 的增量更新或状态变更。
+  - **自动化**: 
+    - 内部自动处理 `lock_file` 和 `unlock_file` 逻辑。
+    - 自动根据 `status` 变化触发 `Channel` 通发（如 `new_job`, `delivery_success` 等）。
+    - 自动格式化为标准 Markdown 表格行。
+  - **参数**: 
+    - `company` (string): 公司名称。
+    - `title` (string): 职位名称。
+    - `url` (string): 职位详情链接（作为唯一标识）。
+    - `status` (enum): `discovered` | `applied` | `failed` | `login_required`。
+    - `time` (string, optional): 投递时间。
 ```
 
 ---
@@ -191,25 +204,20 @@ workspace/
 
 ---
 
-## 6. Web UI（规划中）
+## 6. UI 系统
 
-提供可视化监控和手动干预界面。
+JobClaw 提供两套 UI 系统，分别用于本地交互和远期监控。
 
-### 6.1 功能
+### 6.1 TUI 终端仪表盘 (Phase 4 核心)
 
-| 页面 | 功能 |
-|------|------|
-| 仪表盘 | 抓取/投递统计、最近活动 |
-| 岗位列表 | 浏览已投递岗位、状态 |
-| 目标管理 | 编辑 targets.md |
-| 个人信息 | 编辑 userinfo.md |
+在终端提供基于 `blessed` 的实时监控界面：
 
-### 6.2 技术栈
+- **Dashboard**: 展示实时统计数据（发现/投递/成功率）。
+- **Job Monitor**: 实时渲染 `jobs.md` 的最新动态。
+- **Chat Window**: 集成交互式对话，替代简单的 `readline` 入口。
+- **Status Bar**: 显示 Agent 运行步数、当前 Iteration 和 MCP 占用状态。
 
-- 运行时：Bun
-- 框架：Hono
-- 前端：静态 HTML + Tailwind CSS + Alpine.js
-- 实时更新：WebSocket
+### 6.2 Web UI (Phase 5 规划中)
 
 ---
 
