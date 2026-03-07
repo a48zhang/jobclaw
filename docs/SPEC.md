@@ -108,9 +108,11 @@ jobclaw/
 职责：自动抓取职位信息
 
 - 继承 BaseAgent
+- 构造函数接收 MCP 客户端和可选的 Channel
 - 通过 Playwright MCP 访问招聘页面
 - 解析页面提取职位信息
 - 写入 workspace/data/jobs.md
+- 发现匹配职位后通过 Channel 发送"新职位匹配"通知
 
 ### 4.4 DeliveryAgent（投递）
 
@@ -166,7 +168,16 @@ workspace/
 - 上下文窗口：262144 tokens
 - 压缩阈值：75%（196608 tokens）
 - 压缩后目标：30%（约 78643 tokens）
-- 保留最近 15 条完整消息，更早的压缩为摘要
+- 保留最近 `keepRecentMessages` 条完整消息（默认 20），更早的压缩为摘要
+
+### 5.5 文件锁机制
+
+共享数据文件 `jobs.md` 可能被多个 Agent 写入，需使用文件锁避免竞争：
+
+- 写入前调用 `lock_file` 获取锁
+- 写入完成后调用 `unlock_file` 释放锁
+- 锁超时时间：30 秒，超时自动释放
+- 锁文件位置：`workspace/.locks/jobs.md.lock`
 
 ---
 
