@@ -7,6 +7,7 @@ import { executeWriteFile } from './writeFile'
 import { executeAppendFile } from './appendFile'
 import { executeListDirectory } from './listDirectory'
 import { executeLockFile, executeUnlockFile } from './lockFile'
+import { executeUpsertJob } from './upsertJobWrapper'
 
 // 导出共享工具（供测试和其他模块使用）
 export { getLockFilePath, normalizeAndValidatePath } from './utils'
@@ -21,6 +22,7 @@ export const TOOL_NAMES = {
   LIST_DIRECTORY: 'list_directory',
   LOCK_FILE: 'lock_file',
   UNLOCK_FILE: 'unlock_file',
+  UPSERT_JOB: 'upsert_job',
 } as const
 
 /**
@@ -208,6 +210,33 @@ const unlockFileTool: ChatCompletionTool = {
 }
 
 /**
+ * upsert_job 工具定义
+ */
+const upsertJobTool: ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: TOOL_NAMES.UPSERT_JOB,
+    description: '结构化地更新或插入职位信息到 jobs.md。确保数据一致性，避免重复，并自动处理文件锁。此工具是更新职位数据的唯一推荐方式。',
+    parameters: {
+      type: 'object',
+      properties: {
+        company: { type: 'string', description: '公司名称' },
+        title: { type: 'string', description: '职位名称' },
+        url: { type: 'string', description: '职位的唯一 URL 链接（作为查重依据）' },
+        status: { 
+          type: 'string', 
+          enum: ['discovered', 'applied', 'failed', 'login_required'],
+          description: '职位的当前状态。discovered: 已发现待投递, applied: 已成功投递, failed: 投递失败, login_required: 需要手动登录' 
+        },
+        time: { type: 'string', description: '可选日期字符串 (YYYY-MM-DD)，默认为今天' }
+      },
+      required: ['company', 'title', 'url', 'status'],
+      additionalProperties: false,
+    },
+  },
+}
+
+/**
  * 所有工具的数组，可直接用于 OpenAI API 调用
  */
 export const TOOLS: ChatCompletionTool[] = [
@@ -217,6 +246,7 @@ export const TOOLS: ChatCompletionTool[] = [
   listDirectoryTool,
   lockFileTool,
   unlockFileTool,
+  upsertJobTool,
 ]
 
 // ============================================================================
@@ -248,6 +278,8 @@ export async function executeTool(
       return executeLockFile(args, context)
     case TOOL_NAMES.UNLOCK_FILE:
       return executeUnlockFile(args, context)
+    case TOOL_NAMES.UPSERT_JOB:
+      return executeUpsertJob(args, context)
     default:
       return { success: false, content: '', error: `未知工具：${name}` }
   }
