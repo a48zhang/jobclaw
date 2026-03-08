@@ -123,6 +123,23 @@ export function createApp(workspaceRoot: string): Hono {
     }
   })
 
+  // ── REST: POST /api/chat ─────────────────────────────────────────────────
+  app.post('/api/chat', async (c) => {
+    try {
+      const body = await c.req.json<{ message?: string }>()
+      const message = typeof body.message === 'string' ? body.message : ''
+      if (!message.trim()) return c.json({ ok: false, error: 'Empty message' }, 400)
+      
+      const mainAgent = agentRegistry.get('main')
+      if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+      
+      mainAgent.runEphemeral(message).catch(err => console.error('[Server] Chat task failed:', err))
+      return c.json({ ok: true })
+    } catch {
+      return c.json({ ok: false, error: 'Invalid request' }, 400)
+    }
+  })
+
   // ── REST: POST /api/resume/build ─────────────────────────────────────────
   app.post('/api/resume/build', async (c) => {
     const mainAgent = agentRegistry.get('main')

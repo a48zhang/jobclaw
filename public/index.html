@@ -8,9 +8,6 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <style>
     body { background: #0f172a; color: #e2e8f0; }
-    .log-info  { color: #4ade80; }
-    .log-warn  { color: #facc15; }
-    .log-error { color: #f87171; }
     .ws-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .ws-connected    { background: #22c55e; }
     .ws-disconnected { background: #ef4444; }
@@ -18,139 +15,183 @@
     #modal-overlay.active { display: flex; }
     .sortable-th { cursor: pointer; user-select: none; }
     .sortable-th:hover { color: #93c5fd; }
+    .tab-content:not(.active) { display: none !important; }
+    .nav-btn { cursor: pointer; padding: 0.5rem 1rem; border-radius: 0.5rem; transition: background-color 0.2s; }
+    .nav-btn:hover { background-color: #334155; }
+    .nav-btn.active { background-color: #2563eb; color: #ffffff; }
+    /* Chat bubbles */
+    .msg-user { align-self: flex-end; background-color: #2563eb; color: white; padding: 0.5rem 1rem; border-radius: 1rem 1rem 0 1rem; max-width: 80%; margin-bottom: 0.5rem; word-break: break-word; }
+    .msg-agent { align-self: flex-start; background-color: #334155; color: #e2e8f0; padding: 0.5rem 1rem; border-radius: 1rem 1rem 1rem 0; max-width: 90%; margin-bottom: 0.5rem; font-family: monospace; font-size: 0.875rem; word-break: break-word; white-space: pre-wrap; }
+    .msg-agent.info { border-left: 3px solid #4ade80; }
+    .msg-agent.warn { border-left: 3px solid #facc15; }
+    .msg-agent.error { border-left: 3px solid #f87171; }
+    .chat-container { display: flex; flex-direction: column; height: calc(100vh - 180px); }
+    .chat-history { flex: 1; overflow-y: auto; display: flex; flex-direction: column; padding: 1rem; background: #0f172a; border-radius: 0.5rem; margin-bottom: 1rem; border: 1px solid #1e293b; }
   </style>
 </head>
-<body class="min-h-screen p-4 font-mono">
+<body class="min-h-screen p-4 font-mono flex flex-col">
 
-<!-- ── Header ───────────────────────────────────────────────────────────────── -->
-<header class="flex items-center justify-between mb-6">
-  <h1 class="text-2xl font-bold text-blue-400">JobClaw 🦞 看板</h1>
-  <div class="flex items-center gap-2 text-sm">
-    <span id="ws-dot" class="ws-dot ws-disconnected"></span>
-    <span id="ws-status" class="text-gray-400">未连接</span>
+<!-- ── Header & Navigation ────────────────────────────────────────────────── -->
+<header class="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4">
+  <div class="flex items-center gap-4">
+    <h1 class="text-2xl font-bold text-blue-400">JobClaw 🦞</h1>
+    <nav class="flex gap-2 text-sm font-semibold text-slate-400 bg-slate-800 p-1 rounded-lg">
+      <button class="nav-btn active" data-target="tab-chat">💬 智能助理</button>
+      <button class="nav-btn" data-target="tab-jobs">📊 职位看板</button>
+      <button class="nav-btn" data-target="tab-config">⚙️ 工作区配置</button>
+      <button class="nav-btn" data-target="tab-resume">📄 简历工具</button>
+    </nav>
+  </div>
+  <div class="flex flex-col items-end gap-2 text-sm">
+    <div class="flex items-center gap-2">
+      <span id="ws-dot" class="ws-dot ws-disconnected"></span>
+      <span id="ws-status" class="text-gray-400">未连接</span>
+    </div>
+    <div id="agent-states" class="flex flex-wrap gap-2 justify-end">
+      <span class="text-slate-500 text-xs">等待 Agent...</span>
+    </div>
   </div>
 </header>
 
-<!-- ── Main grid ─────────────────────────────────────────────────────────────── -->
-<div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+<!-- ── Main Content Area ───────────────────────────────────────────────────── -->
+<main class="flex-1 flex flex-col min-h-0">
 
-  <!-- Left column (2/3) -->
-  <div class="xl:col-span-2 flex flex-col gap-4">
-
-    <!-- Dashboard: Agent States -->
-    <section class="bg-slate-800 rounded-xl p-4">
-      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">Agent 状态</h2>
-      <div id="agent-states" class="flex flex-wrap gap-3">
-        <span class="text-slate-500 text-sm">等待连接...</span>
+  <!-- ── Tab 1: Agent Chat ─────────────────────────────────────────────────── -->
+  <section id="tab-chat" class="tab-content active h-full flex flex-col">
+    <div class="bg-slate-800 rounded-xl p-4 flex-1 flex flex-col min-h-0 shadow-lg">
+      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">与 Agent 对话</h2>
+      <div class="chat-container">
+        <div id="chat-history" class="chat-history">
+          <div class="text-center text-slate-500 text-xs my-4">--- 连接已建立 ---</div>
+        </div>
+        <div class="flex gap-2 items-end">
+          <textarea id="chat-input" 
+                    class="flex-1 bg-slate-900 text-slate-200 text-sm p-3 rounded-lg resize-none outline-none border border-slate-700 focus:border-blue-500 shadow-inner" 
+                    rows="3" 
+                    placeholder="输入指令，例如：去 BOSS 直聘搜一下前端开发岗位... (Enter 发送，Shift+Enter 换行)"></textarea>
+          <button id="chat-send" 
+                  class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-lg font-bold shadow-md transition-colors h-[74px]">
+            发送
+          </button>
+        </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- Job Table -->
-    <section class="bg-slate-800 rounded-xl p-4">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">职位列表</h2>
-        <button id="refresh-jobs" class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded">
-          刷新
-        </button>
+  <!-- ── Tab 2: Jobs Dashboard ─────────────────────────────────────────────── -->
+  <section id="tab-jobs" class="tab-content h-full">
+    <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 h-full">
+      <!-- Job Table -->
+      <div class="xl:col-span-3 bg-slate-800 rounded-xl p-4 flex flex-col shadow-lg h-[calc(100vh-140px)]">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">职位列表</h2>
+          <button id="refresh-jobs" class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded shadow">
+            刷新
+          </button>
+        </div>
+        <div class="overflow-y-auto flex-1 bg-slate-900 rounded-lg border border-slate-700">
+          <table class="w-full text-sm">
+            <thead class="sticky top-0 bg-slate-800 shadow">
+              <tr class="text-slate-400 border-b border-slate-700">
+                <th class="sortable-th text-left py-3 px-4" data-col="company">公司 ⇅</th>
+                <th class="sortable-th text-left py-3 px-4" data-col="title">职位 ⇅</th>
+                <th class="text-left py-3 px-4">链接</th>
+                <th class="sortable-th text-left py-3 px-4" data-col="status">状态 ⇅</th>
+                <th class="sortable-th text-left py-3 px-4" data-col="time">时间 ⇅</th>
+              </tr>
+            </thead>
+            <tbody id="job-tbody" class="divide-y divide-slate-800/50">
+              <tr><td colspan="5" class="py-6 text-slate-500 text-center">暂无数据</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-xs">
-          <thead>
-            <tr class="text-slate-400 border-b border-slate-700">
-              <th class="sortable-th text-left py-2 pr-3" data-col="company">公司 ⇅</th>
-              <th class="sortable-th text-left py-2 pr-3" data-col="title">职位 ⇅</th>
-              <th class="text-left py-2 pr-3">链接</th>
-              <th class="sortable-th text-left py-2 pr-3" data-col="status">状态 ⇅</th>
-              <th class="sortable-th text-left py-2" data-col="time">时间 ⇅</th>
-            </tr>
-          </thead>
-          <tbody id="job-tbody" class="divide-y divide-slate-700">
-            <tr><td colspan="5" class="py-3 text-slate-500 text-center">暂无数据</td></tr>
-          </tbody>
-        </table>
+      <!-- Stats -->
+      <div class="bg-slate-800 rounded-xl p-4 flex flex-col shadow-lg">
+        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-6">投递统计</h2>
+        <div class="flex justify-center flex-1 items-center">
+          <div class="w-full max-w-[250px]">
+            <canvas id="donut-chart" width="250" height="250"></canvas>
+          </div>
+        </div>
+        <div id="stats-legend" class="flex flex-col gap-2 mt-6 text-sm bg-slate-900 p-4 rounded-lg border border-slate-700"></div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- Activity Log -->
-    <section class="bg-slate-800 rounded-xl p-4">
-      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">活动流水</h2>
-      <div id="activity-log"
-           class="h-52 overflow-y-auto flex flex-col-reverse gap-0.5 text-xs bg-slate-900 rounded p-3">
-        <span class="text-slate-500">等待 Agent 日志...</span>
+  <!-- ── Tab 3: Config Editor ──────────────────────────────────────────────── -->
+  <section id="tab-config" class="tab-content h-full">
+    <div class="bg-slate-800 rounded-xl p-4 h-[calc(100vh-140px)] flex flex-col shadow-lg">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">工作区配置编辑器</h2>
+        <div class="flex items-center gap-3">
+          <span id="save-status" class="text-sm text-slate-400"></span>
+          <button id="save-md"
+                  class="text-sm bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-lg font-bold shadow">
+            保存
+          </button>
+        </div>
       </div>
-    </section>
-
-  </div><!-- /left column -->
-
-  <!-- Right column (1/3) -->
-  <div class="flex flex-col gap-4">
-
-    <!-- Donut chart -->
-    <section class="bg-slate-800 rounded-xl p-4">
-      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">投递统计</h2>
-      <div class="flex justify-center">
-        <canvas id="donut-chart" width="220" height="220"></canvas>
-      </div>
-      <div id="stats-legend" class="flex justify-center gap-4 mt-3 text-xs text-slate-400"></div>
-    </section>
-
-    <!-- Markdown Editor -->
-    <section class="bg-slate-800 rounded-xl p-4">
-      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">配置编辑器</h2>
-      <div class="flex gap-2 mb-2">
-        <button id="tab-targets"
-                class="tab-btn text-xs px-3 py-1 rounded bg-blue-600 text-white"
-                data-file="targets">targets</button>
-        <button id="tab-userinfo"
-                class="tab-btn text-xs px-3 py-1 rounded bg-slate-700 text-slate-300 hover:bg-slate-600"
-                data-file="userinfo">userinfo</button>
+      <div class="flex gap-2 mb-3">
+        <button class="config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-900 text-blue-400 border-t border-l border-r border-slate-700 font-bold"
+                data-file="targets">targets.md</button>
+        <button class="config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-200 border-t border-l border-r border-transparent transition-colors"
+                data-file="userinfo">userinfo.md</button>
       </div>
       <textarea id="md-editor"
-                class="w-full h-40 bg-slate-900 text-slate-200 text-xs p-2 rounded resize-none outline-none border border-slate-700 focus:border-blue-500"
+                class="flex-1 w-full bg-slate-900 text-slate-200 text-sm p-4 rounded-b-lg rounded-tr-lg resize-none outline-none border border-slate-700 focus:border-blue-500 shadow-inner font-mono leading-relaxed"
                 placeholder="加载中..."></textarea>
-      <div class="flex items-center gap-2 mt-2">
-        <button id="save-md"
-                class="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1 rounded">
-          保存
+    </div>
+  </section>
+
+  <!-- ── Tab 4: Resume Tools ───────────────────────────────────────────────── -->
+  <section id="tab-resume" class="tab-content h-full">
+    <div class="bg-slate-800 rounded-xl p-6 max-w-2xl mx-auto shadow-lg mt-10">
+      <h2 class="text-lg font-bold text-slate-200 mb-2">简历生成工具</h2>
+      <p class="text-slate-400 text-sm mb-6">基于工作区中的模板和用户信息，调用 Agent 自动编译生成最新版本的 PDF 简历。</p>
+      
+      <div class="flex flex-col gap-4">
+        <button id="gen-resume"
+                class="w-full text-base font-bold bg-purple-600 hover:bg-purple-500 text-white py-4 rounded-lg shadow-md transition-colors flex justify-center items-center gap-2">
+          <span>⚙️</span> 生成简历 PDF
         </button>
-        <span id="save-status" class="text-xs text-slate-400"></span>
+        
+        <div id="resume-preview" class="mt-4 bg-slate-900 border border-slate-700 p-4 rounded-lg text-center">
+          <p class="text-green-400 mb-2 text-sm">✓ 生成成功</p>
+          <a id="resume-link" href="/workspace/output/resume.pdf" target="_blank"
+             class="inline-block bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded font-semibold text-sm">
+            📄 查看并下载 PDF
+          </a>
+        </div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <!-- Resume Action -->
-    <section class="bg-slate-800 rounded-xl p-4">
-      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">简历操作</h2>
-      <button id="gen-resume"
-              class="w-full text-sm bg-purple-700 hover:bg-purple-600 text-white py-2 rounded">
-        生成简历 PDF
-      </button>
-      <div id="resume-preview" class="mt-3 hidden">
-        <a id="resume-link" href="#" target="_blank"
-           class="text-xs text-blue-400 underline">查看生成的 PDF</a>
-      </div>
-    </section>
-
-  </div><!-- /right column -->
-</div><!-- /grid -->
+</main>
 
 <!-- ── Intervention Modal ─────────────────────────────────────────────────── -->
 <div id="modal-overlay"
-     class="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-  <div class="bg-slate-800 border border-yellow-500 rounded-xl p-6 w-full max-w-lg shadow-2xl">
-    <h3 class="text-yellow-400 font-bold text-lg mb-2">⚠ 人工干预请求</h3>
-    <p id="modal-prompt" class="text-slate-300 text-sm mb-4 whitespace-pre-wrap"></p>
-    <label class="text-xs text-slate-400 block mb-1">请输入响应（Enter 提交）：</label>
+     class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm">
+  <div class="bg-slate-800 border-2 border-yellow-500 rounded-xl p-6 w-full max-w-lg shadow-2xl transform transition-all">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-2xl">⚠️</span>
+      <h3 class="text-yellow-400 font-bold text-lg">Agent 需要人工干预</h3>
+    </div>
+    <div class="bg-slate-900 p-3 rounded border border-slate-700 mb-4">
+      <p id="modal-prompt" class="text-slate-300 text-sm whitespace-pre-wrap font-mono"></p>
+    </div>
+    <label class="text-xs text-slate-400 block mb-2">请输入响应内容（按 Enter 提交）：</label>
     <input id="modal-input" type="text"
-           class="w-full bg-slate-900 border border-slate-600 text-white text-sm px-3 py-2 rounded outline-none focus:border-yellow-400"
-           placeholder="输入内容并按 Enter..." />
-    <div class="flex gap-2 mt-4">
-      <button id="modal-submit"
-              class="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-semibold py-2 rounded text-sm">
-        提交
-      </button>
+           class="w-full bg-slate-900 border border-slate-600 text-white text-base px-4 py-3 rounded-lg outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 shadow-inner"
+           placeholder="输入内容..." />
+    <div class="flex gap-3 mt-6">
       <button id="modal-cancel"
-              class="px-4 bg-slate-700 hover:bg-slate-600 text-slate-300 py-2 rounded text-sm">
-        跳过
+              class="px-6 bg-slate-700 hover:bg-slate-600 text-slate-300 py-2.5 rounded-lg text-sm font-semibold transition-colors">
+        跳过 / 取消
+      </button>
+      <button id="modal-submit"
+              class="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2.5 rounded-lg text-sm transition-colors shadow">
+        确认提交
       </button>
     </div>
   </div>
@@ -166,11 +207,35 @@ let sortCol = 'time'
 let sortAsc = false
 let donutChart = null
 let interventionAgentName = 'main'
-
-// ─── WebSocket with auto-reconnect ──────────────────────────────────────────
 let ws = null
 let reconnectTimer = null
 
+// ─── Navigation & Tabs ──────────────────────────────────────────────────────
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    // Update buttons
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active', 'bg-blue-600', 'text-white'))
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.add('text-slate-400'))
+    btn.classList.add('active', 'bg-blue-600', 'text-white')
+    btn.classList.remove('text-slate-400')
+    
+    // Update content
+    const targetId = btn.dataset.target
+    document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'))
+    document.getElementById(targetId).classList.add('active')
+
+    // Handle special cases when tab is shown
+    if (targetId === 'tab-jobs') {
+      renderDonut() // Fix chart rendering if it was hidden
+    }
+  })
+})
+// Initialize nav styles
+document.querySelector('.nav-btn.active').classList.add('bg-blue-600', 'text-white')
+document.querySelector('.nav-btn.active').classList.remove('text-slate-400')
+
+
+// ─── WebSocket with auto-reconnect ──────────────────────────────────────────
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   ws = new WebSocket(`${proto}://${location.host}/ws`)
@@ -201,21 +266,19 @@ function setWsStatus(connected) {
   const dot = document.getElementById('ws-dot')
   const label = document.getElementById('ws-status')
   dot.className = 'ws-dot ' + (connected ? 'ws-connected' : 'ws-disconnected')
-  label.textContent = connected ? '已连接' : '未连接'
+  label.textContent = connected ? '已连接' : '连接断开'
 }
 
-// ─── WebSocket event dispatcher ─────────────────────────────────────────────
 function handleWsEvent(event, data) {
   switch (event) {
     case 'snapshot':
-      // data is an array of AgentStateEvent
       if (Array.isArray(data)) data.forEach(d => updateAgentState(d))
       break
     case 'agent:state':
       updateAgentState(data)
       break
     case 'agent:log':
-      appendLog(data)
+      appendAgentLog(data)
       break
     case 'job:updated':
       fetchJobs()
@@ -240,40 +303,91 @@ function updateAgentState({ agentName, state }) {
 function renderAgentCards() {
   const container = document.getElementById('agent-states')
   const stateColors = {
-    idle:    'bg-slate-700 text-slate-300',
-    running: 'bg-blue-700 text-blue-100',
-    waiting: 'bg-yellow-700 text-yellow-100',
-    error:   'bg-red-700 text-red-100',
+    idle:    'bg-slate-700 text-slate-300 border-slate-600',
+    running: 'bg-blue-900/50 text-blue-300 border-blue-700',
+    waiting: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
+    error:   'bg-red-900/50 text-red-300 border-red-700',
   }
   container.innerHTML = Object.entries(agentStates).map(([name, state]) => `
-    <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg ${stateColors[state] ?? 'bg-slate-700 text-slate-300'}">
-      <span class="font-semibold">${escHtml(name)}</span>
-      <span class="text-xs opacity-75">${escHtml(state)}</span>
+    <div class="flex items-center gap-2 px-2.5 py-1 rounded border ${stateColors[state] ?? 'bg-slate-700 text-slate-300 border-slate-600'}">
+      <span class="font-bold text-xs">${escHtml(name)}</span>
+      <span class="text-[10px] uppercase tracking-wider opacity-80">${escHtml(state)}</span>
     </div>
-  `).join('') || '<span class="text-slate-500 text-sm">暂无 Agent 信息</span>'
+  `).join('') || '<span class="text-slate-500 text-xs">暂无 Agent</span>'
 }
 
-// ─── Activity Log ────────────────────────────────────────────────────────────
-const MAX_LOG_LINES = 200
-const logLines = []
+// ─── Agent Chat (Tab 1) ──────────────────────────────────────────────────────
+const chatHistory = document.getElementById('chat-history')
+const chatInput = document.getElementById('chat-input')
+const chatSend = document.getElementById('chat-send')
 
-function appendLog({ type, message, timestamp, agentName }) {
+function appendUserMessage(text) {
+  const div = document.createElement('div')
+  div.className = 'msg-user shadow-md'
+  div.textContent = text
+  chatHistory.appendChild(div)
+  scrollToBottom()
+}
+
+function appendAgentLog({ type, message, timestamp, agentName }) {
   const ts = timestamp ? new Date(timestamp).toLocaleTimeString() : ''
-  const cls = type === 'error' ? 'log-error' : type === 'warn' ? 'log-warn' : 'log-info'
-  const agent = agentName ? `[${escHtml(agentName)}] ` : ''
-  const line = `<div class="${cls}">[${ts}] ${agent}${escHtml(message)}</div>`
-  logLines.unshift(line)
-  if (logLines.length > MAX_LOG_LINES) logLines.pop()
-  document.getElementById('activity-log').innerHTML = logLines.join('')
+  const agent = agentName ? `[${agentName}]` : ''
+  const div = document.createElement('div')
+  div.className = `msg-agent ${type} shadow-sm`
+  div.innerHTML = `<span class="opacity-50 text-[10px] mr-2">${ts} ${agent}</span>\n${escHtml(message)}`
+  chatHistory.appendChild(div)
+  scrollToBottom()
 }
 
-// ─── Job Table ───────────────────────────────────────────────────────────────
+function scrollToBottom() {
+  chatHistory.scrollTop = chatHistory.scrollHeight
+}
+
+async function sendChatMessage() {
+  const text = chatInput.value.trim()
+  if (!text) return
+  
+  appendUserMessage(text)
+  chatInput.value = ''
+  chatInput.focus()
+  chatSend.disabled = true
+  chatSend.classList.add('opacity-50', 'cursor-not-allowed')
+  
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    })
+    const data = await res.json()
+    if (!data.ok) {
+      appendAgentLog({ type: 'error', message: '发送失败: ' + (data.error || '未知错误') })
+    }
+  } catch (err) {
+    appendAgentLog({ type: 'error', message: '网络错误: ' + err.message })
+  } finally {
+    chatSend.disabled = false
+    chatSend.classList.remove('opacity-50', 'cursor-not-allowed')
+  }
+}
+
+chatSend.addEventListener('click', sendChatMessage)
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    sendChatMessage()
+  }
+})
+
+// ─── Jobs Dashboard (Tab 2) ──────────────────────────────────────────────────
 async function fetchJobs() {
   try {
     const res = await fetch('/api/jobs')
     jobs = await res.json()
     renderJobs()
-    renderDonut()
+    if (document.getElementById('tab-jobs').classList.contains('active')) {
+      renderDonut()
+    }
   } catch { /* ignore */ }
 }
 
@@ -285,43 +399,44 @@ function renderJobs() {
   })
   const tbody = document.getElementById('job-tbody')
   if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="py-3 text-slate-500 text-center">暂无数据</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="5" class="py-6 text-slate-500 text-center">暂无数据</td></tr>'
     return
   }
   tbody.innerHTML = sorted.map(r => `
-    <tr class="hover:bg-slate-700/50">
-      <td class="py-1.5 pr-3">${escHtml(r.company)}</td>
-      <td class="py-1.5 pr-3">${escHtml(r.title)}</td>
-      <td class="py-1.5 pr-3">
-        ${r.url ? `<a href="${escHtml(r.url)}" target="_blank" class="text-blue-400 underline">链接</a>` : '—'}
+    <tr class="hover:bg-slate-700/30 transition-colors group">
+      <td class="py-3 px-4 font-semibold text-slate-300">${escHtml(r.company)}</td>
+      <td class="py-3 px-4 text-slate-300">${escHtml(r.title)}</td>
+      <td class="py-3 px-4">
+        ${r.url ? `<a href="${escHtml(r.url)}" target="_blank" class="text-blue-400 hover:text-blue-300 underline opacity-80 group-hover:opacity-100">查看</a>` : '<span class="text-slate-600">—</span>'}
       </td>
-      <td class="py-1.5 pr-3">
-        <span class="${statusColor(r.status)}">${escHtml(r.status)}</span>
+      <td class="py-3 px-4">
+        <span class="px-2 py-1 rounded text-xs font-medium bg-slate-800 border ${statusStyle(r.status)}">${escHtml(r.status)}</span>
       </td>
-      <td class="py-1.5">${escHtml(r.time)}</td>
+      <td class="py-3 px-4 text-slate-400 text-xs">${escHtml(r.time)}</td>
     </tr>
   `).join('')
 }
 
-function statusColor(s) {
-  if (s === 'applied')    return 'text-green-400'
-  if (s === 'failed')     return 'text-red-400'
-  if (s === 'discovered') return 'text-blue-400'
-  return 'text-slate-400'
+function statusStyle(s) {
+  if (s === 'applied')    return 'text-green-400 border-green-900'
+  if (s === 'failed')     return 'text-red-400 border-red-900'
+  if (s === 'discovered') return 'text-blue-400 border-blue-900'
+  return 'text-slate-400 border-slate-700'
 }
 
-// Column sort
 document.querySelectorAll('.sortable-th').forEach(th => {
   th.addEventListener('click', () => {
     const col = th.dataset.col
     if (sortCol === col) { sortAsc = !sortAsc } else { sortCol = col; sortAsc = true }
+    // Update visual indicator
+    document.querySelectorAll('.sortable-th').forEach(t => t.textContent = t.textContent.replace(/[↑↓⇅]/, '⇅'))
+    th.textContent = th.textContent.replace('⇅', sortAsc ? '↑' : '↓')
     renderJobs()
   })
 })
 
 document.getElementById('refresh-jobs').addEventListener('click', fetchJobs)
 
-// ─── Donut Chart ─────────────────────────────────────────────────────────────
 function renderDonut() {
   const applied    = jobs.filter(j => j.status === 'applied').length
   const discovered = jobs.filter(j => j.status === 'discovered').length
@@ -329,46 +444,64 @@ function renderDonut() {
   const other      = jobs.length - applied - discovered - failed
 
   const data = {
-    labels: ['已投递', '已发现', '失败', '其他'],
+    labels: ['已投递', '待处理(发现)', '投递失败', '其他'],
     datasets: [{
       data: [applied, discovered, failed, other],
-      backgroundColor: ['#22c55e', '#3b82f6', '#ef4444', '#94a3b8'],
+      backgroundColor: ['#22c55e', '#3b82f6', '#ef4444', '#64748b'],
       borderWidth: 0,
+      hoverOffset: 4
     }]
   }
+
+  const canvas = document.getElementById('donut-chart')
+  // Chart.js requires canvas to be visible to render properly initially
+  if (canvas.offsetParent === null) return;
 
   if (donutChart) {
     donutChart.data = data
     donutChart.update()
   } else {
-    const ctx = document.getElementById('donut-chart').getContext('2d')
+    const ctx = canvas.getContext('2d')
     donutChart = new Chart(ctx, {
       type: 'doughnut',
       data,
       options: {
-        cutout: '65%',
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '70%',
         plugins: {
           legend: { display: false },
           tooltip: {
-            callbacks: { label: (ctx) => ` ${ctx.label}: ${ctx.parsed}` }
+            backgroundColor: '#1e293b',
+            titleColor: '#f8fafc',
+            bodyColor: '#cbd5e1',
+            borderColor: '#334155',
+            borderWidth: 1,
+            callbacks: { label: (ctx) => ` ${ctx.label}: ${ctx.parsed} 个` }
           }
         }
       }
     })
   }
 
-  document.getElementById('stats-legend').innerHTML =
-    `<span class="text-green-400">投递 ${applied}</span>` +
-    `<span class="text-blue-400">发现 ${discovered}</span>` +
-    `<span class="text-red-400">失败 ${failed}</span>`
+  document.getElementById('stats-legend').innerHTML = `
+    <div class="flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-green-500"></div><span class="text-slate-300">已投递</span></div><span class="font-bold text-green-400">${applied}</span></div>
+    <div class="flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-blue-500"></div><span class="text-slate-300">待处理</span></div><span class="font-bold text-blue-400">${discovered}</span></div>
+    <div class="flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-red-500"></div><span class="text-slate-300">投递失败</span></div><span class="font-bold text-red-400">${failed}</span></div>
+    <div class="flex justify-between items-center pt-2 border-t border-slate-700"><span class="text-slate-400">总计岗位</span><span class="font-bold text-white">${jobs.length}</span></div>
+  `
 }
 
-// ─── Markdown Editor ─────────────────────────────────────────────────────────
+// ─── Config Editor (Tab 3) ──────────────────────────────────────────────────
 async function loadFile(name) {
   currentFile = name
-  document.querySelectorAll('.tab-btn').forEach(btn => {
+  document.querySelectorAll('.config-tab-btn').forEach(btn => {
     const active = btn.dataset.file === name
-    btn.className = `tab-btn text-xs px-3 py-1 rounded ${active ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`
+    if (active) {
+      btn.className = 'config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-900 text-blue-400 border-t border-l border-r border-slate-700 font-bold'
+    } else {
+      btn.className = 'config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-200 border-t border-l border-r border-transparent transition-colors'
+    }
   })
   try {
     const res = await fetch(`/api/config/${name}`)
@@ -377,17 +510,24 @@ async function loadFile(name) {
     document.getElementById('save-status').textContent = ''
   } catch {
     document.getElementById('md-editor').value = ''
-    document.getElementById('save-status').textContent = '加载失败'
+    document.getElementById('save-status').textContent = '✗ 加载失败'
+    document.getElementById('save-status').className = 'text-sm text-red-400'
   }
 }
 
-document.querySelectorAll('.tab-btn').forEach(btn => {
+document.querySelectorAll('.config-tab-btn').forEach(btn => {
   btn.addEventListener('click', () => loadFile(btn.dataset.file))
 })
 
 document.getElementById('save-md').addEventListener('click', async () => {
   const status = document.getElementById('save-status')
-  status.textContent = '正在锁定文件...'
+  const btn = document.getElementById('save-md')
+  
+  status.textContent = '保存中...'
+  status.className = 'text-sm text-yellow-400'
+  btn.disabled = true
+  btn.classList.add('opacity-70')
+
   try {
     const content = document.getElementById('md-editor').value
     const res = await fetch(`/api/config/${currentFile}`, {
@@ -396,19 +536,33 @@ document.getElementById('save-md').addEventListener('click', async () => {
       body: JSON.stringify({ content })
     })
     const json = await res.json()
-    status.textContent = json.ok ? '✓ 已保存' : `✗ ${json.error}`
+    if (json.ok) {
+      status.textContent = '✓ 保存成功'
+      status.className = 'text-sm text-green-400'
+    } else {
+      status.textContent = `✗ ${json.error}`
+      status.className = 'text-sm text-red-400'
+    }
   } catch (e) {
-    status.textContent = `✗ ${e.message}`
+    status.textContent = `✗ 网络错误`
+    status.className = 'text-sm text-red-400'
+  } finally {
+    btn.disabled = false
+    btn.classList.remove('opacity-70')
+    setTimeout(() => { 
+      if(status.textContent === '✓ 保存成功') status.textContent = '' 
+    }, 3000)
   }
-  setTimeout(() => { status.textContent = '' }, 3000)
 })
 
-// ─── Resume Action ────────────────────────────────────────────────────────────
+// ─── Resume Action (Tab 4) ──────────────────────────────────────────────────
 document.getElementById('gen-resume').addEventListener('click', async () => {
   const btn = document.getElementById('gen-resume')
+  
   btn.disabled = true
-  btn.setAttribute('aria-busy', 'true')
-  btn.textContent = '生成中...'
+  btn.classList.add('opacity-70', 'cursor-not-allowed')
+  btn.innerHTML = '<span class="animate-spin inline-block">⚙️</span> 正在调用 Agent 编译...'
+
   try {
     const res = await fetch('/api/resume/build', {
       method: 'POST',
@@ -416,25 +570,28 @@ document.getElementById('gen-resume').addEventListener('click', async () => {
     })
     const json = await res.json()
     if (json.ok) {
-      const preview = document.getElementById('resume-preview')
-      const link = document.getElementById('resume-link')
-      link.href = '/workspace/output/resume.pdf'
-      preview.classList.remove('hidden')
+      // Switch to Chat tab to see progress
+      document.querySelector('[data-target="tab-chat"]').click()
+      appendAgentLog({ type: 'info', message: '已提交简历生成任务，请关注后续日志。', agentName: 'System' })
+    } else {
+      alert('任务提交失败: ' + json.error)
     }
-  } catch { /* ignore */ } finally {
+  } catch (e) { 
+    alert('网络错误: ' + e.message)
+  } finally {
     btn.disabled = false
-    btn.setAttribute('aria-busy', 'false')
-    btn.textContent = '生成简历 PDF'
+    btn.classList.remove('opacity-70', 'cursor-not-allowed')
+    btn.innerHTML = '<span>⚙️</span> 生成简历 PDF'
   }
 })
 
-// ─── Intervention Modal ───────────────────────────────────────────────────────
+// ─── Intervention Modal ──────────────────────────────────────────────────────
 function showModal({ agentName, prompt }) {
   interventionAgentName = agentName ?? 'main'
   document.getElementById('modal-prompt').textContent = prompt ?? ''
   const overlay = document.getElementById('modal-overlay')
   overlay.classList.add('active')
-  setTimeout(() => document.getElementById('modal-input').focus(), 50)
+  setTimeout(() => document.getElementById('modal-input').focus(), 100)
 }
 
 function hideModal() {
