@@ -45,6 +45,8 @@ export function parseJobsMd(content: string): JobRow[] {
 }
 
 const JOB_TABLE_HEADERS = ['公司', '职位', '链接', '状态', '时间']
+const MIN_LOG_HEIGHT = 5 // 日志框最小高度
+const MIN_JOB_HEIGHT = 5 // 职位表最小高度
 
 export class TUI {
   private screen: blessed.Widgets.Screen
@@ -70,14 +72,14 @@ export class TUI {
       smartCSR: true,
       title: 'JobClaw 🦞',
       fullUnicode: true,
+      handleSIGINT: false,
     })
 
-    // 1. 预先创建所有组件，保持引用唯一
+    // 1. 初始化组件
     this.jobTable = contrib.table({
       keys: true, vi: true, label: ' Job Monitor ', border: { type: 'line' },
       style: { header: { fg: 'cyan', bold: true }, cell: { fg: 'white', selected: { bg: 'blue' } } },
       columnWidth: [16, 20, 48, 12, 12],
-      top: 0, left: 0, width: '100%', height: '50%',
     } as contrib.Widgets.TableOptions)
 
     this.activityLog = blessed.log({
@@ -86,17 +88,18 @@ export class TUI {
       scrollbar: { ch: ' ', inverse: true },
       style: { fg: 'green' }, bufferLength: 1000,
       fullUnicode: true, tags: true, wrap: true, mouse: true,
-      top: 0, left: 0, width: '100%', height: 11,
     })
 
     this.inputBox = blessed.textbox({
       label: ' Command (Type /jobs to toggle) > ', border: { type: 'line' },
       style: { fg: 'yellow', focus: { border: { fg: 'yellow' } } },
       inputOnFocus: true, fullUnicode: true, tags: true,
-      top: 11, left: 0, width: '100%', height: 1,
+      height: 3, // 稍微增加输入框高度，防止小屏幕下边框遮挡文字
     })
 
-    // 2. 初始化布局：默认不显示 jobTable
+    // 执行初始布局计算
+    this.applyLayout()
+
     this.screen.append(this.activityLog)
     this.screen.append(this.inputBox)
 
@@ -107,16 +110,22 @@ export class TUI {
       this.screen.render()
     })
 
-    // 3. 核心退出逻辑：底层拦截 C-c
-    this.screen.on('keypress', (_ch, key) => {
+    // 2. 事件监听
+    this.screen.on('resize', () => {
+      this.applyLayout()
+      this.screen.render()
+    })
+
+    this.screen.program.on('keypress', (_ch, key) => {
       if (key && key.ctrl && key.name === 'c') {
         const now = Date.now()
+        if (now - this.lastCtrlC < 100) return
         if (now - this.lastCtrlC < 2000) {
           this.destroy()
           process.exit(0)
         } else {
           this.lastCtrlC = now
-          this.activityLog.log('{yellow-fg}[System] 再按一次 Ctrl-C 退出 JobClaw{/}')
+          this.activityLog.log('{yellow-fg}(System) [QUIT] 再按一次 Ctrl-C 退出 JobClaw{/}')
           this.activityLog.setScrollPerc(100)
           this.screen.render()
         }
@@ -128,7 +137,6 @@ export class TUI {
       process.exit(0)
     })
 
-    // 4. 输入处理
     this.inputBox.key('enter', async () => {
       const value = this.inputBox.getValue().trim()
       this.inputBox.clearValue()
@@ -154,37 +162,57 @@ export class TUI {
     this.screen.render()
   }
 
-  // ── Layout Toggling ────────────────────────────────────────────────────────
+  /** 统一布局计算逻辑 */
+  private applyLayout(): void {
+    const totalH = this.screen.height as number
+    const inputH = 3
+    
+    if (this.showingJobs) {
+      // 开启职位监控时的布局
+      let jobH = Math.floor((totalH - inputH) * 0.5)
+      let logH = totalH - inputH - jobH
+
+      // 强制最小高度约束
+      if (logH < MIN_LOG_HEIGHT) {
+        logH = MIN_LOG_HEIGHT
+        jobH = totalH - inputH - logH
+      }
+      if (jobH < MIN_JOB_HEIGHT) {
+        jobH = MIN_JOB_HEIGHT
+        logH = totalH - inputH - jobH
+      }
+
+      this.jobTable.top = 0
+      this.jobTable.height = jobH
+      this.jobTable.width = '100%'
+
+      this.activityLog.top = jobH
+      this.activityLog.height = logH
+      this.activityLog.width = '100%'
+    } else {
+      // 纯日志对话模式
+      this.activityLog.top = 0
+      this.activityLog.height = totalH - inputH
+      this.activityLog.width = '100%'
+    }
+
+    this.inputBox.top = totalH - inputH
+    this.inputBox.width = '100%'
+  }
 
   toggleJobs(): void {
     this.showingJobs = !this.showingJobs
-    
     if (this.showingJobs) {
-      // 显示 JobTable，压缩日志
       this.screen.append(this.jobTable)
-      this.jobTable.height = '50%'
-      this.activityLog.top = '50%'
-      this.activityLog.height = 11 - (this.screen.height as number / 2) // 粗略计算
-      // 使用更简单且准确的绝对行数分配
-      const totalHeight = this.screen.height as number
-      const jobHeight = Math.floor(totalHeight * 0.5)
-      this.jobTable.height = jobHeight
-      this.activityLog.top = jobHeight
-      this.activityLog.height = totalHeight - jobHeight - 3 // 减去 input 空间
       this.startWatching()
     } else {
-      // 隐藏 JobTable，日志全屏
       this.screen.remove(this.jobTable)
-      this.activityLog.top = 0
-      this.activityLog.height = (this.screen.height as number) - 3
     }
-
+    this.applyLayout()
     this.inputBox.focus()
     this.activityLog.setScrollPerc(100)
     this.screen.render()
   }
-
-  // ── Public API ──────────────────────────────────────────────────────────────
 
   get tuiChannel(): TUIChannel { return this.channel }
 
