@@ -14,7 +14,9 @@ import type { AgentState, Session, Task } from '../../types'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants'
 import { ContextCompressor } from './context-compressor'
 import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types'
-import type { Channel } from '../../channel/base'
+import type { Channel, ChannelMessage } from '../../channel/base'
+import { eventBus } from '../../eventBus'
+import type { InterventionResolvedPayload } from '../../eventBus'
 
 /** 工具调用超时时间（2 分钟） */
 const TOOL_CALL_TIMEOUT_MS = 120_000
@@ -48,7 +50,8 @@ export abstract class BaseAgent extends EventEmitter {
     this.model = config.model
     this.workspaceRoot = config.workspaceRoot
     this.mcpClient = config.mcpClient
-    this.channel = config.channel
+    // Wrap channel.send to also emit agent:log on the global event bus
+    this.channel = config.channel ? this.wrapChannel(config.channel) : config.channel
     this.maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS
     this.keepRecentMessages = config.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
     this.summaryModel = config.summaryModel ?? 'gpt-4o-mini'
@@ -64,6 +67,41 @@ export abstract class BaseAgent extends EventEmitter {
   protected abstract get systemPrompt(): string
 
   /**
+   * 更新 Agent 状态，并向全局 EventBus 发布 agent:state 事件
+   */
+  protected setState(state: AgentState): void {
+    this.state = state
+    eventBus.emit('agent:state', { agentName: this.agentName, state })
+  }
+
+  /**
+   * 将 Channel 包装为同步 emit agent:log 的版本
+   */
+  private wrapChannel(channel: Channel): Channel {
+    return {
+      send: async (message: ChannelMessage): Promise<void> => {
+        const type: 'info' | 'warn' | 'error' =
+          message.type === 'delivery_failed' || message.type === 'tool_error'
+            ? 'error'
+            : message.type === 'delivery_blocked' || message.type === 'tool_warn'
+              ? 'warn'
+              : 'info'
+        const text =
+          typeof message.payload['message'] === 'string'
+            ? `[${message.type}] ${message.payload['message']}`
+            : `[${message.type}]`
+        eventBus.emit('agent:log', {
+          agentName: this.agentName,
+          type,
+          message: text,
+          timestamp: new Date().toISOString(),
+        })
+        return channel.send(message)
+      },
+    }
+  }
+
+  /**
    * 请求人工干预（HITL）
    * 发出 `intervention_required` 事件，挂起 Agent 循环，等待外部调用 resolve 后恢复
    */
@@ -71,7 +109,10 @@ export abstract class BaseAgent extends EventEmitter {
     const defaultTimeout = this.runningEphemeral ? 30_000 : 300_000
     const timeout = timeoutMs ?? defaultTimeout
 
-    let timeoutId: ReturnType<typeof setTimeout>
+    // Emit to global event bus so WebSocket clients can observe
+    eventBus.emit('intervention:required', { agentName: this.agentName, prompt })
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
 
     const interventionPromise = new Promise<string>((resolve) => {
       this.interventionResolve = resolve
@@ -83,6 +124,14 @@ export abstract class BaseAgent extends EventEmitter {
         },
       })
     })
+
+    // Also allow resolution via the global event bus (e.g. from the REST API)
+    const busResolveHandler = (payload: InterventionResolvedPayload): void => {
+      if (payload.agentName === this.agentName) {
+        this.resolveIntervention(payload.input)
+      }
+    }
+    eventBus.on('intervention:resolved', busResolveHandler)
 
     const timeoutPromise = new Promise<string>((resolve) => {
       timeoutId = setTimeout(() => {
@@ -98,6 +147,7 @@ export abstract class BaseAgent extends EventEmitter {
       return await Promise.race([interventionPromise, timeoutPromise])
     } finally {
       if (timeoutId) clearTimeout(timeoutId)
+      eventBus.off('intervention:resolved', busResolveHandler)
     }
   }
 
@@ -109,7 +159,7 @@ export abstract class BaseAgent extends EventEmitter {
 
   /** 运行 Agent 主循环 */
   async run(input: string): Promise<string> {
-    this.state = 'running'
+    this.setState('running')
     this.iterations = 0
     this.lastAction = 'start'
 
@@ -125,7 +175,7 @@ export abstract class BaseAgent extends EventEmitter {
 
       return result ?? '任务完成，但没有生成响应。'
     } catch (error) {
-      this.state = 'error'
+      this.setState('error')
       this.lastAction = `error: ${(error as Error).message}`
       throw error
     }
@@ -171,14 +221,14 @@ export abstract class BaseAgent extends EventEmitter {
       }
 
       if (result) {
-        this.state = 'idle'
+        this.setState('idle')
         this.lastAction = 'completed'
         break
       }
     }
 
     if (this.iterations >= this.maxIterations) {
-      this.state = 'waiting'
+      this.setState('waiting')
       this.lastAction = 'max_iterations'
       result = `已达到最大迭代次数 (${this.maxIterations})，当前任务可能未完成。`
     }
@@ -199,7 +249,7 @@ export abstract class BaseAgent extends EventEmitter {
     const savedEphemeral = this.runningEphemeral
 
     this.messages = []
-    this.state = 'running'
+    this.setState('running')
     this.iterations = 0
     this.lastAction = 'ephemeral_start'
     this.runningEphemeral = true

@@ -6,6 +6,7 @@ import { validateEnv, validateWorkspace } from './env'
 import { createMCPClient } from './mcp'
 import { TUI } from './web/tui'
 import { TUIChannel } from './channel/tui'
+import { startServer, registerAgent } from './web/server'
 
 const WORKSPACE_ROOT = './workspace'
 
@@ -79,6 +80,13 @@ async function main() {
       mcpClient,
       channel: tui.tuiChannel,
     })
+
+    // Register agents with the web server for snapshot broadcasting
+    registerAgent(mainAgent)
+    registerAgent(deliveryAgent)
+
+    // Start the API server in parallel with the main agent loop
+    startServer(WORKSPACE_ROOT)
 
     // Wire up HITL: intervention_required → TUI modal
     tui.attachAgent(mainAgent)
