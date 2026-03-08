@@ -417,9 +417,30 @@ describe('REST API route logic', () => {
   test('TC-B-22: GET /api/config/:name rejects disallowed filenames with 400', async () => {
     const { buildHonoApp } = await import('../../../src/web/server')
     const app = buildHonoApp(tmpDir)
-    const res = await app.fetch(new Request('http://localhost/api/config/invalid.md'))
+    // 'invalid' is not in the allowed set
+    const res = await app.fetch(new Request('http://localhost/api/config/invalid'))
     expect(res.status).toBe(400)
     const body = await res.json()
     expect(body.error).toBeDefined()
+  })
+
+  test('TC-B-23: GET /api/config/targets (no .md suffix) returns file content', async () => {
+    const { buildHonoApp } = await import('../../../src/web/server')
+    fs.writeFileSync(path.join(tmpDir, 'data', 'targets.md'), '# targets bare', 'utf-8')
+
+    const app = buildHonoApp(tmpDir)
+    const res = await app.fetch(new Request('http://localhost/api/config/targets'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual({ content: '# targets bare' })
+  })
+
+  test('TC-B-24: GET /api/config/userinfo (no .md suffix) returns empty string when missing', async () => {
+    const { buildHonoApp } = await import('../../../src/web/server')
+    const app = buildHonoApp(tmpDir)
+    const res = await app.fetch(new Request('http://localhost/api/config/userinfo'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual({ content: '' })
   })
 })

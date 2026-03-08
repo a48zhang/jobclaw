@@ -85,6 +85,18 @@ for (const event of BUS_EVENTS) {
   eventBus.on(event, (payload) => broadcastEvent(event, payload))
 }
 
+// ─── Config name normalizer ───────────────────────────────────────────────────
+// Accepts both bare names ('targets', 'userinfo') and names with the .md suffix.
+// Returns the canonical filename (e.g. 'targets.md') or null if disallowed.
+
+const ALLOWED_CONFIG_NAMES = new Set(['targets', 'userinfo'])
+
+function normalizeConfigName(raw: string): string | null {
+  const base = raw.endsWith('.md') ? raw.slice(0, -3) : raw
+  if (!ALLOWED_CONFIG_NAMES.has(base)) return null
+  return `${base}.md`
+}
+
 // ─── Hono REST app ────────────────────────────────────────────────────────────
 
 export function buildHonoApp(workspaceRoot: string): Hono {
@@ -120,11 +132,11 @@ export function buildHonoApp(workspaceRoot: string): Hono {
 
   // ── GET /api/config/:name ─────────────────────────────────────────────────
   app.get('/api/config/:name', (c) => {
-    const name = c.req.param('name')
-    if (name !== 'targets.md' && name !== 'userinfo.md') {
-      return c.json({ error: 'Only targets.md and userinfo.md are allowed' }, 400)
+    const normalized = normalizeConfigName(c.req.param('name'))
+    if (!normalized) {
+      return c.json({ error: 'Only targets[.md] and userinfo[.md] are allowed' }, 400)
     }
-    const filePath = path.resolve(workspaceRoot, `data/${name}`)
+    const filePath = path.resolve(workspaceRoot, `data/${normalized}`)
     try {
       const content = fs.readFileSync(filePath, 'utf-8')
       return c.json({ content })
@@ -158,9 +170,9 @@ export function buildHonoApp(workspaceRoot: string): Hono {
 
   // ── POST /api/config/:name ────────────────────────────────────────────────
   app.post('/api/config/:name', async (c) => {
-    const name = c.req.param('name')
-    if (name !== 'targets.md' && name !== 'userinfo.md') {
-      return c.json({ error: 'Only targets.md and userinfo.md are allowed' }, 400)
+    const normalized = normalizeConfigName(c.req.param('name'))
+    if (!normalized) {
+      return c.json({ error: 'Only targets[.md] and userinfo[.md] are allowed' }, 400)
     }
 
     let body: { content?: unknown }
@@ -174,7 +186,7 @@ export function buildHonoApp(workspaceRoot: string): Hono {
       return c.json({ error: '"content" (string) is required' }, 400)
     }
 
-    const relPath = `data/${name}`
+    const relPath = `data/${normalized}`
     const holder = 'api-server'
 
     try {
