@@ -237,6 +237,7 @@ export class ContextCompressor {
 主 Agent（同时也是"搜索 Agent"）：
 - 继承 BaseAgent
 - 负责用户交互（交互模式：`run()`）
+- **简历制作 (Resume Mastery)**: 负责提取结构化数据、发起交互润色 (HITL)、通过 Typst 编译生成 PDF。遵循 `jobclaw-skills.md` 中的简历制作 SOP。
 - **直接**通过 Playwright MCP 工具搜索职位（无独立 SearchAgent），遵循 `jobclaw-skills.md` 中的搜索 SOP
 - 通过 `spawnAgent(deliveryAgent, instruction)` 将投递委托给 DeliveryAgent（串行）
 - 支持 `runEphemeral(instruction)` 被 CronJob 无状态拉起（Ephemeral 模式）

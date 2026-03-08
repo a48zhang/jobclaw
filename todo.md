@@ -27,11 +27,12 @@
 - [x] **人工干预 UI**: 实现 TUI 模态框弹出。
 - [x] **系统鲁棒性**: 实现宽容解析与环境预检。
 
-## Phase 5: Web UI & Monitoring (Current)
-- [ ] **Web 基础设施**: 搭建基于 `Hono` 的轻量级 Web 服务器。
+## Phase 5: Web UI & Resume Mastery (Current)
+- [ ] **Web 基础设施**: 搭建基于 `Hono` 的轻量级 Web 服务器与 EventBus 状态总线。
 - [ ] **数据可视化**: 提供 `jobs.md` 的实时统计 API 和 Web 表格展示。
-- [ ] **交互式配置**: 在网页端直接编辑 `targets.md` 和 `userinfo.md`（无需手动改文件）。
-- [ ] **操作日志**: Web 端的 Agent 活动流同步显示。
+- [ ] **交互式配置**: 在网页端直接编辑 `targets.md` 和 `userinfo.md`（支持文件锁）。
+- [ ] **Resume Skill**: 引入 `typst_compile` 工具，实现简历生成 SOP 与 Web 触发入口。
+- [ ] **操作日志**: Web 端的 Agent 活动流实时同步（WS/SSE）。
 
 ## Phase 6: 高级生产特性 (Future)
 - [ ] **TUI 渲染性能**: 引入内容哈希校验，减少 `jobs.md` 无效解析。

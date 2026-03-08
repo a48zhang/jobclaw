@@ -58,7 +58,8 @@ jobclaw/
 │   │   ├── readFile.ts      # 读取文件工具实现
 │   │   ├── writeFile.ts     # 写入文件工具实现
 │   │   ├── appendFile.ts    # 追加文件工具实现
-│   │   ├── listDirectory.ts # 列出目录工具实现
+├── listDirectory.ts # 列出目录工具实现
+│   │   ├── typstCompile.ts  # Typst 编译简历工具实现
 │   │   └── lockFile.ts      # 文件锁工具实现
 │   ├── agents/
 │   │   ├── base/            # BaseAgent 核心包
@@ -94,22 +95,12 @@ jobclaw/
 │       ├── targets.md
 │       └── jobs.md
 ### 3.4 专用工具 (Specialized Tools)
-
-为了确保数据一致性并简化 Agent 逻辑，系统提供专用工具处理核心业务数据：
+### 3.4 专用工具 (Specialized Tools)
 
 - **`upsert_job`**: 职位数据管理工具（Phase 3 核心）。
-  - **职责**: 负责 `data/jobs.md` 的增量更新或状态变更。
-  - **自动化**: 
-    - 内部自动处理 `lock_file` 和 `unlock_file` 逻辑。
-    - 自动根据 `status` 变化触发 `Channel` 通发（如 `new_job`, `delivery_success` 等）。
-    - 自动格式化为标准 Markdown 表格行。
-  - **参数**: 
-    - `company` (string): 公司名称。
-    - `title` (string): 职位名称。
-    - `url` (string): 职位详情链接（作为唯一标识）。
-    - `status` (enum): `discovered` | `applied` | `failed` | `login_required`。
-    - `time` (string, optional): 投递时间。
-```
+- **`typst_compile`**: 简历编译工具（Phase 7 核心）。
+  - **职责**: 将 Typst 源码编译为 PDF 简历。
+  - **参数**: `input` (.typ 路径), `output` (.pdf 路径)。
 
 ---
 
@@ -130,10 +121,12 @@ jobclaw/
 
 - 继承 BaseAgent
 - 负责用户交互（交互模式）
+- **简历管理**: 提取数据、交互润色、通过 Typst 编译 PDF。
 - **直接**通过 Playwright MCP 工具搜索职位，无独立 SearchAgent
 - 通过 `spawnAgent(deliveryAgent, instruction)` 将投递委托给 DeliveryAgent（串行）
 - 支持 `runEphemeral(instruction)` 被 CronJob 无状态拉起，执行完毕后上下文销毁
-- `systemPrompt` 通过 `loadSkill('jobclaw-skills')` 内嵌搜索 SOP 和去重 SOP
+- `systemPrompt` 通过 `loadSkill('jobclaw-skills')` 内嵌搜索 SOP、去重 SOP 及简历制作 SOP
+
 
 ### 4.3 DeliveryAgent（投递）
 
@@ -344,3 +337,4 @@ NOTIFY_EMAIL=target@example.com
 | 5 | Bootstrap 引导流程 + CronJob 脚本 |
 | 6 | Channel 通知（邮件优先） |
 | 7 | Web UI 面板 |
+| 8 | Resume Mastery (Typst 智能简历制作) |
