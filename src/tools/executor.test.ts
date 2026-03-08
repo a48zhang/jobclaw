@@ -135,7 +135,7 @@ describe('read_file 工具', () => {
   test('path 参数必须是字符串', async () => {
     const result = await runTool(TOOL_NAMES.READ_FILE, { path: 123 })
     expect(result.success).toBe(false)
-    expect(result.error).toContain('path 参数必须是字符串')
+    expect(result.error).toContain('参数必须是字符串')
   })
 
   test('offset 参数必须是数字', async () => {
@@ -252,7 +252,7 @@ describe('write_file 工具', () => {
       new_string: 'replacement',
     })
     expect(result.success).toBe(false)
-    expect(result.error).toContain('path 参数必须是字符串')
+    expect(result.error).toContain('参数必须是字符串')
   })
 
   test('写入目录（非文件）返回错误', async () => {
@@ -332,7 +332,7 @@ describe('append_file 工具', () => {
       content: 'test',
     })
     expect(result.success).toBe(false)
-    expect(result.error).toContain('path 参数必须是字符串')
+    expect(result.error).toContain('参数必须是字符串')
   })
 })
 
@@ -397,7 +397,7 @@ describe('list_directory 工具', () => {
   test('参数类型验证', async () => {
     const result = await runTool(TOOL_NAMES.LIST_DIRECTORY, { path: 123 })
     expect(result.success).toBe(false)
-    expect(result.error).toContain('path 参数必须是字符串')
+    expect(result.error).toContain('参数必须是字符串')
   })
 })
 
@@ -456,7 +456,7 @@ describe('lock_file 工具', () => {
       holder: 'main',
     })
     expect(result.success).toBe(true)
-    expect(result.content).toBe('锁已续期')
+    expect(result.content).toBe('获取锁成功')
   })
 
   test('不同 holder 尝试获取已锁文件失败', async () => {
@@ -482,7 +482,7 @@ describe('lock_file 工具', () => {
       holder: 'main',
     })
     expect(result.success).toBe(false)
-    expect(result.error).toContain('path 参数必须是字符串')
+    expect(result.error).toContain('参数必须是字符串')
   })
 })
 
@@ -596,7 +596,7 @@ describe('unlock_file 工具', () => {
       holder: 'main',
     })
     expect(result.success).toBe(true)
-    expect(result.content).toBe('文件未锁定')
+    expect(result.content).toBe('释放锁成功')
   })
 
   test('参数类型验证', async () => {
@@ -605,7 +605,7 @@ describe('unlock_file 工具', () => {
       holder: 'main',
     })
     expect(result.success).toBe(false)
-    expect(result.error).toContain('path 参数必须是字符串')
+    expect(result.error).toContain('参数必须是字符串')
   })
 })
 

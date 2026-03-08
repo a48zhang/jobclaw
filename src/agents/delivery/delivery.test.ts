@@ -194,10 +194,9 @@ describe('DeliveryAgent', () => {
   // TC-C-09: systemPrompt 包含必要关键词
   test('TC-C-09: systemPrompt 包含必要关键词', () => {
     const prompt = (agent as unknown as { systemPrompt: string }).systemPrompt
-    expect(prompt).toContain('jobs.md')
+    expect(prompt).toContain('upsert_job')
     expect(prompt).toContain('userinfo.md')
-    expect(prompt).toContain('lock_file')
-    expect(prompt).toContain('write_file')
+    expect(prompt).toContain('jobs.md')
     expect(prompt).toContain('applied')
     expect(prompt).toContain('failed')
     expect(prompt).toContain('login_required')
