@@ -1,5 +1,17 @@
-# 打工龙虾 Jobclaw
+# JobClaw
 
-帮你找工作。
+AI 驱动的求职自动化助手。
 
-Your partner of job seeking.
+## Quickstart
+
+```bash
+# 安装依赖
+bun install
+
+# 安装
+bun link
+
+# 开始
+jobclaw
+```
+
