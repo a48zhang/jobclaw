@@ -362,4 +362,64 @@ describe('REST API route logic', () => {
 
     eventBus.off('intervention:resolved', handler)
   })
+
+  test('TC-B-18: GET /api/stats returns zero counts when jobs.md is missing', async () => {
+    const { buildHonoApp } = await import('../../../src/web/server')
+    const app = buildHonoApp(tmpDir)
+    const res = await app.fetch(new Request('http://localhost/api/stats'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual({ total: 0, byStatus: {} })
+  })
+
+  test('TC-B-19: GET /api/stats aggregates status counts from jobs.md', async () => {
+    const { buildHonoApp } = await import('../../../src/web/server')
+    const md = [
+      '| 公司 | 职位 | 链接 | 状态 | 时间 |',
+      '| --- | --- | --- | --- | --- |',
+      '| Acme | SWE | https://acme.com | applied | 2024-01-01 |',
+      '| Foo | PM | https://foo.com | applied | 2024-01-02 |',
+      '| Bar | QA | https://bar.com | failed | 2024-01-03 |',
+      '| Baz | Dev | https://baz.com | discovered | 2024-01-04 |',
+    ].join('\n')
+    fs.writeFileSync(path.join(tmpDir, 'data', 'jobs.md'), md, 'utf-8')
+
+    const app = buildHonoApp(tmpDir)
+    const res = await app.fetch(new Request('http://localhost/api/stats'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.total).toBe(4)
+    expect(body.byStatus['applied']).toBe(2)
+    expect(body.byStatus['failed']).toBe(1)
+    expect(body.byStatus['discovered']).toBe(1)
+  })
+
+  test('TC-B-20: GET /api/config/targets.md returns file content', async () => {
+    const { buildHonoApp } = await import('../../../src/web/server')
+    fs.writeFileSync(path.join(tmpDir, 'data', 'targets.md'), '# targets', 'utf-8')
+
+    const app = buildHonoApp(tmpDir)
+    const res = await app.fetch(new Request('http://localhost/api/config/targets.md'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual({ content: '# targets' })
+  })
+
+  test('TC-B-21: GET /api/config/userinfo.md returns empty string when file is missing', async () => {
+    const { buildHonoApp } = await import('../../../src/web/server')
+    const app = buildHonoApp(tmpDir)
+    const res = await app.fetch(new Request('http://localhost/api/config/userinfo.md'))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual({ content: '' })
+  })
+
+  test('TC-B-22: GET /api/config/:name rejects disallowed filenames with 400', async () => {
+    const { buildHonoApp } = await import('../../../src/web/server')
+    const app = buildHonoApp(tmpDir)
+    const res = await app.fetch(new Request('http://localhost/api/config/invalid.md'))
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBeDefined()
+  })
 })

@@ -21,6 +21,14 @@ import type { InterventionResolvedPayload } from '../../eventBus'
 /** 工具调用超时时间（2 分钟） */
 const TOOL_CALL_TIMEOUT_MS = 120_000
 
+/** Channel 消息类型 → 日志级别映射 */
+const CHANNEL_LOG_TYPE_MAP: Record<string, 'info' | 'warn' | 'error'> = {
+  delivery_failed: 'error',
+  tool_error: 'error',
+  delivery_blocked: 'warn',
+  tool_warn: 'warn',
+}
+
 export abstract class BaseAgent extends EventEmitter {
   protected openai: OpenAI
   protected mcpClient?: MCPClient
@@ -80,12 +88,7 @@ export abstract class BaseAgent extends EventEmitter {
   private wrapChannel(channel: Channel): Channel {
     return {
       send: async (message: ChannelMessage): Promise<void> => {
-        const type: 'info' | 'warn' | 'error' =
-          message.type === 'delivery_failed' || message.type === 'tool_error'
-            ? 'error'
-            : message.type === 'delivery_blocked' || message.type === 'tool_warn'
-              ? 'warn'
-              : 'info'
+        const type: 'info' | 'warn' | 'error' = CHANNEL_LOG_TYPE_MAP[message.type] ?? 'info'
         const text =
           typeof message.payload['message'] === 'string'
             ? `[${message.type}] ${message.payload['message']}`

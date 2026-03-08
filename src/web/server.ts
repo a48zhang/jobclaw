@@ -4,6 +4,8 @@
  * Exposes:
  *   WS  /ws                     — real-time event stream + agent snapshots
  *   GET  /api/jobs               — parsed jobs.md as JSON array
+ *   GET  /api/stats              — aggregated job status counts
+ *   GET  /api/config/:name       — read targets.md or userinfo.md
  *   POST /api/intervention       — resolve a pending HITL intervention
  *   POST /api/config/:name       — save targets.md or userinfo.md (with file lock)
  */
@@ -85,7 +87,7 @@ for (const event of BUS_EVENTS) {
 
 // ─── Hono REST app ────────────────────────────────────────────────────────────
 
-function buildHonoApp(workspaceRoot: string): Hono {
+export function buildHonoApp(workspaceRoot: string): Hono {
   const app = new Hono()
 
   // ── GET /api/jobs ─────────────────────────────────────────────────────────
@@ -96,6 +98,38 @@ function buildHonoApp(workspaceRoot: string): Hono {
       return c.json(parseJobsMd(content))
     } catch {
       return c.json([])
+    }
+  })
+
+  // ── GET /api/stats ────────────────────────────────────────────────────────
+  app.get('/api/stats', (c) => {
+    const jobsPath = path.resolve(workspaceRoot, 'data/jobs.md')
+    try {
+      const content = fs.readFileSync(jobsPath, 'utf-8')
+      const jobs = parseJobsMd(content)
+      const stats: Record<string, number> = {}
+      for (const job of jobs) {
+        const status = job.status || 'unknown'
+        stats[status] = (stats[status] ?? 0) + 1
+      }
+      return c.json({ total: jobs.length, byStatus: stats })
+    } catch {
+      return c.json({ total: 0, byStatus: {} })
+    }
+  })
+
+  // ── GET /api/config/:name ─────────────────────────────────────────────────
+  app.get('/api/config/:name', (c) => {
+    const name = c.req.param('name')
+    if (name !== 'targets.md' && name !== 'userinfo.md') {
+      return c.json({ error: 'Only targets.md and userinfo.md are allowed' }, 400)
+    }
+    const filePath = path.resolve(workspaceRoot, `data/${name}`)
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8')
+      return c.json({ content })
+    } catch {
+      return c.json({ content: '' })
     }
   })
 
