@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import * as fsSync from 'node:fs';
 import path from 'path';
 import { lockFile, unlockFile } from './lockFile';
 import type { ToolContext } from './index';
@@ -21,16 +22,19 @@ export async function upsertJob(args: UpsertJobArgs, context: ToolContext): Prom
   const holder = agentName;
 
   try {
+    // 确保目录和文件存在，否则 lockFile 会报错
+    const jobsDir = path.dirname(jobsPath);
+    if (!fsSync.existsSync(jobsDir)) {
+      await fs.mkdir(jobsDir, { recursive: true });
+    }
+    if (!fsSync.existsSync(jobsPath)) {
+      await fs.writeFile(jobsPath, '| 公司 | 职位 | 链接 | 状态 | 时间 |\n| --- | --- | --- | --- | --- |\n', 'utf-8');
+    }
+
     // 调用重构后的底层 lockFile
     await lockFile(relativeJobsPath, holder, workspaceRoot);
 
-    let content = '';
-    try {
-      content = await fs.readFile(jobsPath, 'utf-8');
-    } catch (e) {
-      content = '| 公司 | 职位 | 链接 | 状态 | 时间 |\n| --- | --- | --- | --- | --- |\n';
-    }
-
+    const content = await fs.readFile(jobsPath, 'utf-8');
     const lines = content.split('\n');
     const headerSeparatorIndex = lines.findIndex(l => l.includes('| --- |'));
     if (headerSeparatorIndex === -1) {

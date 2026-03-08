@@ -1,5 +1,6 @@
 // lock_file / unlock_file 工具实现
 import * as fs from 'node:fs'
+import * as path from 'node:path'
 import type { ToolContext, ToolResult } from './index'
 import { normalizeAndValidatePath, getLocksDir, ensureLocksDirExists, getLockFilePath, LOCK_TIMEOUT_MS, type LockFileContent } from './utils'
 
@@ -7,6 +8,11 @@ import { normalizeAndValidatePath, getLocksDir, ensureLocksDirExists, getLockFil
  * 底层加锁函数 (Core)
  */
 export async function lockFile(inputPath: string, holder: string, workspaceRoot: string): Promise<void> {
+  const absolutePath = path.resolve(workspaceRoot, inputPath)
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error(`无法锁定不存在的文件：${inputPath}`)
+  }
+
   const locksDir = getLocksDir(workspaceRoot)
   ensureLocksDirExists(locksDir)
 
