@@ -80,10 +80,19 @@ export async function executeTypstCompile(
     return { success: false, content: '', error: `输入文件不存在：${input_path}` }
   }
 
-  // 确保输出目录存在
+  // 确保输出目录存在且可写
   const outputDir = path.resolve(context.workspaceRoot, 'output')
-  if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true })
+  try {
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true })
+    }
+    fs.accessSync(outputDir, fs.constants.W_OK)
+  } catch (err) {
+    return {
+      success: false,
+      content: '',
+      error: `输出目录不可写或无法创建：${outputDir}`,
+    }
   }
 
   const outputPath = path.resolve(outputDir, 'resume.pdf')

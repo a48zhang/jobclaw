@@ -1,4 +1,3 @@
-# 已投递岗位
-
-记录已投递岗位及状态。
-
+| Company | Title | URL | Status | Time |
+| --- | --- | --- | --- | --- |
+| Google | SWE | http://google.com | discovered | 2026-03-08 |

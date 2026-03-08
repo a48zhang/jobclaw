@@ -1,4 +1,2 @@
-# 监测目标
-
-记录公司招聘主页和其他信息源。
-
+# Targets
+- http://google.com
