@@ -100,22 +100,30 @@ describe('validateEnv', () => {
 
   test('所有必须变量都存在时不抛出异常', () => {
     process.env.OPENAI_API_KEY = 'sk-test'
+    process.env.MODEL = 'o3-mini'
+    process.env.SUMMARY_MODEL = 'gpt-4o-mini'
     expect(() => validateEnv(tmpDir)).not.toThrow()
   })
 
-  test('缺少 LLM API Key 时抛出友好错误', () => {
+  test('缺少 API_KEY 时抛出友好错误', () => {
     delete process.env.OPENAI_API_KEY
-    expect(() => validateEnv(tmpDir)).toThrow(/LLM API Key/)
+    process.env.MODEL_ID = 'o3-mini'
+    process.env.SUMMARY_MODEL_ID = 'gpt-4o-mini'
+    expect(() => validateEnv(tmpDir)).toThrow(/API_KEY/)
   })
 
   test('smtp 模式下缺少 SMTP_HOST 时抛出友好错误', () => {
     process.env.OPENAI_API_KEY = 'sk-test'
+    process.env.MODEL_ID = 'o3-mini'
+    process.env.SUMMARY_MODEL_ID = 'gpt-4o-mini'
     delete process.env.SMTP_HOST
     expect(() => validateEnv(tmpDir, ['smtp'])).toThrow(/SMTP_HOST/)
   })
 
   test('smtp 模式下所有变量都存在时不抛出异常', () => {
     process.env.OPENAI_API_KEY = 'sk-test'
+    process.env.MODEL_ID = 'o3-mini'
+    process.env.SUMMARY_MODEL_ID = 'gpt-4o-mini'
     process.env.SMTP_HOST = 'smtp.example.com'
     process.env.SMTP_USER = 'noreply@example.com'
     process.env.SMTP_PASSWORD = 'secret'
@@ -126,7 +134,9 @@ describe('validateEnv', () => {
   test('可以使用 config.json 代替环境变量', () => {
     delete process.env.OPENAI_API_KEY
     fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
-      llm: { apiKey: 'sk-from-file', model: 'gpt-4' }
+      API_KEY: 'sk-from-file', 
+      MODEL_ID: 'gpt-4',
+      SUMMARY_MODEL_ID: 'gpt-4o-mini'
     }))
     expect(() => validateEnv(tmpDir)).not.toThrow()
   })

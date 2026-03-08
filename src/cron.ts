@@ -35,13 +35,16 @@ async function main() {
   const mcpClient = await createMCPClient();
 
   try {
-    const openai = new OpenAI({ apiKey: config.llm.apiKey });
+    const openai = new OpenAI({ 
+      apiKey: config.API_KEY,
+      baseURL: config.BASE_URL
+    });
 
     const deliveryAgent = new DeliveryAgent({
       agentName: 'delivery',
       openai,
-      model: config.llm.model,
-      summaryModel: config.llm.summaryModel,
+      model: config.MODEL_ID,
+      summaryModel: config.SUMMARY_MODEL_ID,
       workspaceRoot: WORKSPACE_ROOT,
       mcpClient,
       channel,
@@ -50,8 +53,8 @@ async function main() {
     const mainAgent = new MainAgent({
       agentName: 'main',
       openai,
-      model: config.llm.model,
-      summaryModel: config.llm.summaryModel,
+      model: config.MODEL_ID,
+      summaryModel: config.SUMMARY_MODEL_ID,
       workspaceRoot: WORKSPACE_ROOT,
       deliveryAgent,
       mcpClient,

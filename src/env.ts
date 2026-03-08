@@ -45,8 +45,16 @@ export function validateEnv(workspaceRoot: string, features: Array<'smtp'> = [])
   const config = loadConfig(workspaceRoot)
   const errors: string[] = []
 
-  if (!config.llm.apiKey) {
-    errors.push('  - LLM API Key：未在 config.json 或环境变量 (OPENAI_API_KEY) 中配置')
+  if (!config.API_KEY) {
+    errors.push('  - API_KEY：未在 config.json 或环境变量中配置')
+  }
+
+  if (!config.MODEL_ID) {
+    errors.push('  - MODEL_ID：未在 config.json 或环境变量中配置')
+  }
+
+  if (!config.SUMMARY_MODEL_ID) {
+    errors.push('  - SUMMARY_MODEL_ID：未在 config.json 或环境变量中配置')
   }
 
   if (features.includes('smtp')) {

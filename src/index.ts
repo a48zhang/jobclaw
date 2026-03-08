@@ -18,16 +18,18 @@ async function main() {
   const mcpClient = await createMCPClient()
 
   try {
-    const openai = new OpenAI({ apiKey: config.llm.apiKey })
+    const openai = new OpenAI({ 
+      apiKey: config.API_KEY,
+      baseURL: config.BASE_URL
+    })
 
-    // Bootstrap 引导循环：持续运行直到用户完成配置并生成 config.json
+    // Bootstrap 引导循环
     if (needsBootstrap(WORKSPACE_ROOT)) {
-      // During bootstrap we use a stderr-backed channel since TUI is not yet running
       const bootstrapChannel = new TUIChannel((line) => process.stderr.write(line + '\n'))
       const bootstrapDelivery = new DeliveryAgent({
         openai,
         agentName: 'delivery',
-        model: config.llm.model,
+        model: config.MODEL_ID,
         workspaceRoot: WORKSPACE_ROOT,
         mcpClient,
         channel: bootstrapChannel,
@@ -35,7 +37,7 @@ async function main() {
       const bootstrapAgent = new MainAgent({
         openai,
         agentName: 'main',
-        model: config.llm.model,
+        model: config.MODEL_ID,
         workspaceRoot: WORKSPACE_ROOT,
         deliveryAgent: bootstrapDelivery,
         mcpClient,
@@ -67,8 +69,8 @@ async function main() {
     const deliveryAgent = new DeliveryAgent({
       openai,
       agentName: 'delivery',
-      model: config.llm.model,
-      summaryModel: config.llm.summaryModel,
+      model: config.MODEL_ID,
+      summaryModel: config.SUMMARY_MODEL_ID,
       workspaceRoot: WORKSPACE_ROOT,
       mcpClient,
       channel: tui.tuiChannel,
@@ -77,20 +79,16 @@ async function main() {
     mainAgent = new MainAgent({
       openai,
       agentName: 'main',
-      model: config.llm.model,
-      summaryModel: config.llm.summaryModel,
+      model: config.MODEL_ID,
+      summaryModel: config.SUMMARY_MODEL_ID,
       workspaceRoot: WORKSPACE_ROOT,
       deliveryAgent,
       mcpClient,
       channel: tui.tuiChannel,
     })
 
-    // Register agents with the web server for snapshot broadcasting
-    registerAgent(mainAgent)
-    registerAgent(deliveryAgent)
-
-    // Start the API server in parallel with the main agent loop
-    startServer(WORKSPACE_ROOT)
+    // Start server with config
+    startServer(WORKSPACE_ROOT, config.SERVER_PORT)
 
     // Wire up HITL: intervention_required → TUI modal
     tui.attachAgent(mainAgent)

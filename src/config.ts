@@ -1,24 +1,20 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-export interface LLMConfig {
-  apiKey: string
-  model: string
-  summaryModel?: string
-}
-
 export interface Config {
-  llm: LLMConfig
-  serverPort?: number
+  API_KEY: string
+  MODEL_ID: string
+  SUMMARY_MODEL_ID: string
+  BASE_URL: string
+  SERVER_PORT: number
 }
 
-const DEFAULT_CONFIG: Partial<Config> = {
-  llm: {
-    apiKey: '',
-    model: 'gpt-4o',
-    summaryModel: 'gpt-4o-mini',
-  },
-  serverPort: 3000,
+const DEFAULT_CONFIG: Config = {
+  API_KEY: '',
+  MODEL_ID: '',
+  SUMMARY_MODEL_ID: '',
+  BASE_URL: 'https://api.openai.com/v1',
+  SERVER_PORT: 3000,
 }
 
 /**
@@ -38,11 +34,10 @@ export function loadConfig(workspaceRoot: string): Config {
   }
 
   return {
-    llm: {
-      apiKey: fileConfig.llm?.apiKey || process.env['OPENAI_API_KEY'] || DEFAULT_CONFIG.llm!.apiKey,
-      model: fileConfig.llm?.model || process.env['MODEL'] || DEFAULT_CONFIG.llm!.model,
-      summaryModel: fileConfig.llm?.summaryModel || DEFAULT_CONFIG.llm!.summaryModel,
-    },
-    serverPort: fileConfig.serverPort || parseInt(process.env['SERVER_PORT'] || '', 10) || DEFAULT_CONFIG.serverPort,
+    API_KEY: fileConfig.API_KEY || process.env['API_KEY'] || process.env['OPENAI_API_KEY'] || DEFAULT_CONFIG.API_KEY,
+    MODEL_ID: fileConfig.MODEL_ID || process.env['MODEL_ID'] || process.env['MODEL'] || DEFAULT_CONFIG.MODEL_ID,
+    SUMMARY_MODEL_ID: fileConfig.SUMMARY_MODEL_ID || process.env['SUMMARY_MODEL_ID'] || process.env['SUMMARY_MODEL'] || DEFAULT_CONFIG.SUMMARY_MODEL_ID,
+    BASE_URL: fileConfig.BASE_URL || process.env['BASE_URL'] || process.env['OPENAI_BASE_URL'] || DEFAULT_CONFIG.BASE_URL,
+    SERVER_PORT: fileConfig.SERVER_PORT || parseInt(process.env['SERVER_PORT'] || '', 10) || DEFAULT_CONFIG.SERVER_PORT,
   }
 }
