@@ -31,7 +31,34 @@ export async function findTypstBinary(): Promise<string | null> {
     await execFileAsync('typst', ['--version'])
     return 'typst'
   } catch {
+    // 检查常见安装路径是否在 PATH 中（针对刚刚安装的情况）
+    const home = process.env.HOME || ''
+    const cargoBin = path.join(home, '.cargo', 'bin', 'typst')
+    if (fs.existsSync(cargoBin)) return cargoBin
+
     return null
+  }
+}
+
+/**
+ * 自动安装 typst
+ * 优先尝试使用 cargo 安装，因为这是 Codespace 和 Linux 开发环境最通用的方式
+ */
+export async function autoInstallTypst(): Promise<boolean> {
+  console.log('[JobClaw] 正在尝试自动安装 typst...')
+  try {
+    // 检查是否安装了 cargo
+    await execFileAsync('cargo', ['--version'])
+    console.log('[JobClaw] 检测到 cargo，正在通过 cargo 安装 typst-cli...')
+    
+    // 执行安装命令
+    await execFileAsync('cargo', ['install', 'typst-cli'], { timeout: 300_000 })
+    console.log('[JobClaw] typst 安装成功！')
+    return true
+  } catch (err) {
+    console.error('[JobClaw] 自动安装 typst 失败。请尝试手动安装：https://typst.app/docs/installation/')
+    console.error('错误详情:', (err as Error).message)
+    return false
   }
 }
 
@@ -98,13 +125,21 @@ export async function executeTypstCompile(
   const outputPath = path.resolve(outputDir, 'resume.pdf')
 
   // 检查 typst 是否可用
-  const typstBin = await findTypstBinary()
+  let typstBin = await findTypstBinary()
+  if (!typstBin) {
+    // 尝试自动安装
+    const installed = await autoInstallTypst()
+    if (installed) {
+      typstBin = await findTypstBinary()
+    }
+  }
+
   if (!typstBin) {
     return {
       success: false,
       content: '',
       error:
-        'typst 未安装或不可用。请先安装 typst：https://typst.app/docs/installation/ 或运行 `cargo install typst-cli`',
+        'typst 未安装且自动安装失败。请手动安装：https://typst.app/docs/installation/',
     }
   }
 

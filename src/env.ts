@@ -56,14 +56,31 @@ export function validateEnv(features: Array<'smtp'> = []): void {
     )
   }
 
-  // 检查 typst 是否可用（非致命，仅打印警告）
+  // 检查 typst 是否可用（自动尝试安装）
   try {
     execFileSync('typst', ['--version'], { stdio: 'ignore' })
   } catch {
-    console.warn(
-      '[JobClaw] 警告：typst 未安装或不在 PATH 中。简历编译功能（typst_compile 工具）将不可用。\n' +
-        '          安装方法：https://typst.app/docs/installation/ 或 `cargo install typst-cli`'
-    )
+    // 检查 cargo 安装路径是否在 PATH 中，如果不在则尝试自动安装
+    const home = process.env.HOME || ''
+    const cargoBin = path.join(home, '.cargo', 'bin')
+    const typstPath = path.join(cargoBin, 'typst')
+    
+    if (fs.existsSync(typstPath)) {
+      // 如果二进制存在但不在 PATH 中，尝试临时添加到 PATH
+      process.env.PATH = `${cargoBin}${path.delimiter}${process.env.PATH}`
+    } else {
+      console.log('[JobClaw] 检测到 typst 未安装，准备自动安装...')
+      try {
+        // 由于这里是同步调用，我们直接尝试通过 cargo 安装
+        execFileSync('cargo', ['install', 'typst-cli'], { stdio: 'inherit' })
+        process.env.PATH = `${cargoBin}${path.delimiter}${process.env.PATH}`
+      } catch {
+        console.warn(
+          '[JobClaw] 警告：typst 自动安装失败。简历编译功能将不可用。\n' +
+            '          请手动安装：https://typst.app/docs/installation/'
+        )
+      }
+    }
   }
 }
 
