@@ -19,14 +19,14 @@
 
 ---
 
-## 任务拆分
+## 任务拆分 (✅ 已完成)
 
-### 🟢 [Team A: TUI 仪表盘与实时数据](team_a_tui_dashboard.md)
+### 🟢 [Team A: TUI 仪表盘与实时数据](team_a_tui_dashboard.md) (✅)
 - **职责**: 实现 `TUIChannel` 类，订阅 `intervention_required` 事件并显示弹窗。
 
-### 🔵 [Team B: 人工干预与鲁棒性](team_b_hitl_robustness.md)
+### 🔵 [Team B: 人工干预与鲁棒性](team_b_hitl_robustness.md) (✅)
 - **职责**: 让 `BaseAgent` 继承 `EventEmitter`，实现 `requestIntervention` 的 Promise 挂起逻辑。
 
-## 验收流程
-1. 运行 `bun src/index.ts` 进入仪表盘。
-2. 模拟验证码触发，验证 UI 弹窗与 Agent 恢复运行。
+## 验收结果
+- **Gemini 审查**: ✅ 已通过 (见 [gemini_review.md](gemini_review.md))
+- **联调情况**: 核心接口协议对接成功，TUI 仪表盘可实时刷新，HITL 弹窗正常工作。

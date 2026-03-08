@@ -21,21 +21,15 @@
 
 ---
 
-## Phase 4: TUI 仪表盘与鲁棒性集成 (Next)
+## Phase 4: TUI 仪表盘与鲁棒性集成 (Completed)
+- [x] **布局实现**: 实现基于 `blessed` 的 Grid 布局。
+- [x] **实时数据流**: 监听 `jobs.md` 变化并订阅 Channel 事件。
+- [x] **人工干预 UI**: 实现 TUI 模态框弹出。
+- [x] **系统鲁棒性**: 实现宽容解析与环境预检。
 
-### TUI 终端仪表盘 (Blessed)
-- [ ] **布局实现**: 实现基于 `blessed` 的 Grid 布局（Chat 窗口 + 职位表格 + 实时数据面板）。
-- [ ] **实时数据流**: 
-  - 监听 `jobs.md` 文件变化，自动刷新 TUI 表格。
-  - 订阅 `Channel` 事件，在仪表盘展示实时 Agent 动作。
-- [ ] **人工干预 UI**: 当 Agent 检测到验证码或登录阻断时，在 TUI 弹出显著提示，并允许用户在 TUI 中输入反馈或手动操作浏览器。
-
-### 系统鲁棒性优化
-- [ ] **宽容解析**: 重构 `jobs.md` 的读取逻辑，使其能容忍 LLM 或用户手动修改引入的非关键格式错误。
-- [ ] **环境预检**: 实现 `validateEnv` 的完整预检逻辑，在程序启动前确认所有 API Key、SMTP 和 Workspace 路径配置正确。
-
----
-
-## Phase 5: Web UI & Monitoring (Future)
+## Phase 5: Web UI & Monitoring (Current)
 - [ ] 提供基于 Hono 的可视化监控看板。
 - [ ] 实现交互式的 `targets.md` 和 `userinfo.md` 编辑器。
+- [ ] **TUI 性能优化 (远期)**:
+  - 引入内容哈希校验，避免 `jobs.md` 无变化时的重复解析。
+  - 优化 Blessed Table 渲染，减少批量写入时的闪烁。
