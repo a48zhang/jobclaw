@@ -5,29 +5,19 @@ import type {
   ChatCompletionTool,
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions'
-import * as fs from 'node:fs'
-import * as path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { EventEmitter } from 'node:events'
 import { executeTool, TOOLS, type ToolContext, type ToolResult } from '../../tools/index'
 import type { AgentState, Session, Task } from '../../types'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants'
 import { ContextCompressor } from './context-compressor'
 import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types'
-import type { Channel, ChannelMessage } from '../../channel/base'
+import type { Channel } from '../../channel/base'
 import { eventBus } from '../../eventBus'
 import type { InterventionResolvedPayload } from '../../eventBus'
+import * as utils from './agent-utils'
 
 /** 工具调用超时时间（2 分钟） */
 const TOOL_CALL_TIMEOUT_MS = 120_000
-
-/** Channel 消息类型 → 日志级别映射 */
-const CHANNEL_LOG_TYPE_MAP: Record<string, 'info' | 'warn' | 'error'> = {
-  delivery_failed: 'error',
-  tool_error: 'error',
-  delivery_blocked: 'warn',
-  tool_warn: 'warn',
-}
 
 export abstract class BaseAgent extends EventEmitter {
   protected openai: OpenAI
@@ -58,8 +48,7 @@ export abstract class BaseAgent extends EventEmitter {
     this.model = config.model
     this.workspaceRoot = config.workspaceRoot
     this.mcpClient = config.mcpClient
-    // Wrap channel.send to also emit agent:log on the global event bus
-    this.channel = config.channel ? this.wrapChannel(config.channel) : config.channel
+    this.channel = config.channel ? utils.wrapChannel(config.channel, this.agentName) : config.channel
     this.maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS
     this.keepRecentMessages = config.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
     this.summaryModel = config.summaryModel ?? 'gpt-4o-mini'
@@ -71,77 +60,31 @@ export abstract class BaseAgent extends EventEmitter {
     })
   }
 
-  /** 系统提示词 - 子类必须实现 */
   protected abstract get systemPrompt(): string
 
-  /**
-   * 更新 Agent 状态，并向全局 EventBus 发布 agent:state 事件
-   */
   protected setState(state: AgentState): void {
     this.state = state
     eventBus.emit('agent:state', { agentName: this.agentName, state })
   }
 
-  /**
-   * 将 Channel 包装为同步 emit agent:log 的版本
-   */
-  private wrapChannel(channel: Channel): Channel {
-    return {
-      send: async (message: ChannelMessage): Promise<void> => {
-        const type: 'info' | 'warn' | 'error' = CHANNEL_LOG_TYPE_MAP[message.type] ?? 'info'
-        const text =
-          typeof message.payload['message'] === 'string'
-            ? `[${message.type}] ${message.payload['message']}`
-            : `[${message.type}]`
-        eventBus.emit('agent:log', {
-          agentName: this.agentName,
-          type,
-          message: text,
-          timestamp: new Date().toISOString(),
-        })
-        return channel.send(message)
-      },
-    }
-  }
-
-  /**
-   * 请求人工干预（HITL）
-   * 发出 `intervention_required` 事件，挂起 Agent 循环，等待外部调用 resolve 后恢复
-   */
   async requestIntervention(prompt: string, timeoutMs?: number): Promise<string> {
-    const defaultTimeout = this.runningEphemeral ? 30_000 : 300_000
-    const timeout = timeoutMs ?? defaultTimeout
-
-    // Emit to global event bus so WebSocket clients can observe
+    const timeout = timeoutMs ?? (this.runningEphemeral ? 30_000 : 300_000)
     eventBus.emit('intervention:required', { agentName: this.agentName, prompt })
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined
-
     const interventionPromise = new Promise<string>((resolve) => {
       this.interventionResolve = resolve
-      this.emit('intervention_required', {
-        prompt,
-        resolve: (input: string) => {
-          this.resolveIntervention(input)
-          this.emit('intervention_handled', { prompt })
-        },
-      })
+      this.emit('intervention_required', { prompt, resolve: (i: string) => this.resolveIntervention(i) })
     })
 
-    // Also allow resolution via the global event bus (e.g. from the REST API)
-    const busResolveHandler = (payload: InterventionResolvedPayload): void => {
-      if (payload.agentName === this.agentName) {
-        this.resolveIntervention(payload.input)
-      }
+    const busResolveHandler = (p: InterventionResolvedPayload): void => {
+      if (p.agentName === this.agentName) this.resolveIntervention(p.input)
     }
     eventBus.on('intervention:resolved', busResolveHandler)
 
     const timeoutPromise = new Promise<string>((resolve) => {
       timeoutId = setTimeout(() => {
-        if (this.interventionResolve) {
-          this.resolveIntervention('')
-          this.emit('intervention_timeout', { prompt })
-        }
+        if (this.interventionResolve) this.resolveIntervention('')
         resolve('')
       }, timeout)
     })
@@ -154,28 +97,22 @@ export abstract class BaseAgent extends EventEmitter {
     }
   }
 
-  /** 供外部（如 TUI）调用以解决挂起的 intervention Promise */
   public resolveIntervention(input: string): void {
     this.interventionResolve?.(input)
     this.interventionResolve = undefined
   }
 
-  /** 运行 Agent 主循环 */
   async run(input: string): Promise<string> {
     this.setState('running')
     this.iterations = 0
     this.lastAction = 'start'
-
     try {
       await this.loadSession()
-      this.initMessages(input)
+      this.messages = utils.initMessages(this.messages, this.systemPrompt, input)
       const tools = await this.getAvailableTools()
-
       const result = await this.runMainLoop(tools)
-
       this.messages = await this.compressor.checkAndCompress(this.messages)
       await this.saveSession()
-
       return result ?? '任务完成，但没有生成响应。'
     } catch (error) {
       this.setState('error')
@@ -184,150 +121,68 @@ export abstract class BaseAgent extends EventEmitter {
     }
   }
 
-  /**
-   * 主循环逻辑（不加载/保存 session）
-   * 供 run() 和 runEphemeral() 共用
-   */
   protected async runMainLoop(tools: ChatCompletionTool[]): Promise<string | null> {
     let result: string | null = null
-
     while (this.iterations < this.maxIterations) {
       this.iterations++
       this.lastAction = 'llm_call'
-
       const response = await this.callLLM(tools)
       const message = response.choices[0]?.message
-
-      if (!message) {
-        throw new Error('LLM 返回空响应')
-      }
-
-      if (message.content) {
-        result = message.content
-      }
-
+      if (!message) throw new Error('LLM 返回空响应')
+      if (message.content) result = message.content
       if (message.tool_calls && message.tool_calls.length > 0) {
         this.lastAction = 'tool_call'
-
-        this.messages.push({
-          role: 'assistant',
-          content: message.content,
-          tool_calls: message.tool_calls,
-        })
-
+        this.messages.push({ role: 'assistant', content: message.content, tool_calls: message.tool_calls })
         const toolResults = await this.executeToolCalls(message.tool_calls)
-        for (const toolResult of toolResults) {
-          this.messages.push(toolResult)
-        }
-
+        for (const tr of toolResults) this.messages.push(tr)
         continue
       }
-
       if (result) {
-        this.setState('idle')
-        this.lastAction = 'completed'
-        break
+        this.setState('idle'); this.lastAction = 'completed'; break
       }
     }
-
     if (this.iterations >= this.maxIterations) {
-      this.setState('waiting')
-      this.lastAction = 'max_iterations'
+      this.setState('waiting'); this.lastAction = 'max_iterations'
       result = `已达到最大迭代次数 (${this.maxIterations})，当前任务可能未完成。`
     }
-
     return result
   }
 
-  /**
-   * 无状态单次执行（Ephemeral 模式）
-   * 不加载/保存 session，执行完后恢复原有消息上下文
-   */
-  async runEphemeral(
-    initialPrompt: string,
-    options: { timeoutMs?: number } = {}
-  ): Promise<string> {
-    const savedMessages = this.messages
-    const savedState = this.state
-    const savedEphemeral = this.runningEphemeral
-
-    this.messages = []
-    this.setState('running')
-    this.iterations = 0
-    this.lastAction = 'ephemeral_start'
-    this.runningEphemeral = true
-
+  async runEphemeral(initialPrompt: string, options: { timeoutMs?: number } = {}): Promise<string> {
+    const saved = { messages: this.messages, state: this.state, runningEphemeral: this.runningEphemeral }
+    this.messages = []; this.setState('running'); this.iterations = 0; this.lastAction = 'ephemeral_start'; this.runningEphemeral = true
     let timeoutId: ReturnType<typeof setTimeout> | undefined
-
     try {
-      this.initMessages(initialPrompt)
+      this.messages = utils.initMessages(this.messages, this.systemPrompt, initialPrompt)
       const tools = await this.getAvailableTools()
       const runPromise = this.runMainLoop(tools)
-
-      const result = options.timeoutMs
-        ? await Promise.race([
-            runPromise,
-            new Promise<never>((_, reject) => {
-              timeoutId = setTimeout(
-                () =>
-                  reject(
-                    new Error(
-                      `[${this.agentName}] runEphemeral timed out after ${options.timeoutMs}ms`
-                    )
-                  ),
-                options.timeoutMs
-              )
-            }),
-          ])
-        : await runPromise
-
+      const result = options.timeoutMs ? await Promise.race([runPromise, new Promise<null>((_, r) => {
+        timeoutId = setTimeout(() => r(new Error(`[${this.agentName}] runEphemeral timed out`)), options.timeoutMs)
+      })]) : await runPromise
       return result ?? '任务完成'
     } finally {
       if (timeoutId) clearTimeout(timeoutId)
-      // 销毁临时上下文，不调用 saveSession()
-      this.messages = savedMessages
-      this.state = savedState
-      this.runningEphemeral = savedEphemeral
+      this.messages = saved.messages; this.state = saved.state; this.runningEphemeral = saved.runningEphemeral
     }
   }
 
-  /** 获取当前状态快照 */
   getState(): AgentSnapshot {
     return {
-      agentName: this.agentName,
-      state: this.state,
-      iterations: this.iterations,
+      agentName: this.agentName, state: this.state, iterations: this.iterations,
       tokenCount: this.compressor.calculateTokens(this.messages),
-      lastAction: this.lastAction,
-      currentTask: this.currentTask,
+      lastAction: this.lastAction, currentTask: this.currentTask,
     }
   }
 
   protected async getAvailableTools(): Promise<ChatCompletionTool[]> {
-    if (this.availableTools) {
-      return this.availableTools
-    }
-
+    if (this.availableTools) return this.availableTools
     const tools: ChatCompletionTool[] = [...TOOLS]
-
     if (this.mcpClient) {
       try {
         const mcpTools = await this.mcpClient.listTools()
-        for (const tool of mcpTools) {
-          tools.push({
-            type: 'function',
-            function: {
-              name: tool.name,
-              description: tool.description,
-              parameters: tool.inputSchema,
-            },
-          })
-        }
-      } catch (error) {
-        console.error('获取 MCP 工具失败:', error)
-      }
+        for (const t of mcpTools) tools.push({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } })
+      } catch (e) { console.error('获取 MCP 工具失败:', e) }
     }
-
     this.availableTools = tools
     return tools
   }
@@ -335,191 +190,70 @@ export abstract class BaseAgent extends EventEmitter {
   protected async executeToolCall(toolCall: ChatCompletionMessageToolCall): Promise<ChatCompletionMessageParam> {
     const toolName = toolCall.function.name
     let args: Record<string, unknown> = {}
-
-    try {
-      args = JSON.parse(toolCall.function.arguments)
-    } catch {
-      return {
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: JSON.stringify({ error: '无法解析工具参数' }),
-      }
+    try { args = JSON.parse(toolCall.function.arguments) } catch {
+      return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ error: '无法解析工具参数' }) }
     }
-
     let result: ToolResult
-
-    const localToolNames = [
-      'read_file',
-      'write_file',
-      'append_file',
-      'list_directory',
-      'lock_file',
-      'unlock_file',
-    ]
-
-    if (localToolNames.includes(toolName)) {
-      const context: ToolContext = {
-        workspaceRoot: this.workspaceRoot,
-        agentName: this.agentName,
+    const localTools = ['read_file', 'write_file', 'append_file', 'list_directory', 'lock_file', 'unlock_file']
+    if (localTools.includes(toolName)) {
+      const ctx: ToolContext = {
+        workspaceRoot: this.workspaceRoot, agentName: this.agentName,
         logger: (line, type) => {
-          if (this.channel) {
-            this.channel.send({
-              type: type === 'error' ? 'tool_error' : 'tool_warn',
-              payload: { message: line, toolName },
-              timestamp: new Date(),
-            })
-          }
+          if (this.channel) this.channel.send({ type: type === 'error' ? 'tool_error' : 'tool_warn', payload: { message: line, toolName }, timestamp: new Date() })
         },
       }
-      result = await executeTool(toolName, args, context)
+      result = await executeTool(toolName, args, ctx)
     } else if (this.mcpClient) {
       try {
-        const mcpResult = await this.mcpClient.callTool(toolName, args)
-        result = {
-          success: true,
-          content: typeof mcpResult === 'string' ? mcpResult : JSON.stringify(mcpResult),
-        }
-      } catch (error) {
-        result = {
-          success: false,
-          content: '',
-          error: (error as Error).message,
-        }
-      }
+        const r = await this.mcpClient.callTool(toolName, args)
+        result = { success: true, content: typeof r === 'string' ? r : JSON.stringify(r) }
+      } catch (e) { result = { success: false, content: '', error: (e as Error).message } }
     } else {
-      result = {
-        success: false,
-        content: '',
-        error: `未知工具: ${toolName}`,
-      }
+      result = { success: false, content: '', error: `未知工具: ${toolName}` }
     }
-
     await this.onToolResult(toolName, result)
-
-    return {
-      role: 'tool',
-      tool_call_id: toolCall.id,
-      content: result.success ? result.content : `错误: ${result.error}`,
-    }
+    return { role: 'tool', tool_call_id: toolCall.id, content: result.success ? result.content : `错误: ${result.error}` }
   }
 
   protected async executeToolCalls(toolCalls: ChatCompletionMessageToolCall[]): Promise<ChatCompletionMessageParam[]> {
-    return Promise.all(
-      toolCalls.map((tc) =>
-        Promise.race([
-          this.executeToolCall(tc),
-          new Promise<ChatCompletionMessageParam>((resolve) =>
-            setTimeout(
-              () =>
-                resolve({
-                  role: 'tool',
-                  tool_call_id: tc.id,
-                  content: `错误: 工具调用超时 (${TOOL_CALL_TIMEOUT_MS / 1000}s)`,
-                }),
-              TOOL_CALL_TIMEOUT_MS
-            )
-          ),
-        ])
-      )
-    )
+    return Promise.all(toolCalls.map((tc) => Promise.race([
+      this.executeToolCall(tc),
+      new Promise<ChatCompletionMessageParam>((resolve) => setTimeout(() => resolve({ role: 'tool', tool_call_id: tc.id, content: `错误: 工具调用超时` }), TOOL_CALL_TIMEOUT_MS)),
+    ])))
   }
 
-  /** 工具执行结果钩子 - 子类可覆盖实现副作用（如发送通知） */
-  protected async onToolResult(_toolName: string, _result: ToolResult): Promise<void> {}
-
-  protected getSessionPath(): string {
-    return path.resolve(this.workspaceRoot, 'agents', this.agentName, 'session.json')
-  }
+  protected async onToolResult(_name: string, _res: ToolResult): Promise<void> {}
 
   protected async loadSession(): Promise<void> {
-    const sessionPath = this.getSessionPath()
-
-    if (fs.existsSync(sessionPath)) {
-      try {
-        const content = fs.readFileSync(sessionPath, 'utf-8')
-        const session: Session = JSON.parse(content)
-
-        this.currentTask = session.currentTask
-        this.messages = session.messages || []
-
-        if (session.context) {
-          this.restoreContext(session.context)
-        }
-      } catch (error) {
-        console.error('加载会话失败:', error)
-        this.messages = []
-      }
-    }
+    const s = utils.loadSession(this.getSessionPath())
+    if (s) { this.currentTask = s.currentTask; this.messages = s.messages || []; if (s.context) this.restoreContext(s.context) }
   }
 
-  /** 保存会话 - 不保存 system 消息，每次启动使用最新的 systemPrompt */
   protected async saveSession(): Promise<void> {
-    const sessionPath = this.getSessionPath()
-    const dir = path.dirname(sessionPath)
-
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true })
-    }
-
-    const messagesToSave = this.messages.filter((m) => m.role !== 'system')
-
-    const session: Session = {
-      currentTask: this.currentTask,
-      context: this.extractContext(),
-      messages: messagesToSave,
-      todos: [],
-    }
-
-    fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2), 'utf-8')
+    const session: Session = { currentTask: this.currentTask, context: this.extractContext(), messages: this.messages.filter((m) => m.role !== 'system'), todos: [] }
+    utils.saveSession(this.getSessionPath(), session)
   }
 
-  /**
-   * 加载 Skill 文件（SOP）
-   * workspace/skills/ 中的用户版本优先于 src/agents/skills/ 中的代码版本
-   */
+  protected getSessionPath(): string {
+    return utils.getSessionPath(this.workspaceRoot, this.agentName)
+  }
+
   protected loadSkill(name: string): string {
-    const userPath = path.join(this.workspaceRoot, 'skills', `${name}.md`)
-    const codePath = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '../skills',
-      `${name}.md`
-    )
-    if (fs.existsSync(userPath)) return fs.readFileSync(userPath, 'utf-8')
-    if (fs.existsSync(codePath)) return fs.readFileSync(codePath, 'utf-8')
-    return ''
+    return utils.loadSkill(this.workspaceRoot, name)
   }
-
-  protected extractContext(): Record<string, unknown> {
-    return {}
-  }
-
-  protected restoreContext(_context: Record<string, unknown>): void {}
 
   protected initMessages(input: string): void {
-    if (this.messages.length === 0) {
-      this.messages = [
-        { role: 'system', content: this.systemPrompt },
-        { role: 'user', content: input },
-      ]
-    } else {
-      const hasSystem = this.messages.length > 0 && this.messages[0].role === 'system'
-      if (!hasSystem) {
-        this.messages.unshift({ role: 'system', content: this.systemPrompt })
-      }
-      this.messages.push({ role: 'user', content: input })
-    }
+    this.messages = utils.initMessages(this.messages, this.systemPrompt, input)
   }
 
   protected calculateTokens(): number {
     return this.compressor.calculateTokens(this.messages)
   }
 
+  protected extractContext(): Record<string, unknown> { return {} }
+  protected restoreContext(_c: Record<string, unknown>): void {}
+
   protected async callLLM(tools: ChatCompletionTool[]): Promise<OpenAI.Chat.Completions.ChatCompletion> {
-    return this.openai.chat.completions.create({
-      model: this.model,
-      messages: this.messages,
-      tools,
-      tool_choice: 'auto',
-    })
+    return this.openai.chat.completions.create({ model: this.model, messages: this.messages, tools, tool_choice: 'auto' })
   }
 }
