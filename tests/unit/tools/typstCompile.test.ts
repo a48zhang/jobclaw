@@ -106,27 +106,26 @@ describe('typst_compile 工具（路径安全校验）', () => {
     )
     expect(result.success).toBe(false)
     expect(result.error).toContain('路径不安全')
-  })
-
-  test('不存在的文件返回错误', async () => {
+    })
+    test('不存在的文件返回错误', async () => {
     const result = await executeTool(
       TOOL_NAMES.TYPST_COMPILE,
       { input_path: 'nonexistent_file_xyz.typ' },
       createContext()
     )
     expect(result.success).toBe(false)
-    expect(result.error).toContain('不存在')
-  })
+    expect(result.error).toContain('编译失败')
+    })
 
-  test('input_path 参数类型错误时返回错误', async () => {
+    test('input_path 参数类型错误时返回错误', async () => {
     const result = await executeTool(
       TOOL_NAMES.TYPST_COMPILE,
       { input_path: 123 },
       createContext()
     )
     expect(result.success).toBe(false)
-    expect(result.error).toContain('input_path 参数必须是字符串')
-  })
+    expect(result.error).toContain('input_path 必须是字符串')
+    })
 
   test('typst 不可用时返回友好错误', async () => {
     // 创建一个真实的 .typ 文件用于测试

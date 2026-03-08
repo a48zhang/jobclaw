@@ -63,10 +63,14 @@ export function loadSession(sessionPath: string): Session | null {
  */
 export function saveSession(sessionPath: string, session: Session): void {
   const dir = path.dirname(sessionPath)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true })
+    }
+    fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2), 'utf-8')
+  } catch (error) {
+    console.error(`[Critical Error] Failed to save session to ${sessionPath}:`, (error as Error).message)
   }
-  fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2), 'utf-8')
 }
 
 /**

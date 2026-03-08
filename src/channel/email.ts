@@ -28,6 +28,7 @@ const SUBJECT_MAP: Record<ChannelMessageType, string> = {
   tool_call: '【JobClaw】工具调用通知',
   agent_response: '【JobClaw】Agent 回复',
   user_input: '【JobClaw】用户输入记录',
+  tool_output: '【JobClaw】工具输出流',
 }
 
 /** 对字符串做 HTML escape，防止注入 */

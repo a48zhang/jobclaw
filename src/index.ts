@@ -98,7 +98,7 @@ async function main() {
       channel: tui.tuiChannel,
     })
 
-    // ── Load History ────────────────────────────────────────────────────────
+    // ── Load History & Sync UI ──────────────────────────────────────────────
     await mainAgent.loadSession()
     const history = mainAgent.getMessages()
     for (const msg of history) {
@@ -106,7 +106,7 @@ async function main() {
         tui.tuiChannel.send({
           type: 'user_input' as any,
           payload: { message: `{cyan-fg}> ${msg.content}{/}` },
-          timestamp: new Date(), // 虽然时间戳不准，但能保证显示
+          timestamp: new Date(),
         })
       } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
         tui.tuiChannel.send({
@@ -116,7 +116,7 @@ async function main() {
         })
       }
     }
-    tui.render() // 历史加载完后渲染一次，触发 TUIChannel 内部的滚动逻辑
+    tui.render()
 
     // Start server with config
     startServer(WORKSPACE_ROOT, config.SERVER_PORT)

@@ -51,7 +51,7 @@ export async function upsertJob(args: UpsertJobArgs, context: ToolContext): Prom
         const columns = dataLines[i].split('|').map(c => c.trim());
         if (columns.length < MIN_COLUMNS) {
           const msg = `jobs.md 第 ${i + 1} 行格式异常，已跳过：${dataLines[i]}`;
-          if (logger) logger(msg, 'info');
+          if (logger) logger(msg);
           else console.warn(`[upsertJob] ${msg}`);
           continue;
         }
@@ -61,7 +61,7 @@ export async function upsertJob(args: UpsertJobArgs, context: ToolContext): Prom
         }
       } catch (lineError) {
         const msg = `jobs.md 第 ${i + 1} 行解析失败，已跳过：${(lineError as Error).message}`;
-        if (logger) logger(msg, 'info');
+        if (logger) logger(msg);
         else console.warn(`[upsertJob] ${msg}`);
       }
     }

@@ -107,16 +107,26 @@ export abstract class BaseAgent extends EventEmitter {
     this.iterations = 0
     this.lastAction = 'start'
     try {
-      await this.loadSession()
-      this.messages = utils.initMessages(this.messages, this.systemPrompt, input)
+      // 关键修复 1：不再在此处 loadSession，避免覆盖内存中的实时状态
+      this.initMessages(input)
+      
+      // 关键修复 2：消息初始化后立即保存一次（确保 User 消息存入）
+      if (!this.runningEphemeral) await this.saveSession()
+
       const tools = await this.getAvailableTools()
       const result = await this.runMainLoop(tools)
+      
       this.messages = await this.compressor.checkAndCompress(this.messages)
-      await this.saveSession()
+      
+      // 关键修复 3：任务结束后再次保存（确保 Assistant 和 Tool 消息存入）
+      if (!this.runningEphemeral) await this.saveSession()
+      
       return result ?? '任务完成，但没有生成响应。'
     } catch (error) {
       this.setState('error')
       this.lastAction = `error: ${(error as Error).message}`
+      // 即使出错，也尝试保存一次已有记录
+      if (!this.runningEphemeral) await this.saveSession().catch(() => {})
       throw error
     }
   }
@@ -130,7 +140,6 @@ export abstract class BaseAgent extends EventEmitter {
       try {
         response = await this.callLLM(tools)
       } catch (e: any) {
-        // 捕获 OpenAI SDK 抛出的详细错误 (如 401, 429 等)
         const status = e.status || e.statusCode || 'Unknown'
         const code = e.code || e.type || 'None'
         const apiMsg = e.message || String(e)
@@ -139,10 +148,10 @@ export abstract class BaseAgent extends EventEmitter {
 
       const message = response.choices && response.choices[0]?.message
       if (!message) {
-        // 如果请求成功但没有 choices，打印原始响应的 JSON 片段
         const rawSnippet = JSON.stringify(response).slice(0, 200)
         throw new Error(`LLM 响应格式异常: 缺少 choices。原始响应前200位: ${rawSnippet}`)
       }
+      
       if (message.content) result = message.content
 
       // 无论是否有工具调用，都应记录助手消息
@@ -154,7 +163,6 @@ export abstract class BaseAgent extends EventEmitter {
 
       if (message.tool_calls && message.tool_calls.length > 0) {
         this.lastAction = 'tool_call'
-        // 发送工具调用通知到 Channel
         for (const tc of message.tool_calls) {
           if (this.channel) {
             this.channel.send({
@@ -166,12 +174,14 @@ export abstract class BaseAgent extends EventEmitter {
         }
         const toolResults = await this.executeToolCalls(message.tool_calls)
         for (const tr of toolResults) this.messages.push(tr)
+        
+        // 关键修复 4：工具执行完后立即保存一次进度
+        if (!this.runningEphemeral) await this.saveSession()
         continue
       }
 
       if (result) {
         this.setState('idle'); this.lastAction = 'completed'
-        // 如果是在持久化会话中运行，且有 Channel，则主动推送最终结果
         if (!this.runningEphemeral && this.channel) {
           await this.channel.send({
             type: 'agent_response',
@@ -190,11 +200,11 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   async runEphemeral(initialPrompt: string, options: { timeoutMs?: number } = {}): Promise<string> {
-    const saved = { messages: this.messages, state: this.state, runningEphemeral: this.runningEphemeral }
+    const saved = { messages: [...this.messages], state: this.state, runningEphemeral: this.runningEphemeral }
     this.messages = []; this.setState('running'); this.iterations = 0; this.lastAction = 'ephemeral_start'; this.runningEphemeral = true
     let timeoutId: ReturnType<typeof setTimeout> | undefined
     try {
-      this.messages = utils.initMessages(this.messages, this.systemPrompt, initialPrompt)
+      this.initMessages(initialPrompt)
       const tools = await this.getAvailableTools()
       const runPromise = this.runMainLoop(tools)
       const result = options.timeoutMs ? await Promise.race([runPromise, new Promise<null>((_, r) => {
@@ -243,8 +253,12 @@ export abstract class BaseAgent extends EventEmitter {
     if (localTools.includes(toolName)) {
       const ctx: ToolContext = {
         workspaceRoot: this.workspaceRoot, agentName: this.agentName,
-        logger: (line, type) => {
-          if (this.channel) this.channel.send({ type: type === 'error' ? 'tool_error' : 'tool_warn', payload: { message: line, toolName }, timestamp: new Date() })
+        logger: (line) => {
+          if (this.channel) this.channel.send({ 
+            type: 'tool_output', 
+            payload: { message: line, toolName }, 
+            timestamp: new Date() 
+          })
         },
       }
       result = await executeTool(toolName, args, ctx)
@@ -279,7 +293,12 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   protected async saveSession(): Promise<void> {
-    const session: Session = { currentTask: this.currentTask, context: this.extractContext(), messages: this.messages.filter((m) => m.role !== 'system'), todos: [] }
+    const session: Session = { 
+      currentTask: this.currentTask, 
+      context: this.extractContext(), 
+      messages: this.messages.filter((m) => m.role !== 'system'), 
+      todos: [] 
+    }
     utils.saveSession(this.getSessionPath(), session)
   }
 
@@ -301,11 +320,11 @@ export abstract class BaseAgent extends EventEmitter {
    - “这些数据中是否有我的臆测成分？”
    - “如果是编造的，我是否应该改为向用户求助？”
 3. **中文交流**: 始终使用中文与用户交流。`
+    
+    // 关键修复 5：就地修改数组，不重新创建，保持引用一致
     if (this.messages.length === 0) {
-      this.messages = [
-        { role: 'system', content: systemContent },
-        { role: 'user', content: input },
-      ]
+      this.messages.push({ role: 'system', content: systemContent })
+      this.messages.push({ role: 'user', content: input })
     } else {
       const hasSystem = this.messages.length > 0 && this.messages[0].role === 'system'
       if (!hasSystem) {

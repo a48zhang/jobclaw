@@ -1,5 +1,5 @@
 // typst_compile 工具实现
-import { execFile, execSync } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -8,10 +8,7 @@ import { normalizeAndValidatePath } from './utils'
 
 const execFileAsync = promisify(execFile)
 
-/**
- * Linux / Codespace 常见字体路径常量
- * 用于 typst compile 的 --font-path 参数，确保中文字体可用
- */
+/** 常见字体路径 */
 export const FONT_PATHS: string[] = [
   '/usr/share/fonts',
   '/usr/local/share/fonts',
@@ -19,24 +16,50 @@ export const FONT_PATHS: string[] = [
   '/root/.fonts',
 ]
 
-/** typst 编译超时时间（毫秒） */
 export const TYPST_COMPILE_TIMEOUT_MS = 60_000
 
 /**
- * 检查 typst 是否可用
- * @returns typst 可执行文件路径，若不可用返回 null
+ * 辅助函数：运行命令并实时通过 logger 输出
  */
+async function runWithLog(
+  command: string,
+  args: string[],
+  logger: (line: string) => void,
+  options: Record<string, any> = {}
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { ...options, shell: true })
+
+    child.stdout.on('data', (data) => {
+      data.toString().split('\n').forEach((line: string) => {
+        if (line.trim()) logger(line.trim())
+      })
+    })
+
+    child.stderr.on('data', (data) => {
+      data.toString().split('\n').forEach((line: string) => {
+        if (line.trim()) logger(line.trim())
+      })
+    })
+
+    child.on('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`命令退出码: ${code}`))
+    })
+
+    child.on('error', (err) => reject(err))
+  })
+}
+
 export async function findTypstBinary(): Promise<string | null> {
   try {
     await execFileAsync('typst', ['--version'])
     return 'typst'
   } catch {
-    // 检查常见安装路径是否在 PATH 中（针对刚刚安装的情况）
     const home = process.env.HOME || ''
     const cargoBinDir = path.join(home, '.cargo', 'bin')
     const typstBin = path.join(cargoBinDir, 'typst')
     if (fs.existsSync(typstBin)) {
-      // 临时更新当前进程的 PATH 以便后续调用
       if (!process.env.PATH?.includes(cargoBinDir)) {
         process.env.PATH = `${cargoBinDir}${path.delimiter}${process.env.PATH}`
       }
@@ -46,59 +69,43 @@ export async function findTypstBinary(): Promise<string | null> {
   }
 }
 
-/**
- * 自动安装 cargo (Rust toolchain)
- * 通过 rustup 官方脚本安装
- */
-export async function autoInstallCargo(): Promise<boolean> {
+export async function autoInstallCargo(logger: (line: string) => void): Promise<boolean> {
   const home = process.env.HOME || ''
   const cargoBinDir = path.join(home, '.cargo', 'bin')
   const cargoBin = path.join(cargoBinDir, 'cargo')
 
   if (fs.existsSync(cargoBin)) {
-    // 已经存在但可能不在 PATH 中
     if (!process.env.PATH?.includes(cargoBinDir)) {
       process.env.PATH = `${cargoBinDir}${path.delimiter}${process.env.PATH}`
     }
     return true
   }
 
-  console.log('[JobClaw] 检测到 cargo 未安装，正在通过 rustup 自动安装 Rust 工具链...')
+  logger('检测到 cargo 未安装，开始通过 rustup 安装...')
   try {
-    // 使用 curl 下载并运行 rustup 安装脚本 (非交互模式 -y)
     const installCmd = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-    execSync(installCmd, { stdio: 'inherit' })
-    
-    // 更新当前进程的 PATH
+    await runWithLog('curl', ['--proto', "'=https'", '--tlsv1.2', '-sSf', 'https://sh.rustup.rs', '|', 'sh', '-s', '--', '-y'], logger)
     process.env.PATH = `${cargoBinDir}${path.delimiter}${process.env.PATH}`
-    console.log('[JobClaw] Rust 工具链安装成功！')
+    logger('Rust 工具链安装成功！')
     return true
   } catch (err) {
-    console.error('[JobClaw] 自动安装 cargo 失败。错误详情:', (err as Error).message)
+    logger(`安装 cargo 失败: ${(err as Error).message}`)
     return false
   }
 }
 
-/**
- * 自动安装 typst (由 install_typst 工具调用)
- */
-export async function autoInstallTypst(): Promise<boolean> {
-  console.log('[JobClaw] 正在尝试自动安装 typst...')
+export async function autoInstallTypst(logger: (line: string) => void): Promise<boolean> {
+  logger('正在准备 typst 环境...')
   try {
-    // 1. 确保 cargo 可用
-    const cargoReady = await autoInstallCargo()
-    if (!cargoReady) {
-      throw new Error('无法准备 cargo 环境')
-    }
+    const cargoReady = await autoInstallCargo(logger)
+    if (!cargoReady) throw new Error('Cargo 环境未就绪')
 
-    // 2. 使用 cargo 安装 typst-cli
-    console.log('[JobClaw] 正在通过 cargo 安装 typst-cli...')
-    await execFileAsync('cargo', ['install', 'typst-cli'], { timeout: 300_000 })
-    console.log('[JobClaw] typst 安装成功！')
+    logger('正在通过 cargo 安装 typst-cli (可能需要几分钟)...')
+    await runWithLog('cargo', ['install', 'typst-cli'], logger)
+    logger('typst 安装成功！')
     return true
   } catch (err) {
-    console.error('[JobClaw] 自动安装 typst 失败。请尝试手动安装：https://typst.app/docs/installation/')
-    console.error('错误详情:', (err as Error).message)
+    logger(`自动安装 typst 失败: ${(err as Error).message}`)
     return false
   }
 }
@@ -108,85 +115,54 @@ export async function autoInstallTypst(): Promise<boolean> {
  */
 export function buildTypstArgs(inputPath: string, outputPath: string): string[] {
   const args = ['compile']
-  for (const fontPath of FONT_PATHS) {
-    if (fs.existsSync(fontPath)) {
-      args.push('--font-path', fontPath)
-    }
-  }
+  for (const p of FONT_PATHS) { if (fs.existsSync(p)) args.push('--font-path', p) }
   args.push(inputPath, outputPath)
   return args
 }
 
-/**
- * typst_compile 工具实现
- */
 export async function executeTypstCompile(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<ToolResult> {
   const { input_path } = args as { input_path: unknown }
-
-  if (typeof input_path !== 'string') {
-    return { success: false, content: '', error: 'input_path 参数必须是字符串' }
-  }
+  if (typeof input_path !== 'string') return { success: false, content: '', error: 'input_path 必须是字符串' }
 
   const normalizedInput = normalizeAndValidatePath(input_path, context.workspaceRoot)
-  if (!normalizedInput) {
-    return { success: false, content: '', error: '路径不安全，拒绝访问' }
-  }
-
-  if (!fs.existsSync(normalizedInput)) {
-    return { success: false, content: '', error: `输入文件不存在：${input_path}` }
-  }
+  if (!normalizedInput) return { success: false, content: '', error: '路径不安全' }
 
   const outputDir = path.resolve(context.workspaceRoot, 'output')
-  try {
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true })
-    }
-    fs.accessSync(outputDir, fs.constants.W_OK)
-  } catch (err) {
-    return { success: false, content: '', error: `输出目录不可写或无法创建：${outputDir}` }
-  }
-
+  if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true })
   const outputPath = path.resolve(outputDir, 'resume.pdf')
 
-  // 检查 typst 是否可用（此时不自动安装）
   const typstBin = await findTypstBinary()
   if (!typstBin) {
     return {
       success: false,
       content: '',
-      error:
-        'typst 未安装，无法执行编译。请告知用户环境缺失，如果用户要求安装，请调用 install_typst 工具。',
+      error: 'typst 未安装。如果用户要求安装，请调用 install_typst 工具。',
     }
   }
 
-  const typstArgs = buildTypstArgs(normalizedInput, outputPath)
-
   try {
-    await execFileAsync(typstBin, typstArgs, { timeout: TYPST_COMPILE_TIMEOUT_MS })
-    const relativeOutput = path.relative(context.workspaceRoot, outputPath)
-    return { success: true, content: `简历编译成功，已输出到 ${relativeOutput}` }
-  } catch (err) {
-    const error = err as { stderr?: string; message?: string }
-    const detail = error.stderr ?? error.message ?? String(err)
-    return { success: false, content: '', error: `typst 编译失败：${detail}` }
+    const argsArr = ['compile']
+    for (const p of FONT_PATHS) { if (fs.existsSync(p)) argsArr.push('--font-path', p) }
+    argsArr.push(normalizedInput, outputPath)
+
+    await execFileAsync(typstBin, argsArr, { timeout: TYPST_COMPILE_TIMEOUT_MS })
+    return { success: true, content: `简历已生成：output/resume.pdf` }
+  } catch (err: any) {
+    return { success: false, content: '', error: `编译失败: ${err.stderr || err.message}` }
   }
 }
 
-/**
- * install_typst 工具实现
- * 只有在用户明确授权后，Agent 才会调用此工具。
- */
 export async function executeInstallTypst(
   _args: Record<string, unknown>,
-  _context: ToolContext
+  context: ToolContext
 ): Promise<ToolResult> {
-  const installed = await autoInstallTypst()
+  const installed = await autoInstallTypst(context.logger)
   if (installed) {
-    return { success: true, content: 'typst 环境安装成功。现在可以继续生成简历了。' }
+    return { success: true, content: 'typst 环境已安装成功。' }
   } else {
-    return { success: false, content: '', error: '自动安装 typst 失败，请用户检查终端输出或手动安装。' }
+    return { success: false, content: '', error: '安装失败，请检查 TUI 日志了解详情。' }
   }
 }

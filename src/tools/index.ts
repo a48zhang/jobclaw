@@ -14,7 +14,7 @@ export { getLockFilePath }
 export interface ToolContext {
   workspaceRoot: string
   agentName: string
-  logger: (line: string, type: 'info' | 'error') => void
+  logger: (line: string) => void
 }
 
 export interface ToolResult {

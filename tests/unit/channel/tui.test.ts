@@ -10,7 +10,7 @@ describe('TUIChannel 构造', () => {
 })
 
 describe('TUIChannel.send', () => {
-  test('TC-A-02: new_job 消息触发 info 日志，包含公司和职位', async () => {
+  test('TC-A-02: new_job 消息触发 info 日志，分为 Header 和内容两行', async () => {
     const cb = mock((_line: string, _type: string) => {})
     const channel = new TUIChannel(cb)
 
@@ -22,15 +22,21 @@ describe('TUIChannel.send', () => {
 
     await channel.send(msg)
 
-    expect(cb).toHaveBeenCalledTimes(1)
-    const [line, type] = (cb as ReturnType<typeof mock>).mock.calls[0] as [string, string]
-    expect(type).toBe('info')
-    expect(line).toContain('发现新职位')
-    expect(line).toContain('Acme')
-    expect(line).toContain('SWE')
+    // 现在每条消息至少触发两次 logger (Header + Content)
+    expect(cb).toHaveBeenCalledTimes(2)
+    
+    const [headerLine, headerType] = (cb as ReturnType<typeof mock>).mock.calls[0] as [string, string]
+    expect(headerType).toBe('info')
+    expect(headerLine).toContain('System|Job')
+
+    const [contentLine, contentType] = (cb as ReturnType<typeof mock>).mock.calls[1] as [string, string]
+    expect(contentType).toBe('info')
+    expect(contentLine).toContain('发现新职位')
+    expect(contentLine).toContain('Acme')
+    expect(contentLine).toContain('SWE')
   })
 
-  test('TC-A-03: delivery_failed 消息触发 error 日志', async () => {
+  test('TC-A-03: delivery_failed 消息触发 error 日志内容', async () => {
     const cb = mock((_line: string, _type: string) => {})
     const channel = new TUIChannel(cb)
 
@@ -42,11 +48,12 @@ describe('TUIChannel.send', () => {
 
     await channel.send(msg)
 
-    const [, type] = (cb as ReturnType<typeof mock>).mock.calls[0] as [string, string]
-    expect(type).toBe('error')
+    // 第二行是正文，应该为 error
+    const [, contentType] = (cb as ReturnType<typeof mock>).mock.calls[1] as [string, string]
+    expect(contentType).toBe('error')
   })
 
-  test('TC-A-04: delivery_blocked 消息触发 warn 日志', async () => {
+  test('TC-A-04: delivery_blocked 消息触发 warn 日志内容', async () => {
     const cb = mock((_line: string, _type: string) => {})
     const channel = new TUIChannel(cb)
 
@@ -58,11 +65,11 @@ describe('TUIChannel.send', () => {
 
     await channel.send(msg)
 
-    const [, type] = (cb as ReturnType<typeof mock>).mock.calls[0] as [string, string]
-    expect(type).toBe('warn')
+    const [, contentType] = (cb as ReturnType<typeof mock>).mock.calls[1] as [string, string]
+    expect(contentType).toBe('warn')
   })
 
-  test('TC-A-05: 无公司/职位时仍输出包含内容的日志行', async () => {
+  test('TC-A-05: cron_complete 显示为 System 标签', async () => {
     const cb = mock((_line: string, _type: string) => {})
     const channel = new TUIChannel(cb)
 
@@ -74,8 +81,11 @@ describe('TUIChannel.send', () => {
 
     await channel.send(msg)
 
-    const [line] = (cb as ReturnType<typeof mock>).mock.calls[0] as [string, string]
-    expect(line).toContain('定时任务完成')
-    expect(line).toContain('Done')
+    const [headerLine] = (cb as ReturnType<typeof mock>).mock.calls[0] as [string, string]
+    expect(headerLine).toContain('(System)')
+    
+    const [contentLine] = (cb as ReturnType<typeof mock>).mock.calls[1] as [string, string]
+    expect(contentLine).toContain('任务完成')
+    expect(contentLine).toContain('Done')
   })
 })

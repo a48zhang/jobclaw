@@ -19,24 +19,33 @@ const DEFAULT_CONFIG: Config = {
 
 /**
  * 加载配置信息。
- * 优先级：workspace/config.json > 环境变量 > 默认值
+ * 同时负责确保 workspace 及其所有子目录（agents, data, skills, output）存在。
  */
 export function loadConfig(workspaceRoot: string): Config {
-  const configPath = path.join(workspaceRoot, 'config.json')
-  
-  // 如果配置文件不存在，自动创建一个模板
-  if (!fs.existsSync(configPath)) {
-    try {
-      if (!fs.existsSync(workspaceRoot)) {
-        fs.mkdirSync(workspaceRoot, { recursive: true })
-      }
-      fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf-8')
-      console.log(`[Config] 已在 ${configPath} 创建配置模板，请填写后运行。`)
-    } catch (err) {
-      console.error(`[Config] 无法创建模板文件:`, (err as Error).message)
+  // 1. 确保目录结构全量存在
+  const subdirs = ['agents', 'data', 'skills', 'output']
+  if (!fs.existsSync(workspaceRoot)) {
+    fs.mkdirSync(workspaceRoot, { recursive: true })
+  }
+  for (const dir of subdirs) {
+    const p = path.join(workspaceRoot, dir)
+    if (!fs.existsSync(p)) {
+      fs.mkdirSync(p, { recursive: true })
     }
   }
 
+  // 2. 确保 config.json 模板存在
+  const configPath = path.join(workspaceRoot, 'config.json')
+  if (!fs.existsSync(configPath)) {
+    try {
+      fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf-8')
+      console.log(`[Config] 已创建配置模板: ${configPath}`)
+    } catch (err) {
+      console.error(`[Config] 无法创建配置文件:`, (err as Error).message)
+    }
+  }
+
+  // 3. 读取配置
   let fileConfig: Partial<Config> = {}
   if (fs.existsSync(configPath)) {
     try {

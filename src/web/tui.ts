@@ -85,7 +85,7 @@ export class TUI {
     this.activityLog = blessed.log({
       label: ' Agent Activity ', border: { type: 'line' },
       scrollable: true, alwaysScroll: true,
-      scrollbar: { ch: ' ', inverse: true },
+      scrollbar: { ch: ' ', style: { inverse: true } },
       style: { fg: 'green' }, bufferLength: 1000,
       fullUnicode: true, tags: true, wrap: true, mouse: true,
     })

@@ -10,6 +10,15 @@ export class TUIChannel implements Channel {
     let label = ''
     let content = ''
 
+    // 特殊处理：流式输出不需要 Header 和图标
+    if (message.type === 'tool_output') {
+      const text = String(message.payload['message'] || '')
+      text.split('\n').forEach(line => {
+        if (line.trim()) this.logger(line, 'info')
+      })
+      return
+    }
+
     switch (message.type) {
       case 'new_job':
         label = 'System|Job'
@@ -35,7 +44,7 @@ export class TUIChannel implements Channel {
         break
       case 'cron_complete':
         label = 'System'
-        content = `📅 定时任务完成: ${message.payload['summary'] || message.payload['message']}`
+        content = `📅 任务完成: ${message.payload['summary'] || message.payload['message']}`
         break
       case 'user_input' as any:
         label = 'User'
@@ -46,30 +55,50 @@ export class TUIChannel implements Channel {
         content = `🤖 ${message.payload['message']}`
         break
       case 'tool_call':
-        label = `tool:${message.payload['toolName']}`
-        content = `🛠️ 正在调用工具 (参数: ${JSON.stringify(message.payload['args'])})`
+        const toolName = message.payload['toolName']
+        label = `tool:${toolName}`
+        let argsRaw = String(message.payload['args'] || '')
+        
+        // 针对文件写入工具执行自动折叠
+        if (toolName === 'write_file' || toolName === 'append_file') {
+          try {
+            const argsObj = JSON.parse(argsRaw)
+            const targetKey = toolName === 'write_file' ? 'new_string' : 'content'
+            const targetText = argsObj[targetKey]
+            
+            if (typeof targetText === 'string') {
+              const lines = targetText.split('\n')
+              if (lines.length > 10) {
+                const folded = [
+                  ...lines.slice(0, 3),
+                  `... (已折叠 ${lines.length - 6} 行) ...`,
+                  ...lines.slice(-3)
+                ].join('\n')
+                argsObj[targetKey] = folded
+                argsRaw = JSON.stringify(argsObj, null, 2)
+              }
+            }
+          } catch {
+            // 解析失败保持原样
+          }
+        }
+        content = `🛠️ 正在执行 (参数: ${argsRaw})`
         break
-      case 'tool_error' as any:
-        label = `tool:${message.payload['toolName'] || 'error'}`
-        content = `❌ 🛠️ 错误: ${message.payload['message']}`
+      case 'tool_error':
+        label = `tool:error`
+        content = `❌ 🛠️ 失败: ${message.payload['message']}`
         level = 'error'
-        break
-      case 'tool_warn' as any:
-        label = `tool:${message.payload['toolName'] || 'warn'}`
-        content = `⚠️ 🛠️ 警告: ${message.payload['message']}`
-        level = 'warn'
         break
       default:
         label = message.type
         content = JSON.stringify(message.payload)
     }
 
-    // 第一行：打印时间与标签
+    // 打印事件头
     this.logger(`${headerPrefix} (${label})`, 'info')
 
-    // 后续行：打印正文内容，不加空格缩进
-    const lines = content.split('\n')
-    lines.forEach((line) => {
+    // 打印正文，顶格显示
+    content.split('\n').forEach((line) => {
       this.logger(line, level)
     })
   }
