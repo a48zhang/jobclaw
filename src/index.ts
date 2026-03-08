@@ -6,6 +6,7 @@ import { validateEnv, validateWorkspace } from './env'
 import { createMCPClient } from './mcp'
 import { TUI } from './web/tui'
 import { TUIChannel } from './channel/tui'
+import { startServer } from './web/server'
 
 const WORKSPACE_ROOT = './workspace'
 
@@ -45,6 +46,10 @@ async function main() {
 
     // ── Pre-launch Workspace Validation ──────────────────────────────────────
     validateWorkspace(WORKSPACE_ROOT)
+
+    // ── Start Web Server ─────────────────────────────────────────────────────
+    const webPort = parseInt(process.env.PORT ?? '3000', 10)
+    startServer(WORKSPACE_ROOT, webPort)
 
     // ── Launch TUI ──────────────────────────────────────────────────────────
     let mainAgent: MainAgent

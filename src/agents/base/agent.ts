@@ -14,7 +14,9 @@ import type { AgentState, Session, Task } from '../../types'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants'
 import { ContextCompressor } from './context-compressor'
 import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types'
-import type { Channel } from '../../channel/base'
+import type { Channel, ChannelMessage } from '../../channel/base'
+import { eventBus } from '../../eventBus'
+import type { InterventionResolvedEvent } from '../../eventBus'
 
 /** 工具调用超时时间（2 分钟） */
 const TOOL_CALL_TIMEOUT_MS = 120_000
@@ -30,7 +32,12 @@ export abstract class BaseAgent extends EventEmitter {
   protected keepRecentMessages: number
   protected summaryModel: string
 
-  protected state: AgentState = 'idle'
+  protected _state: AgentState = 'idle'
+  protected get state(): AgentState { return this._state }
+  protected set state(s: AgentState) {
+    this._state = s
+    eventBus.emit('agent:state', { agentName: this.agentName, state: s })
+  }
   protected iterations: number = 0
   protected lastAction: string = ''
   protected messages: ChatCompletionMessageParam[] = []
@@ -48,7 +55,7 @@ export abstract class BaseAgent extends EventEmitter {
     this.model = config.model
     this.workspaceRoot = config.workspaceRoot
     this.mcpClient = config.mcpClient
-    this.channel = config.channel
+    this.channel = config.channel ? this.wrapChannel(config.channel) : undefined
     this.maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS
     this.keepRecentMessages = config.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
     this.summaryModel = config.summaryModel ?? 'gpt-4o-mini'
@@ -60,18 +67,45 @@ export abstract class BaseAgent extends EventEmitter {
     })
   }
 
+  /** 包装 Channel，在转发消息的同时向 eventBus 发送 agent:log */
+  private wrapChannel(channel: Channel): Channel {
+    const agentName = this.agentName
+    return {
+      send: async (message: ChannelMessage): Promise<void> => {
+        await channel.send(message)
+        const type: 'info' | 'warn' | 'error' =
+          message.type === 'tool_error' || message.type === 'delivery_failed'
+            ? 'error'
+            : message.type === 'tool_warn' || message.type === 'delivery_blocked'
+            ? 'warn'
+            : 'info'
+        const msg =
+          typeof message.payload['message'] === 'string'
+            ? message.payload['message']
+            : JSON.stringify(message.payload)
+        eventBus.emit('agent:log', {
+          agentName,
+          type,
+          message: `[${message.type}] ${msg}`,
+          timestamp: message.timestamp.toISOString(),
+        })
+      },
+    }
+  }
+
   /** 系统提示词 - 子类必须实现 */
   protected abstract get systemPrompt(): string
 
   /**
    * 请求人工干预（HITL）
-   * 发出 `intervention_required` 事件，挂起 Agent 循环，等待外部调用 resolve 后恢复
+   * 发出 `intervention_required` 事件，挂起 Agent 循环，等待外部调用 resolve 后恢复。
+   * 同时向 eventBus 发送 intervention:required，支持 Web 前端响应。
    */
   async requestIntervention(prompt: string, timeoutMs?: number): Promise<string> {
     const defaultTimeout = this.runningEphemeral ? 30_000 : 300_000
     const timeout = timeoutMs ?? defaultTimeout
 
-    let timeoutId: ReturnType<typeof setTimeout>
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
 
     const interventionPromise = new Promise<string>((resolve) => {
       this.interventionResolve = resolve
@@ -83,6 +117,18 @@ export abstract class BaseAgent extends EventEmitter {
         },
       })
     })
+
+    // Also publish on eventBus so the web frontend can pick it up
+    eventBus.emit('intervention:required', { agentName: this.agentName, prompt })
+
+    // Listen for resolution coming from the web frontend via eventBus
+    const webResolveHandler = (payload: InterventionResolvedEvent) => {
+      if (payload.agentName === this.agentName && this.interventionResolve) {
+        this.resolveIntervention(payload.input)
+        this.emit('intervention_handled', { prompt })
+      }
+    }
+    eventBus.once('intervention:resolved', webResolveHandler)
 
     const timeoutPromise = new Promise<string>((resolve) => {
       timeoutId = setTimeout(() => {
@@ -97,7 +143,8 @@ export abstract class BaseAgent extends EventEmitter {
     try {
       return await Promise.race([interventionPromise, timeoutPromise])
     } finally {
-      if (timeoutId) clearTimeout(timeoutId)
+      clearTimeout(timeoutId)
+      eventBus.off('intervention:resolved', webResolveHandler)
     }
   }
 
