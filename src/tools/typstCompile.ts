@@ -1,5 +1,5 @@
 // typst_compile 工具实现
-import { execFile } from 'node:child_process'
+import { execFile, execSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -41,17 +41,54 @@ export async function findTypstBinary(): Promise<string | null> {
 }
 
 /**
+ * 自动安装 cargo (Rust toolchain)
+ * 通过 rustup 官方脚本安装
+ */
+export async function autoInstallCargo(): Promise<boolean> {
+  const home = process.env.HOME || ''
+  const cargoBinDir = path.join(home, '.cargo', 'bin')
+  const cargoBin = path.join(cargoBinDir, 'cargo')
+
+  if (fs.existsSync(cargoBin)) {
+    // 已经存在但可能不在 PATH 中
+    if (!process.env.PATH?.includes(cargoBinDir)) {
+      process.env.PATH = `${cargoBinDir}${path.delimiter}${process.env.PATH}`
+    }
+    return true
+  }
+
+  console.log('[JobClaw] 检测到 cargo 未安装，正在通过 rustup 自动安装 Rust 工具链...')
+  try {
+    // 使用 curl 下载并运行 rustup 安装脚本 (非交互模式 -y)
+    // 这是一个常见的 Linux/Codespace 环境操作
+    const installCmd = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+    execSync(installCmd, { stdio: 'inherit' })
+    
+    // 更新当前进程的 PATH
+    process.env.PATH = `${cargoBinDir}${path.delimiter}${process.env.PATH}`
+    console.log('[JobClaw] Rust 工具链安装成功！')
+    return true
+  } catch (err) {
+    console.error('[JobClaw] 自动安装 cargo 失败。错误详情:', (err as Error).message)
+    return false
+  }
+}
+
+/**
  * 自动安装 typst
  * 优先尝试使用 cargo 安装，因为这是 Codespace 和 Linux 开发环境最通用的方式
  */
 export async function autoInstallTypst(): Promise<boolean> {
   console.log('[JobClaw] 正在尝试自动安装 typst...')
   try {
-    // 检查是否安装了 cargo
-    await execFileAsync('cargo', ['--version'])
-    console.log('[JobClaw] 检测到 cargo，正在通过 cargo 安装 typst-cli...')
-    
-    // 执行安装命令
+    // 1. 确保 cargo 可用
+    const cargoReady = await autoInstallCargo()
+    if (!cargoReady) {
+      throw new Error('无法准备 cargo 环境')
+    }
+
+    // 2. 使用 cargo 安装 typst-cli
+    console.log('[JobClaw] 正在通过 cargo 安装 typst-cli...')
     await execFileAsync('cargo', ['install', 'typst-cli'], { timeout: 300_000 })
     console.log('[JobClaw] typst 安装成功！')
     return true
