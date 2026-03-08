@@ -5,7 +5,7 @@ import { executeListDirectory } from './listDirectory'
 import { executeLockFile, executeUnlockFile } from './lockFile'
 import { executeUpsertJob } from './upsertJob'
 import { executeTypstCompile, executeInstallTypst } from './typstCompile'
-import { executeShellCommand, detectShell } from './shell'
+import { executeShellCommand, detectShell, detectOS } from './shell'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
 
 export interface ToolContext {
@@ -33,7 +33,8 @@ export const TOOL_NAMES = {
   RUN_SHELL_COMMAND: 'run_shell_command',
 } as const
 
-// 动态检测当前系统的 Shell 环境
+// 动态检测系统与 Shell 环境
+const CURRENT_OS = detectOS()
 const CURRENT_SHELL = detectShell()
 
 export const TOOLS: ChatCompletionTool[] = [
@@ -173,7 +174,7 @@ export const TOOLS: ChatCompletionTool[] = [
     type: 'function',
     function: {
       name: TOOL_NAMES.RUN_SHELL_COMMAND,
-      description: `在系统终端中运行 shell 命令。当前默认环境为: ${CURRENT_SHELL}。`,
+      description: `在系统终端中运行 shell 命令。当前环境: 操作系统=${CURRENT_OS}, Shell=${CURRENT_SHELL}。`,
       parameters: {
         type: 'object',
         properties: {

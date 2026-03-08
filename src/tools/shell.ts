@@ -6,17 +6,24 @@ import type { ToolContext, ToolResult } from './index'
 const execAsync = promisify(exec)
 
 /**
+ * 检测当前操作系统
+ */
+export function detectOS(): 'windows' | 'linux' | 'macos' | 'unknown' {
+  const platform = os.platform()
+  if (platform === 'win32') return 'windows'
+  if (platform === 'linux') return 'linux'
+  if (platform === 'darwin') return 'macos'
+  return 'unknown'
+}
+
+/**
  * 检测当前系统环境下的默认 Shell
  */
 export function detectShell(): 'bash' | 'pwsh' | 'cmd' | 'unknown' {
   const platform = os.platform()
   if (platform === 'win32') {
-    // 检查是否在 Windows 下使用 pwsh
-    try {
-      return 'pwsh'
-    } catch {
-      return 'cmd'
-    }
+    // 简单逻辑：Windows 下通常优先检查是否能用 pwsh
+    return 'pwsh' 
   }
   return 'bash'
 }

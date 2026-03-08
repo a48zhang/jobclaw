@@ -1,5 +1,5 @@
 import { describe, test, expect, mock } from 'bun:test'
-import { executeShellCommand, detectShell } from '../../../src/tools/shell'
+import { executeShellCommand, detectShell, detectOS } from '../../../src/tools/shell'
 import type { ToolContext } from '../../../src/tools/index'
 
 describe('Shell Tool', () => {
@@ -8,6 +8,11 @@ describe('Shell Tool', () => {
     agentName: 'test-agent',
     logger: mock(() => {}),
   }
+
+  test('detectOS should return a valid OS name', () => {
+    const osName = detectOS()
+    expect(['windows', 'linux', 'macos', 'unknown']).toContain(osName)
+  })
 
   test('detectShell should return a valid shell name', () => {
     const shell = detectShell()
