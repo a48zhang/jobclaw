@@ -355,6 +355,7 @@ export abstract class BaseAgent extends EventEmitter {
       'list_directory',
       'lock_file',
       'unlock_file',
+      'typst_compile',
     ]
 
     if (localToolNames.includes(toolName)) {
