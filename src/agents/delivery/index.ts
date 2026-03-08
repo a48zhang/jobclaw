@@ -18,7 +18,15 @@ export class DeliveryAgent extends BaseAgent {
   }
 
   protected get systemPrompt(): string {
-    return this.loadSkill('jobclaw-skills')
+    const skillsIndex = this.loadSkill('index')
+    return `你是 JobClaw 的投递 Agent (DeliveryAgent)。
+你的核心职责是自动投递职位。你可以使用 mcpClient (Playwright) 访问页面并提交表单。
+
+## 可用技能索引
+${skillsIndex}
+
+请在需要投递时，使用 read_file 工具读取对应的投递 SOP (src/agents/skills/delivery.md)。
+`
   }
 
   protected async onToolResult(toolName: string, result: ToolResult): Promise<void> {

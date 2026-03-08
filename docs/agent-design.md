@@ -73,7 +73,7 @@
 ### 4.1 MainAgent
 
 - **职责**: 职位搜索、简历制作、任务调度。
-- **SOP 驱动**: 动态加载 `jobclaw-skills.md` 中的 `Bootstrap`、`搜索职位`、`简历制作` 等章节。
+- **SOP 驱动**: 动态加载 `src/agents/skills/index.md` 了解所需技能，并在需要时按需读取对应的具体 SOP（如 `Bootstrap`、`搜索职位`、`简历制作` 等）文件。
 - **HITL**: 在简历润色阶段调用 `requestIntervention` 等待用户输入。
 
 ### 4.2 DeliveryAgent

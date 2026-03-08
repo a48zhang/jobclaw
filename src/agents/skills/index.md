@@ -1,0 +1,19 @@
+# JobClaw 技能索引 (Skills Index)
+
+作为 JobClaw Agent，当你遇到特定的任务场景时，你需要参考以下独立的技能 SOP 文件以确保操作的准确性和一致性。**在执行复杂任务前，请先使用 `read_file` 工具读取对应的技能 SOP 文件了解详细步骤。**
+
+## 可用技能列表
+
+| 技能名称 | 文件路径 | 适用场景 |
+| :--- | :--- | :--- |
+| **系统初始化** | `src/agents/skills/bootstrap.md` | 当用户首次使用或请求“初始化工作区”时使用，用于收集用户信息和配置环境。 |
+| **搜索职位** | `src/agents/skills/search-jobs.md` | 当用户发出 `run search` 或要求“搜寻新岗位”时使用，用于从目标网站获取并核实职位信息。 |
+| **投递职位** | `src/agents/skills/delivery.md` | 当用户发出 `start delivery` 或要求“自动投递已发现的职位”时使用，用于执行自动化表单提交。 |
+| **日报汇总** | `src/agents/skills/daily-digest.md` | 当用户要求“分析 jobs.md”或“发送日报”时使用，用于统计新增数据并通过 Channel 发送邮件。 |
+| **简历制作** | `src/agents/skills/resume-mastery.md` | 当用户要求“生成简历”、“更新简历”或修改项目经历描述时使用，负责整合用户信息并编译 Typst PDF。 |
+| **简历审查面试官** | `src/agents/skills/interviewer.md` | 当用户要求“评估简历”、“作为面试官看看这份简历有什么问题”时使用，充当严厉的面试官，结合市场真实 JD 对简历进行压力测试和毒舌点评。 |
+| **环境故障自愈** | `src/agents/skills/env-recovery.md` | 当执行 Browser 或 MCP 操作报错（如找不到浏览器或依赖）时主动触发，用于半自动修复环境。 |
+
+---
+**Agent 指导原则**：
+不要在这个文件（index）中寻找具体的执行步骤！这个文件只是一张地图。当你明确了当前任务属于上述哪个类别后，请**必须**读取对应的 `.md` 文件来获取完整的 SOP 流程。

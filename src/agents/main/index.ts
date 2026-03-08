@@ -80,9 +80,9 @@ export class MainAgent extends BaseAgent {
     }
   }
 
-  /** 系统提示词，内嵌 jobclaw-skills SOP */
+  /** 系统提示词，内嵌 skills index SOP */
   protected get systemPrompt(): string {
-    const skills = this.loadSkill('jobclaw-skills')
+    const skills = this.loadSkill('index')
     const mcpWarning = this.mcpClient ? '' : MCP_NOT_CONNECTED_WARNING
     return `你是 JobClaw 的主 Agent（MainAgent），负责用户交互、职位搜索与任务调度。
 ${mcpWarning}
@@ -92,7 +92,7 @@ ${mcpWarning}
 - 发现新职位后，**必须**使用 \`upsert_job\` 工具写入 \`data/jobs.md\`。
 - 通过 \`run_delivery_agent\` 工具委托 DeliveryAgent 执行简历投递。
 
-## 核心 SOP (执行优先级最高)
+## 可用技能索引 (Skill Index)
 ${skills}
 ${RESUME_SYSTEM_PROMPT}
 ## 可用工具概览
