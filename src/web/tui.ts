@@ -103,12 +103,15 @@ export class TUI {
     this.screen.append(this.activityLog)
     this.screen.append(this.inputBox)
 
-    this.channel = new TUIChannel((line, type) => {
-      const color = type === 'error' ? '{red-fg}' : type === 'warn' ? '{yellow-fg}' : '{green-fg}'
-      this.activityLog.log(`${color}${line}{/}`)
-      this.activityLog.setScrollPerc(100)
-      this.screen.render()
-    })
+    this.channel = new TUIChannel(
+      (line, type) => {
+        const color = type === 'error' ? '{red-fg}' : type === 'warn' ? '{yellow-fg}' : '{green-fg}'
+        this.activityLog.log(`${color}${line}{/}`)
+        this.activityLog.setScrollPerc(100)
+        this.screen.render()
+      },
+      () => this.activityLog
+    )
 
     // 2. 事件监听
     this.screen.on('resize', () => {

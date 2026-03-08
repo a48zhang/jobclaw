@@ -1,23 +1,29 @@
 /** 通知消息类型 */
 export type ChannelMessageType =
-  | 'new_job'           // MainAgent 搜索发现新职位
-  | 'delivery_start'    // DeliveryAgent 开始处理某职位
-  | 'delivery_success'  // DeliveryAgent 成功投递
-  | 'delivery_failed'   // DeliveryAgent 投递失败
-  | 'delivery_blocked'  // DeliveryAgent 遇到需要登录/人工介入
-  | 'cron_complete'     // CronJob 执行完毕汇总
-  | 'tool_warn'         // 工具执行过程中的业务警告
-  | 'tool_error'        // 工具执行过程中的致命错误
-  | 'tool_call'         // 工具调用开始标记
-  | 'tool_output'       // 工具执行过程中的流式输出 (无 Header)
-  | 'agent_response'    // Agent 的直接回复
-  | 'user_input'        // 用户输入
+  | 'new_job'
+  | 'delivery_start'
+  | 'delivery_success'
+  | 'delivery_failed'
+  | 'delivery_blocked'
+  | 'cron_complete'
+  | 'tool_warn'
+  | 'tool_error'
+  | 'tool_call'
+  | 'tool_output'
+  | 'agent_response'
+  | 'user_input'
 
 /** 通知消息结构 */
 export interface ChannelMessage {
   type: ChannelMessageType
   payload: Record<string, unknown>
   timestamp: Date
+  /** 流式传输标识 (Phase 6) */
+  streaming?: {
+    isFirst: boolean  // 是否是第一块（用于打印 Header）
+    isFinal: boolean  // 是否是最后一块（用于收尾）
+    chunk: string     // 当前片段
+  }
 }
 
 export interface Channel {

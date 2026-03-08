@@ -1,7 +1,11 @@
 import type { Channel, ChannelMessage } from './base'
 
 export class TUIChannel implements Channel {
-  constructor(private logger: (line: string, type: 'info' | 'warn' | 'error') => void) {}
+  private streamingContent: string = ''
+  private isStreaming: boolean = false
+  private streamStartLines: number = 0
+
+  constructor(private logger: (line: string, type: 'info' | 'warn' | 'error') => void, private getRawLog?: () => any) {}
 
   async send(message: ChannelMessage): Promise<void> {
     const time = message.timestamp.toLocaleTimeString()
@@ -10,7 +14,54 @@ export class TUIChannel implements Channel {
     let label = ''
     let content = ''
 
-    // 特殊处理：流式输出不需要 Header 和图标
+    // ─── 流式处理逻辑 (Phase 6) ──────────────────────────────────────────────
+    if (message.streaming) {
+      const logObj = this.getRawLog ? this.getRawLog() : null
+
+      if (message.streaming.isFirst) {
+        // 1. 打印页眉
+        this.logger(`${headerPrefix} (Agent)`, 'info')
+        this.streamingContent = '🤖 '
+        this.isStreaming = true
+        
+        // 2. 记录当前缓冲区长度，作为流内容的起始位置
+        if (logObj && Array.isArray(logObj.items)) {
+          this.streamStartLines = logObj.items.length
+          logObj.log('') // 为内容预留第一行
+        }
+      }
+
+      this.streamingContent += message.streaming.chunk
+      
+      if (logObj && this.isStreaming) {
+        const items = logObj.items
+        if (Array.isArray(items)) {
+          // 关键修复：计算新内容会占据多少行（粗略按换行符拆分）
+          const newLines = this.streamingContent.split('\n').map(l => `{green-fg}${l}{/}`)
+          
+          // 替换从起始位置开始的所有行
+          // 这样即便内容从单行变成了多行，旧的多行也会被正确覆盖，而不是残留在屏幕上
+          items.splice(this.streamStartLines, items.length - this.streamStartLines, ...newLines)
+          
+          // 触发 Blessed 的内部内容更新
+          if (typeof logObj.setContent === 'function') {
+            logObj.setContent(items.join('\n'))
+          }
+          logObj.setScrollPerc(100)
+          logObj.screen.render()
+        }
+      } else if (!this.getRawLog && message.streaming.isFinal) {
+        if (this.streamingContent) this.logger(`🤖 ${this.streamingContent}`, 'info')
+      }
+
+      if (message.streaming.isFinal) {
+        this.streamingContent = ''
+        this.isStreaming = false
+      }
+      return
+    }
+
+    // ─── 常规消息逻辑 ─────────────────────────────────────────────────────────
     if (message.type === 'tool_output') {
       const text = String(message.payload['message'] || '')
       text.split('\n').forEach(line => {
@@ -58,29 +109,20 @@ export class TUIChannel implements Channel {
         const toolName = message.payload['toolName']
         label = `tool:${toolName}`
         let argsRaw = String(message.payload['args'] || '')
-        
-        // 针对文件写入工具执行自动折叠
         if (toolName === 'write_file' || toolName === 'append_file') {
           try {
             const argsObj = JSON.parse(argsRaw)
             const targetKey = toolName === 'write_file' ? 'new_string' : 'content'
             const targetText = argsObj[targetKey]
-            
             if (typeof targetText === 'string') {
               const lines = targetText.split('\n')
               if (lines.length > 10) {
-                const folded = [
-                  ...lines.slice(0, 3),
-                  `... (已折叠 ${lines.length - 6} 行) ...`,
-                  ...lines.slice(-3)
-                ].join('\n')
+                const folded = [...lines.slice(0, 3), `... (已折叠 ${lines.length - 6} 行) ...`, ...lines.slice(-3)].join('\n')
                 argsObj[targetKey] = folded
                 argsRaw = JSON.stringify(argsObj, null, 2)
               }
             }
-          } catch {
-            // 解析失败保持原样
-          }
+          } catch {}
         }
         content = `🛠️ 正在执行 (参数: ${argsRaw})`
         break
@@ -94,10 +136,7 @@ export class TUIChannel implements Channel {
         content = JSON.stringify(message.payload)
     }
 
-    // 打印事件头
     this.logger(`${headerPrefix} (${label})`, 'info')
-
-    // 打印正文，顶格显示
     content.split('\n').forEach((line) => {
       this.logger(line, level)
     })

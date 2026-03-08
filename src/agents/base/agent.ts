@@ -4,6 +4,7 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
   ChatCompletionMessageToolCall,
+  ChatCompletionChunk,
 } from 'openai/resources/chat/completions'
 import { EventEmitter } from 'node:events'
 import { executeTool, TOOLS, type ToolContext, type ToolResult } from '../../tools/index'
@@ -16,7 +17,6 @@ import { eventBus } from '../../eventBus'
 import type { InterventionResolvedPayload } from '../../eventBus'
 import * as utils from './agent-utils'
 
-/** 工具调用超时时间（2 分钟） */
 const TOOL_CALL_TIMEOUT_MS = 120_000
 
 export abstract class BaseAgent extends EventEmitter {
@@ -70,28 +70,19 @@ export abstract class BaseAgent extends EventEmitter {
   async requestIntervention(prompt: string, timeoutMs?: number): Promise<string> {
     const timeout = timeoutMs ?? (this.runningEphemeral ? 30_000 : 300_000)
     eventBus.emit('intervention:required', { agentName: this.agentName, prompt })
-
     let timeoutId: ReturnType<typeof setTimeout> | undefined
     const interventionPromise = new Promise<string>((resolve) => {
       this.interventionResolve = resolve
       this.emit('intervention_required', { prompt, resolve: (i: string) => this.resolveIntervention(i) })
     })
-
     const busResolveHandler = (p: InterventionResolvedPayload): void => {
       if (p.agentName === this.agentName) this.resolveIntervention(p.input)
     }
     eventBus.on('intervention:resolved', busResolveHandler)
-
     const timeoutPromise = new Promise<string>((resolve) => {
-      timeoutId = setTimeout(() => {
-        if (this.interventionResolve) this.resolveIntervention('')
-        resolve('')
-      }, timeout)
+      timeoutId = setTimeout(() => { if (this.interventionResolve) this.resolveIntervention(''); resolve('') }, timeout)
     })
-
-    try {
-      return await Promise.race([interventionPromise, timeoutPromise])
-    } finally {
+    try { return await Promise.race([interventionPromise, timeoutPromise]) } finally {
       if (timeoutId) clearTimeout(timeoutId)
       eventBus.off('intervention:resolved', busResolveHandler)
     }
@@ -103,29 +94,17 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   async run(input: string): Promise<string> {
-    this.setState('running')
-    this.iterations = 0
-    this.lastAction = 'start'
+    this.setState('running'); this.iterations = 0; this.lastAction = 'start'
     try {
-      // 关键修复 1：不再在此处 loadSession，避免覆盖内存中的实时状态
       this.initMessages(input)
-      
-      // 关键修复 2：消息初始化后立即保存一次（确保 User 消息存入）
       if (!this.runningEphemeral) await this.saveSession()
-
       const tools = await this.getAvailableTools()
       const result = await this.runMainLoop(tools)
-      
       this.messages = await this.compressor.checkAndCompress(this.messages)
-      
-      // 关键修复 3：任务结束后再次保存（确保 Assistant 和 Tool 消息存入）
       if (!this.runningEphemeral) await this.saveSession()
-      
       return result ?? '任务完成，但没有生成响应。'
     } catch (error) {
-      this.setState('error')
-      this.lastAction = `error: ${(error as Error).message}`
-      // 即使出错，也尝试保存一次已有记录
+      this.setState('error'); this.lastAction = `error: ${(error as Error).message}`
       if (!this.runningEphemeral) await this.saveSession().catch(() => {})
       throw error
     }
@@ -134,67 +113,71 @@ export abstract class BaseAgent extends EventEmitter {
   protected async runMainLoop(tools: ChatCompletionTool[]): Promise<string | null> {
     let result: string | null = null
     while (this.iterations < this.maxIterations) {
-      this.iterations++
-      this.lastAction = 'llm_call'
-      let response
+      this.iterations++; this.lastAction = 'llm_call'
+      let fullContent = ''; let toolCalls: any[] = []
       try {
-        response = await this.callLLM(tools)
-      } catch (e: any) {
-        const status = e.status || e.statusCode || 'Unknown'
-        const code = e.code || e.type || 'None'
-        const apiMsg = e.message || String(e)
-        throw new Error(`LLM API 请求失败 [Status: ${status}, Code: ${code}]: ${apiMsg}`)
-      }
+        const stream = await this.openai.chat.completions.create({
+          model: this.model, messages: this.messages, tools, tool_choice: 'auto', stream: true
+        })
 
-      const message = response.choices && response.choices[0]?.message
-      if (!message) {
-        const rawSnippet = JSON.stringify(response).slice(0, 200)
-        throw new Error(`LLM 响应格式异常: 缺少 choices。原始响应前200位: ${rawSnippet}`)
-      }
-      
-      if (message.content) result = message.content
+        let isFirstChunk = true
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta
+          if (!delta) continue
 
-      // 无论是否有工具调用，都应记录助手消息
-      this.messages.push({
-        role: 'assistant',
-        content: message.content ?? null,
-        tool_calls: message.tool_calls,
-      })
+          // 1. 处理内容流
+          if (delta.content) {
+            fullContent += delta.content
+            if (this.channel) {
+              this.channel.send({
+                type: 'agent_response', timestamp: new Date(), payload: {},
+                streaming: { isFirst: isFirstChunk, isFinal: false, chunk: delta.content }
+              })
+              isFirstChunk = false
+            }
+          }
 
-      if (message.tool_calls && message.tool_calls.length > 0) {
-        this.lastAction = 'tool_call'
-        for (const tc of message.tool_calls) {
-          if (this.channel) {
-            this.channel.send({
-              type: 'tool_call',
-              payload: { toolName: tc.function.name, args: tc.function.arguments },
-              timestamp: new Date(),
-            })
+          // 2. 处理工具调用流
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (!toolCalls[tc.index]) toolCalls[tc.index] = { id: tc.id, function: { name: '', arguments: '' }, type: 'function' }
+              if (tc.id) toolCalls[tc.index].id = tc.id
+              if (tc.function?.name) toolCalls[tc.index].function.name += tc.function.name
+              if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments
+            }
           }
         }
-        const toolResults = await this.executeToolCalls(message.tool_calls)
+
+        // 流结束：如果是内容流，发送 Final 标识
+        if (fullContent && this.channel) {
+          this.channel.send({
+            type: 'agent_response', timestamp: new Date(), payload: {},
+            streaming: { isFirst: false, isFinal: true, chunk: '' }
+          })
+        }
+      } catch (e: any) {
+        throw new Error(`LLM API 请求失败 [Status: ${e.status}, Code: ${e.code}]: ${e.message}`)
+      }
+
+      const finalToolCalls = toolCalls.filter(Boolean)
+      this.messages.push({ role: 'assistant', content: fullContent || null, tool_calls: finalToolCalls.length > 0 ? finalToolCalls : undefined })
+
+      if (finalToolCalls.length > 0) {
+        this.lastAction = 'tool_call'
+        for (const tc of finalToolCalls) {
+          if (this.channel) this.channel.send({ type: 'tool_call', payload: { toolName: tc.function.name, args: tc.function.arguments }, timestamp: new Date() })
+        }
+        const toolResults = await this.executeToolCalls(finalToolCalls)
         for (const tr of toolResults) this.messages.push(tr)
-        
-        // 关键修复 4：工具执行完后立即保存一次进度
         if (!this.runningEphemeral) await this.saveSession()
         continue
       }
 
-      if (result) {
-        this.setState('idle'); this.lastAction = 'completed'
-        if (!this.runningEphemeral && this.channel) {
-          await this.channel.send({
-            type: 'agent_response',
-            payload: { message: result },
-            timestamp: new Date(),
-          })
-        }
+      if (fullContent) {
+        result = fullContent; this.setState('idle'); this.lastAction = 'completed'
+        if (!this.runningEphemeral) await this.saveSession()
         break
       }
-    }
-    if (this.iterations >= this.maxIterations) {
-      this.setState('waiting'); this.lastAction = 'max_iterations'
-      result = `已达到最大迭代次数 (${this.maxIterations})，当前任务可能未完成。`
     }
     return result
   }
@@ -212,8 +195,7 @@ export abstract class BaseAgent extends EventEmitter {
       })]) : await runPromise
       return result ?? '任务完成'
     } finally {
-      if (timeoutId) clearTimeout(timeoutId)
-      this.messages = saved.messages; this.state = saved.state; this.runningEphemeral = saved.runningEphemeral
+      if (timeoutId) clearTimeout(timeoutId); this.messages = saved.messages; this.state = saved.state; this.runningEphemeral = saved.runningEphemeral
     }
   }
 
@@ -245,21 +227,11 @@ export abstract class BaseAgent extends EventEmitter {
       return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ error: '无法解析工具参数' }) }
     }
     let result: ToolResult
-    const localTools = [
-      'read_file', 'write_file', 'append_file', 'list_directory', 
-      'lock_file', 'unlock_file', 'upsert_job', 'typst_compile', 
-      'install_typst', 'run_shell_command'
-    ]
+    const localTools = ['read_file', 'write_file', 'append_file', 'list_directory', 'lock_file', 'unlock_file', 'upsert_job', 'typst_compile', 'install_typst', 'run_shell_command']
     if (localTools.includes(toolName)) {
       const ctx: ToolContext = {
         workspaceRoot: this.workspaceRoot, agentName: this.agentName,
-        logger: (line) => {
-          if (this.channel) this.channel.send({ 
-            type: 'tool_output', 
-            payload: { message: line, toolName }, 
-            timestamp: new Date() 
-          })
-        },
+        logger: (line) => { if (this.channel) this.channel.send({ type: 'tool_output', payload: { message: line, toolName }, timestamp: new Date() }) },
       }
       result = await executeTool(toolName, args, ctx)
     } else if (this.mcpClient) {
@@ -267,9 +239,7 @@ export abstract class BaseAgent extends EventEmitter {
         const r = await this.mcpClient.callTool(toolName, args)
         result = { success: true, content: typeof r === 'string' ? r : JSON.stringify(r) }
       } catch (e) { result = { success: false, content: '', error: (e as Error).message } }
-    } else {
-      result = { success: false, content: '', error: `未知工具: ${toolName}` }
-    }
+    } else { result = { success: false, content: '', error: `未知工具: ${toolName}` } }
     await this.onToolResult(toolName, result)
     return { role: 'tool', tool_call_id: toolCall.id, content: result.success ? result.content : `错误: ${result.error}` }
   }
@@ -288,62 +258,34 @@ export abstract class BaseAgent extends EventEmitter {
     if (s) { this.currentTask = s.currentTask; this.messages = s.messages || []; if (s.context) this.restoreContext(s.context) }
   }
 
-  public getMessages(): ChatCompletionMessageParam[] {
-    return this.messages
-  }
+  public getMessages(): ChatCompletionMessageParam[] { return this.messages }
 
   protected async saveSession(): Promise<void> {
-    const session: Session = { 
-      currentTask: this.currentTask, 
-      context: this.extractContext(), 
-      messages: this.messages.filter((m) => m.role !== 'system'), 
-      todos: [] 
-    }
+    const session: Session = { currentTask: this.currentTask, context: this.extractContext(), messages: this.messages.filter((m) => m.role !== 'system'), todos: [] }
     utils.saveSession(this.getSessionPath(), session)
   }
 
-  protected getSessionPath(): string {
-    return utils.getSessionPath(this.workspaceRoot, this.agentName)
-  }
-
-  protected loadSkill(name: string): string {
-    return utils.loadSkill(this.workspaceRoot, name)
-  }
+  protected getSessionPath(): string { return utils.getSessionPath(this.workspaceRoot, this.agentName) }
+  protected loadSkill(name: string): string { return utils.loadSkill(this.workspaceRoot, name) }
 
   protected initMessages(input: string): void {
-    const systemContent = `${this.systemPrompt}
-
-## 核心行为准则
-1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request_intervention\` 请求介入。绝不能编造不存在的 API Key、文件内容、路径、岗位详情或任何其他虚假信息。
-2. **写入前反思**: 在向 \`data/\` 目录写入任何信息（如使用 \`upsert_job\` 或 \`write_file\`）之前，你必须执行一次内部反思：
-   - “我刚才通过工具（如 \`browser_snapshot\`）确实看到了这些信息吗？”
-   - “这些数据中是否有我的臆测成分？”
-   - “如果是编造的，我是否应该改为向用户求助？”
-3. **中文交流**: 始终使用中文与用户交流。`
-    
-    // 关键修复 5：就地修改数组，不重新创建，保持引用一致
+    const systemContent = `${this.systemPrompt}\n\n## 核心行为准则\n1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request_intervention\` 请求介入。绝不能编造虚假信息。\n2. **写入前反思**: 在向 \`data/\` 写入信息前，必须核实数据真实性。\n3. **中文交流**: 始终使用中文与用户交流。`
     if (this.messages.length === 0) {
-      this.messages.push({ role: 'system', content: systemContent })
-      this.messages.push({ role: 'user', content: input })
+      this.messages.push({ role: 'system', content: systemContent }, { role: 'user', content: input })
     } else {
       const hasSystem = this.messages.length > 0 && this.messages[0].role === 'system'
-      if (!hasSystem) {
-        this.messages.unshift({ role: 'system', content: systemContent })
-      } else {
-        this.messages[0].content = systemContent
-      }
+      if (!hasSystem) this.messages.unshift({ role: 'system', content: systemContent })
+      else this.messages[0].content = systemContent
       this.messages.push({ role: 'user', content: input })
     }
   }
 
-  protected calculateTokens(): number {
-    return this.compressor.calculateTokens(this.messages)
-  }
-
+  protected calculateTokens(): number { return this.compressor.calculateTokens(this.messages) }
   protected extractContext(): Record<string, unknown> { return {} }
   protected restoreContext(_c: Record<string, unknown>): void {}
 
   protected async callLLM(tools: ChatCompletionTool[]): Promise<OpenAI.Chat.Completions.ChatCompletion> {
+    // 基础方法仍保留，但在 runMainLoop 中现在优先使用流式逻辑
     return this.openai.chat.completions.create({ model: this.model, messages: this.messages, tools, tool_choice: 'auto' })
   }
 }
