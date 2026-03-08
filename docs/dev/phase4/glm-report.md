@@ -393,3 +393,95 @@ JobClaw 已具备以下能力：
 
 *审查人: GLM Team*  
 *审查时间: 2026-03-08*
+
+---
+
+## 11. Gemini 代码变更审查 (commit 44a9d8d)
+
+### 变更概览
+
+| 文件 | 变更内容 |
+|------|----------|
+| `src/agents/base/agent.ts` | HITL 超时机制、Channel 集成、logger 回调 |
+| `src/agents/base/types.ts` | BaseAgentConfig 增加 channel 字段 |
+| `src/channel/base.ts` | 新增 `tool_warn` / `tool_error` 类型 |
+| `src/channel/tui.ts` | 支持新消息类型、message payload |
+| `src/tools/index.ts` | ToolContext 增加 logger 回调 |
+| `src/tools/upsertJob.ts` | 集成 logger 回调 |
+| `src/web/tui.ts` | HITL 超时事件监听 |
+
+### ✅ 优秀设计
+
+**1. 超时机制设计精巧**
+```typescript
+const defaultTimeout = this.runningEphemeral ? 30_000 : 300_000
+```
+区分 TUI 模式（5分钟）和 Cron/Ephemeral 模式（30秒）的默认超时，符合产品逻辑。
+
+**2. 事件驱动解耦干净**
+- `intervention_timeout`: 超时时发出
+- `intervention_handled`: 用户输入时发出
+- TUI 通过事件监听自动清理 Modal，无需轮询
+
+**3. 日志回调链路完整**
+```
+ToolContext.logger → BaseAgent.channel.send → TUIChannel → Activity Log
+```
+工具层的 `console.warn` 被正确桥接到 TUI。
+
+### ⚠️ 待改进项
+
+| 问题 | 文件 | 说明 |
+|------|------|------|
+| **holder 仍硬编码** | `upsertJob.ts:16` | `holder = 'system'` 应改为 `context.agentName` |
+| **超时 Promise 不够优雅** | `agent.ts:73-81` | `timeoutId!` 非空断言有风险 |
+| **类型断言可优化** | `tui.ts:40-41` | `typeof payload['x'] === 'string'` 可提取为工具函数 |
+
+### 代码细节审查
+
+#### 1. HITL 超时逻辑 (agent.ts:67-92)
+```typescript
+const timeoutPromise = new Promise<string>((resolve) => {
+  timeoutId = setTimeout(() => {
+    if (this.interventionResolve) {
+      this.resolveIntervention('')
+      this.emit('intervention_timeout', { prompt })
+    }
+    resolve('')
+  }, timeout)
+})
+```
+✅ 正确：超时后调用 `resolveIntervention('')` 确保 Agent 继续运行
+✅ 正确：发出 `intervention_timeout` 事件供 TUI 监听
+⚠️ 建议：`finally` 中使用 `timeoutId!` 非空断言，虽然逻辑正确，但可用显式判断
+
+#### 2. TUI 事件监听 (tui.ts:281-300)
+```typescript
+agent.once('intervention_timeout', onTimeout)
+agent.once('intervention_handled', onHandled)
+```
+✅ 正确：使用 `once` 自动移除监听器
+✅ 正确：`cleanup()` 中显式 `removeListener` 防止内存泄漏
+✅ 正确：超时和手动处理都会触发 cleanup
+
+#### 3. upsertJob 签名变更
+```typescript
+// 旧签名
+export async function upsertJob(args: UpsertJobArgs, workspaceRoot: string)
+
+// 新签名
+export async function upsertJob(args: UpsertJobArgs, context: ToolContext)
+```
+✅ 正确：与 `ToolContext` 接口对齐
+✅ 正确：保持 `logger` 可选，向后兼容
+
+### Gemini 审查结论
+
+| 维度 | 评分 |
+|------|------|
+| 功能完整性 | ⭐⭐⭐⭐⭐ |
+| 代码质量 | ⭐⭐⭐⭐ |
+| 设计合理性 | ⭐⭐⭐⭐⭐ |
+| 测试覆盖 | ⭐⭐⭐⭐ |
+
+**总体评价**: Gemini 的代码变更质量高，架构设计合理，与 Phase 4 规划高度一致。`validateWorkspace` 未调用是唯一遗漏的 P0 问题。
