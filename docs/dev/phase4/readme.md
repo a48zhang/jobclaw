@@ -22,11 +22,20 @@
 ## 任务拆分 (✅ 已完成)
 
 ### 🟢 [Team A: TUI 仪表盘与实时数据](team_a_tui_dashboard.md) (✅)
-- **职责**: 实现 `TUIChannel` 类，订阅 `intervention_required` 事件并显示弹窗。
-
 ### 🔵 [Team B: 人工干预与鲁棒性](team_b_hitl_robustness.md) (✅)
-- **职责**: 让 `BaseAgent` 继承 `EventEmitter`，实现 `requestIntervention` 的 Promise 挂起逻辑。
+
+---
+
+## 🛑 Phase 4.2: 最终润色 (✅ 已完成)
+**目标**: 修复综合审计中发现的 P0/P1 级瑕疵，确保系统达到生产级稳健性。
+
+- [x] **[P0] 启动预检强化**: 在 `src/index.ts` 和 `src/cron.ts` 中补全 `validateWorkspace` 调用。 (✅)
+- [x] **[P1] 动态锁持有者**: 重构 `upsertJob` 逻辑，从上下文动态获取 `agentName` 作为锁持有者标识。 (✅)
+- [x] **[P1] MCP 数据精简**: 修改 `src/mcp.ts`，对 `callTool` 的返回结果进行文本提取，减少 Token 消耗。 (✅)
+- [x] **[P1] 投递重试逻辑**: 在 `jobclaw-skills.md` 中增加显式的投递重试指引。 (✅)
+
+---
 
 ## 验收结果
 - **Gemini 审查**: ✅ 已通过 (见 [gemini_review.md](gemini_review.md))
-- **联调情况**: 核心接口协议对接成功，TUI 仪表盘可实时刷新，HITL 弹窗正常工作。
+- **综合审计报告**: 🚩 待 P4.2 完成后关闭 (见 [final_audit_and_plan.md](final_audit_and_plan.md))
