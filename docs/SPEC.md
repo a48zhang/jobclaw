@@ -1,19 +1,18 @@
 # JobClaw 技术规格说明书
 
-> 版本: 0.1.0  
-> 更新日期: 2026-03-06
+> 版本: 0.2.0  
+> 更新日期: 2026-03-08
 
 ---
 
 ## 1. 项目概述
 
-**JobClaw** 是一个智能求职助手 AI multiagent。
+**JobClaw** 是一个全自动求职管家 Multi-Agent 系统。
 
-投递 Agent 通过 Playwright MCP 操作浏览器投递。
+- **MainAgent**: 负责用户交互、职位搜索协调、任务调度及简历制作。
+- **DeliveryAgent**: 通过 Playwright MCP 浏览器工具执行自动化表单填写与职位投递。
+- **Web Dashboard**: 实时可视化看板，支持 Agent 状态监控、实时日志流及人工干预（HITL）。
 
-信息搜集 Agent 自动抓取职位并提示投递.
-
-主 Agent 与用户交互,获取必要信息等.
 ---
 
 ## 2. 系统架构
@@ -35,7 +34,7 @@
                  │                         │
         ┌───────────────┐        ┌───────────────┐
         │  MainAgent    │        │ DeliveryAgent │
-        │ (搜索+交互)   │        │  (自动投递)   │
+        │ (交互+调度)   │        │  (表单投递)   │
         └───────┬───────┘        └───────────────┘
                 │ spawnAgent(deliveryAgent, ...)
                 └──────串行，共享 MCP 实例──────▶
@@ -48,293 +47,84 @@
 ```
 jobclaw/
 ├── src/
-│   ├── index.ts             # 入口（检测 config.yaml，决定是否 Bootstrap）
-│   ├── bootstrap.ts         # Bootstrap 引导流程（首次运行）
-│   ├── cron.ts              # CronJob 单次任务脚本（外部调度器触发）
-│   ├── types.ts             # 类型定义
-│   ├── tools/
-│   │   ├── index.ts         # 工具执行器入口与 Schema 定义
-│   │   ├── utils.ts         # 工具共享函数
-│   │   ├── readFile.ts      # 读取文件工具实现
-│   │   ├── writeFile.ts     # 写入文件工具实现
-│   │   ├── appendFile.ts    # 追加文件工具实现
-├── listDirectory.ts # 列出目录工具实现
-│   │   ├── typstCompile.ts  # Typst 编译简历工具实现
-│   │   └── lockFile.ts      # 文件锁工具实现
+│   ├── index.ts             # 交互模式入口（检测 config.json，决定是否 Bootstrap）
+│   ├── bootstrap.ts         # Bootstrap 引导流程定义
+│   ├── cron.ts              # 定时任务入口（无状态拉起）
+│   ├── config.ts            # 配置加载器（支持 config.json 与环境变量）
+│   ├── env.ts               # 环境校验与路径预检
+│   ├── eventBus.ts          # 全局强类型事件总线 (TypedEventBus)
 │   ├── agents/
-│   │   ├── base/            # BaseAgent 核心包
-│   │   │   ├── index.ts     # 导出入口
-│   │   │   ├── agent.ts     # BaseAgent 核心类
-│   │   │   ├── types.ts     # Agent 相关类型定义
-│   │   │   ├── constants.ts # 常量定义
-│   │   │   └── context-compressor.ts  # 上下文压缩模块
-│   │   ├── main/            # MainAgent（搜索+交互）
-│   │   │   └── index.ts
-│   │   ├── delivery/        # DeliveryAgent（表单投递）
-│   │   │   └── index.ts
-│   │   └── skills/          # 代码级默认 Skill（只读）
-│   │       └── jobclaw-skills.md
+│   │   ├── base/            # Agent 基座
+│   │   │   ├── agent.ts     # 逻辑核心（已重构拆分）
+│   │   │   └── agent-utils.ts # 通用辅助（Session/Channel/Skill）
+│   │   ├── main/            # 主 Agent 逻辑
+│   │   └── delivery/        # 投递 Agent 逻辑
+│   ├── tools/               # 智能工具库 (Shell, Typst, File, UpsertJob)
 │   ├── web/
-│   │   └── server.ts        # Hono 服务端
-│   └── channel/
-│       ├── base.ts          # Channel 抽象接口
-│       └── email.ts         # 邮件通知实现
-├── workspace/
-│   ├── config.yaml          # Bootstrap 完成标志（首次运行后生成）
-│   ├── skills/              # 用户级 Skill（可覆盖代码默认，优先级更高）
-│   │   └── jobclaw-skills.md
-│   ├── agents/              # Agent 私有文件
-│   │   ├── main/
-│   │   │   ├── session.json # 会话记忆（会压缩）
-│   │   │   └── notebook.md  # 笔记本（持久化）
-│   │   └── delivery/
-│   │       ├── session.json # ephemeral 模式下不读写
-│   │       └── notebook.md  # 笔记本（持久化）
-│   └── data/                # 共享数据（持久化，不压缩）
-│       ├── userinfo.md
-│       ├── targets.md
-│       └── jobs.md
-### 3.4 专用工具 (Specialized Tools)
-### 3.4 专用工具 (Specialized Tools)
-
-- **`upsert_job`**: 职位数据管理工具（Phase 3 核心）。
-- **`typst_compile`**: 简历编译工具（Phase 7 核心）。
-  - **职责**: 将 Typst 源码编译为 PDF 简历。
-  - **参数**: `input` (.typ 路径), `output` (.pdf 路径)。
-
----
-
-## 4. 多 Agent 架构
-
-### 4.1 BaseAgent
-
-所有 Agent 的基类：
-
-- 管理与 LLM 的交互
-- 处理工具调用
-- 管理运行状态
-- 支持本地工具和 MCP 工具
-
-### 4.2 MainAgent
-
-主 Agent（同时也是"搜索 Agent"）：
-
-- 继承 BaseAgent
-- 负责用户交互（交互模式）
-- **简历管理**: 提取数据、交互润色、通过 Typst 编译 PDF。
-- **直接**通过 Playwright MCP 工具搜索职位，无独立 SearchAgent
-- 通过 `spawnAgent(deliveryAgent, instruction)` 将投递委托给 DeliveryAgent（串行）
-- 支持 `runEphemeral(instruction)` 被 CronJob 无状态拉起，执行完毕后上下文销毁
-- `systemPrompt` 通过 `loadSkill('jobclaw-skills')` 内嵌搜索 SOP、去重 SOP 及简历制作 SOP
-
-
-### 4.3 DeliveryAgent（投递）
-
-职责：自动投递匹配职位
-
-- 继承 BaseAgent
-- **仅**通过 `spawnAgent` 以子进程形式运行（`runEphemeral`），永不直接 `run()`
-- 最多执行 50 步，用尽后不重试，返回结果给 MainAgent
-- 通过 Playwright MCP 填写表单投递
-- 写入 workspace/data/jobs.md（状态更新：applied/failed/login_required）
-- 通过 Channel 发送通知
-- `systemPrompt` 通过 `loadSkill('jobclaw-skills')` 内嵌投递 SOP
-
----
-
-## 5. 记忆机制
-
-### 5.1 记忆架构
-
-```
-workspace/
-├── config.yaml              # Bootstrap 完成标志（首次运行后生成）
-├── skills/                  # 用户级 Skill（可覆盖代码默认）
-│   └── jobclaw-skills.md    # 统一 Skill 文件（含搜索/去重/投递 SOP）
-├── agents/                  # Agent 私有文件
-│   ├── main/
-│   │   ├── session.json     # 会话记忆（会压缩）
-│   │   └── notebook.md      # 笔记本（持久化）
-│   └── delivery/
-│       ├── session.json     # ephemeral 模式下不读写
-│       └── notebook.md      # 笔记本（持久化）
-│
-└── data/                    # 共享数据（持久化，不压缩）
-    ├── userinfo.md          # 用户信息
-    ├── targets.md           # 监测目标
-    └── jobs.md              # 已投递岗位
-```
-
-### 5.2 文件分类
-
-| 文件 | 类型 | 格式 | 压缩 | 说明 |
-|------|------|------|------|------|
-| session.json | Agent 私有 | JSON | 是 | 会话记忆，达到阈值压缩 |
-| notebook.md | Agent 私有 | Markdown | 否 | 笔记本，持久化存储 |
-| data/*.md | 共享数据 | Markdown | 否 | 持久化，不压缩 |
-
-### 5.3 访问边界
-
-- Agent 只能访问自己的 `workspace/agents/{name}/` 目录
-- Agent 可以读取所有 `workspace/data/` 共享数据
-- 工具层限制路径范围
-
-### 5.4 记忆压缩
-
-- 上下文窗口：262144 tokens
-- 压缩阈值：75%（196608 tokens）
-- 压缩后目标：30%（约 78643 tokens）
-- 保留最近 `keepRecentMessages` 条完整消息（默认 20），更早的压缩为摘要
-
-### 5.5 文件锁机制
-
-共享数据文件 `jobs.md` 可能被多个 Agent 写入，需使用文件锁避免竞争：
-
-- 写入前调用 `lock_file` 获取锁
-- 写入完成后调用 `unlock_file` 释放锁
-- 锁超时时间：30 秒，超时自动释放
-- 锁文件位置：`workspace/.locks/jobs.md.lock`
-
----
-
-## 6. UI 系统
-
-JobClaw 提供两套 UI 系统，分别用于本地交互和远期监控。
-
-### 6.1 TUI 终端仪表盘 (Phase 4 核心)
-
-在终端提供基于 `blessed` 的实时监控界面：
-
-- **Dashboard**: 展示实时统计数据（发现/投递/成功率）。
-- **Job Monitor**: 实时渲染 `jobs.md` 的最新动态。
-- **Chat Window**: 集成交互式对话，替代简单的 `readline` 入口。
-- **Status Bar**: 显示 Agent 运行步数、当前 Iteration 和 MCP 占用状态。
-
-### 6.2 Web UI (Phase 5 规划中)
-
----
-
-## 7. Channel（通知通道）
-
-### 7.1 设计
-
-Channel 是抽象接口，支持多种通知方式：
-
-```
-Channel (abstract)
-    ├── EmailChannel    # 邮件通知（默认实现）
-    ├── WeChatChannel   # 微信通知（预留）
-    └── SmsChannel      # 短信通知（预留）
-```
-
-**职责边界**：Channel 仅用于向**外部用户**推送通知（邮件/Webhook 等），不用于 Agent 间通信。Agent 间通过 `jobs.md` + 文件锁交换数据。
-
-### 7.2 接口定义
-
-```typescript
-export type ChannelMessageType =
-  | 'new_job'           // MainAgent 发现新职位
-  | 'delivery_start'    // DeliveryAgent 开始投递
-  | 'delivery_success'  // 成功投递
-  | 'delivery_failed'   // 投递失败
-  | 'delivery_blocked'  // 需要登录/人工介入
-  | 'cron_complete'     // CronJob 执行完毕汇总
-
-export interface ChannelMessage {
-  type: ChannelMessageType
-  payload: Record<string, unknown>
-  timestamp: Date
-}
-
-export interface Channel {
-  send(message: ChannelMessage): Promise<void>
-}
-```
-
-### 7.3 触发场景
-
-| 场景 | type | payload 字段 |
-|------|------|-------------|
-| 发现新职位 | `new_job` | `company`, `title`, `url` |
-| 开始投递 | `delivery_start` | `company`, `title`, `url` |
-| 投递成功 | `delivery_success` | `company`, `title`, `url`, `time` |
-| 投递失败 | `delivery_failed` | `company`, `title`, `url`, `reason?` |
-| 需要登录 | `delivery_blocked` | `company`, `title`, `url`, `reason` |
-| CronJob 汇总 | `cron_complete` | `newJobs`, `summary` |
-
-### 7.4 邮件配置
-
-```bash
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USER=user@example.com
-SMTP_PASS=password
-NOTIFY_EMAIL=target@example.com
+│   │   ├── server.ts        # Hono Web 服务器 (REST API + WebSocket)
+│   │   └── tui.ts           # Blessed TUI 界面
+│   └── channel/             # 通知通道 (Email, TUI)
+├── public/                  # 静态前端资源 (Vanilla JS + Tailwind)
+├── workspace/               # 工作区目录
+│   ├── config.json          # 扁平化全局配置
+│   ├── data/                # 业务数据 (jobs.md, userinfo.md, targets.md)
+│   ├── agents/              # Agent 私有记忆
+│   └── output/              # 产物输出 (resume.pdf)
 ```
 
 ---
 
-## 8. Bootstrap 首次运行
+## 4. 记忆与配置机制
 
-`src/index.ts` 启动时检查 `workspace/config.yaml` 是否存在：
+### 4.1 扁平化配置 (`config.json`)
 
-- **不存在** → 进入 Bootstrap 引导流程（`src/bootstrap.ts`）
-- **存在** → 跳过 Bootstrap，正常启动 MainAgent
+系统采用扁平化的配置结构，支持环境变量覆盖：
 
-Bootstrap 是一次引导性对话，引导用户：
-1. 填写 `workspace/data/userinfo.md`（姓名、邮箱、简历链接等）
-2. 填写 `workspace/data/targets.md`（至少添加一个公司的招聘页 URL）
-3. 告知如何配置外部定时任务（`bun src/cron.ts` + 系统 cron 或 PM2）
+| 配置项 | 环境变量 | 说明 |
+| :--- | :--- | :--- |
+| `API_KEY` | `OPENAI_API_KEY` | LLM 鉴权密钥 |
+| `MODEL_ID` | `MODEL` | 主任务模型 ID |
+| `SUMMARY_MODEL_ID` | `SUMMARY_MODEL` | 上下文压缩模型 ID |
+| `BASE_URL` | `OPENAI_BASE_URL` | API Endpoint (Base URL) |
+| `SERVER_PORT` | `SERVER_PORT` | Web 看板端口 (默认 3000) |
 
-对话结束后写入 `workspace/config.yaml`：
-```yaml
-version: "1"
-bootstrapped_at: "2026-03-07T09:00:00Z"
-```
+### 4.2 记忆压缩
 
-`config.yaml` 是 Bootstrap 完成的**标志位**，不包含运行时配置。这从设计上保证了 CronJob 触发时 `targets.md` 不为空。
+- **机制**: 当 Token 计数超过阈值时，`ContextCompressor` 将历史消息汇总为摘要。
+- **保护**: 始终保留 `system` 消息和最近 `N` 条原始消息。
 
----
+### 4.3 文件锁机制
 
-## 9. CronJob 定时任务
-
-`src/cron.ts` 是**单次任务脚本**，由外部调度器（系统 cron、PM2、Task Scheduler 等）按需触发。**调度时机由用户或运维在系统层面决定，代码中不包含任何调度表达式、不存储 cron 配置**。
-
-```bash
-# 外部调度示例（由用户配置，不在代码中指定）
-# 系统 crontab — 每天早上 9 点
-0 9 * * * /usr/bin/bun /path/to/jobclaw/src/cron.ts
-```
-
-`cron.ts` 调用 `mainAgent.runEphemeral(instruction)` 而非 `mainAgent.run()`，不读写 session.json，执行完毕后上下文销毁。
+共享文件（如 `jobs.md`, `targets.md`）由 `lock_file` 工具管理：
+- **租约**: 30 秒超时自动释放。
+- **粒度**: 文件级互斥锁。
 
 ---
 
-## 10. 配置
+## 5. 交互与可视化
 
-```bash
-# AI
-OPENAI_API_KEY=sk-xxx
+### 5.1 Web 看板 (Phase 5)
+- **实时流**: 基于 WebSocket 推送 Agent 的 `Think` 和 `Tool` 详细日志。
+- **人工干预 (HITL)**: 当 Agent 调用 `requestIntervention` 时，网页弹出实时弹窗供用户输入。
+- **配置编辑**: 支持直接在线编辑 Markdown 配置并保存。
 
-# 邮件通知（可选）
-SMTP_HOST=smtp.example.com
-SMTP_PORT=587
-SMTP_USER=user@example.com
-SMTP_PASS=password
-NOTIFY_EMAIL=target@example.com
-```
+### 5.2 TUI 仪表盘
+- 针对命令行环境的 Blessed 界面，显示任务统计与活动流水。
 
 ---
 
-## 11. 开发路线
+## 6. 专用工具集
 
-| Phase | 内容 |
-|-------|------|
-| 1 | Agent Loop + Playwright MCP 集成 |
-| 2 | 抓取功能（读取 targets.md → 写入 jobs.md）|
-| 3 | 投递功能（读取 userinfo.md → 填表 → 写入 jobs.md） |
-| 4 | 匹配、错误处理、状态追踪 |
-| 5 | Bootstrap 引导流程 + CronJob 脚本 |
-| 6 | Channel 通知（邮件优先） |
-| 7 | Web UI 面板 |
-| 8 | Resume Mastery (Typst 智能简历制作) |
+- **`run_shell_command`**: 环境感知工具，自动探测 OS (Windows/Linux/macOS) 和 Shell (Bash/Pwsh)。
+- **`typst_compile`**: 智能简历编译，支持环境自愈引导。
+- **`upsert_job`**: 原子化职位数据维护，自动触发通知。
+
+---
+
+## 7. 路线图完成度
+
+- [x] **Phase 1-2**: 核心 Agent 循环与 MCP 集成。
+- [x] **Phase 3**: 搜索与投递业务闭环。
+- [x] **Phase 4**: TUI 交互与系统鲁棒性。
+- [x] **Phase 5**: Web 可视化看板、HITL、智能简历制作工具链。
+- [ ] **Phase 6**: 高级生产特性（自动化重试、Session 深度管理等）。
