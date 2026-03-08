@@ -25,7 +25,7 @@ export class DeliveryAgent extends BaseAgent {
 ## 可用技能索引
 ${skillsIndex}
 
-请在需要投递时，使用 read_file 工具读取对应的投递 SOP (src/agents/skills/delivery.md)。
+请在需要投递时，使用 read_file 工具读取对应的投递 SOP (skills/delivery.md)。
 `
   }
 

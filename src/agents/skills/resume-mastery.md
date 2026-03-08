@@ -19,4 +19,4 @@
 - 缺失的信息可以在userinfo中标明
 - 缺失的信息不得出现在resume产物中，不允许出现“请补充”“某某”等占位符
 - 如果学历、联系方式等关键信息缺失应该要求用户先补全，除非用户强烈要求否则不要直接进行typst起草和编译
-- 使用 `src/agents/skills/templates/resume.typ` 作为模板，不允许自己写模板，除非用户要求。
+- 使用 `skills/templates/resume.typ` 作为模板，不允许自己写模板，除非用户要求。

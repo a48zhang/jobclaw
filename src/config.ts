@@ -1,5 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export interface Config {
   API_KEY: string
@@ -20,6 +21,7 @@ const DEFAULT_CONFIG: Config = {
 /**
  * 加载配置信息。
  * 同时负责确保 workspace 及其所有子目录（agents, data, skills, output）存在。
+ * 如果 skills 目录为空，将从程序源码自动拷贝一份。
  */
 export function loadConfig(workspaceRoot: string): Config {
   // 1. 确保目录结构全量存在
@@ -32,6 +34,22 @@ export function loadConfig(workspaceRoot: string): Config {
     if (!fs.existsSync(p)) {
       fs.mkdirSync(p, { recursive: true })
     }
+  }
+
+  // 1.5 自动拷贝默认 Skills 到用户的 workspace/skills
+  const workspaceSkillsPath = path.join(workspaceRoot, 'skills')
+  try {
+    const existingSkills = fs.readdirSync(workspaceSkillsPath)
+    if (existingSkills.length === 0) {
+      // 获取当前运行代码所在的 src/agents/skills 路径
+      const codeSkillsPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'agents/skills')
+      if (fs.existsSync(codeSkillsPath)) {
+        fs.cpSync(codeSkillsPath, workspaceSkillsPath, { recursive: true })
+        console.log(`[Config] 已将默认技能 SOP 拷贝至: ${workspaceSkillsPath}`)
+      }
+    }
+  } catch (err) {
+    console.error(`[Config] 拷贝默认 Skills 失败:`, (err as Error).message)
   }
 
   // 2. 确保 config.json 模板存在
