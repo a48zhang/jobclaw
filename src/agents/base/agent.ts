@@ -146,7 +146,11 @@ export abstract class BaseAgent extends EventEmitter {
       if (message.content) result = message.content
 
       // 无论是否有工具调用，都应记录助手消息
-      this.messages.push(message)
+      this.messages.push({
+        role: 'assistant',
+        content: message.content ?? null,
+        tool_calls: message.tool_calls,
+      })
 
       if (message.tool_calls && message.tool_calls.length > 0) {
         this.lastAction = 'tool_call'
@@ -231,7 +235,11 @@ export abstract class BaseAgent extends EventEmitter {
       return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ error: '无法解析工具参数' }) }
     }
     let result: ToolResult
-    const localTools = ['read_file', 'write_file', 'append_file', 'list_directory', 'lock_file', 'unlock_file']
+    const localTools = [
+      'read_file', 'write_file', 'append_file', 'list_directory', 
+      'lock_file', 'unlock_file', 'upsert_job', 'typst_compile', 
+      'install_typst', 'run_shell_command'
+    ]
     if (localTools.includes(toolName)) {
       const ctx: ToolContext = {
         workspaceRoot: this.workspaceRoot, agentName: this.agentName,
@@ -261,9 +269,13 @@ export abstract class BaseAgent extends EventEmitter {
 
   protected async onToolResult(_name: string, _res: ToolResult): Promise<void> {}
 
-  protected async loadSession(): Promise<void> {
+  public async loadSession(): Promise<void> {
     const s = utils.loadSession(this.getSessionPath())
     if (s) { this.currentTask = s.currentTask; this.messages = s.messages || []; if (s.context) this.restoreContext(s.context) }
+  }
+
+  public getMessages(): ChatCompletionMessageParam[] {
+    return this.messages
   }
 
   protected async saveSession(): Promise<void> {
@@ -280,7 +292,15 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   protected initMessages(input: string): void {
-    const systemContent = `${this.systemPrompt}\n\n重要：请始终使用中文与用户交流。`
+    const systemContent = `${this.systemPrompt}
+
+## 核心行为准则
+1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request_intervention\` 请求介入。绝不能编造不存在的 API Key、文件内容、路径、岗位详情或任何其他虚假信息。
+2. **写入前反思**: 在向 \`data/\` 目录写入任何信息（如使用 \`upsert_job\` 或 \`write_file\`）之前，你必须执行一次内部反思：
+   - “我刚才通过工具（如 \`browser_snapshot\`）确实看到了这些信息吗？”
+   - “这些数据中是否有我的臆测成分？”
+   - “如果是编造的，我是否应该改为向用户求助？”
+3. **中文交流**: 始终使用中文与用户交流。`
     if (this.messages.length === 0) {
       this.messages = [
         { role: 'system', content: systemContent },

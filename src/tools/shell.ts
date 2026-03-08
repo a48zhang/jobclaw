@@ -5,6 +5,9 @@ import type { ToolContext, ToolResult } from './index'
 
 const execAsync = promisify(exec)
 
+/** 默认命令执行超时（30秒） */
+const DEFAULT_SHELL_TIMEOUT = 30000
+
 /**
  * 检测当前操作系统
  */
@@ -22,7 +25,6 @@ export function detectOS(): 'windows' | 'linux' | 'macos' | 'unknown' {
 export function detectShell(): 'bash' | 'pwsh' | 'cmd' | 'unknown' {
   const platform = os.platform()
   if (platform === 'win32') {
-    // 简单逻辑：Windows 下通常优先检查是否能用 pwsh
     return 'pwsh' 
   }
   return 'bash'
@@ -30,27 +32,39 @@ export function detectShell(): 'bash' | 'pwsh' | 'cmd' | 'unknown' {
 
 /**
  * run_shell_command 工具实现
- * 执行系统 shell 命令
+ * 执行系统 shell 命令，支持自定义超时
  */
 export async function executeShellCommand(
   args: Record<string, unknown>,
   _context: ToolContext
 ): Promise<ToolResult> {
-  const { command } = args as { command: unknown }
+  const { command, timeout } = args as { command: unknown; timeout?: unknown }
 
   if (typeof command !== 'string') {
     return { success: false, content: '', error: 'command 参数必须是字符串' }
   }
 
+  // 校验并设置超时时间
+  const shellTimeout = typeof timeout === 'number' ? timeout : DEFAULT_SHELL_TIMEOUT
+
   try {
-    const { stdout, stderr } = await execAsync(command, { timeout: 30000 })
+    const { stdout, stderr } = await execAsync(command, { timeout: shellTimeout })
     const output = stdout + (stderr ? `\n[STDERR]\n${stderr}` : '')
     return {
       success: true,
       content: output || '(无输出)',
     }
   } catch (err) {
-    const error = err as { stdout?: string; stderr?: string; message?: string }
+    const error = err as { stdout?: string; stderr?: string; message?: string; killed?: boolean }
+    
+    if (error.killed) {
+      return {
+        success: false,
+        content: '',
+        error: `命令执行超时（限制: ${shellTimeout}ms）。如果是在安装大容量依赖，请尝试增加 timeout 参数。`,
+      }
+    }
+
     const detail = (error.stdout || '') + (error.stderr || '') + (error.message || '')
     return {
       success: false,

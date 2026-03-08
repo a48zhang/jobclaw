@@ -182,6 +182,7 @@ export const TOOLS: ChatCompletionTool[] = [
         type: 'object',
         properties: {
           command: { type: 'string', description: '要运行的 shell 命令' },
+          timeout: { type: 'number', description: '超时时间（毫秒），默认为 30000。执行耗时长的安装命令时请调大此值。' },
         },
         required: ['command'],
         additionalProperties: false,

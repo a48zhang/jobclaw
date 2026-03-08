@@ -1,15 +1,6 @@
 /**
  * TUI Dashboard - Phase 4 Team A
  * Full-screen interactive terminal dashboard using blessed & blessed-contrib
- *
- * Layout:
- *   ┌──────────────────────┬──────────────────┐
- *   │     Job Monitor      │  Stats Panel     │
- *   ├──────────────────────┴──────────────────┤
- *   │            Agent Activity Log           │
- *   ├─────────────────────────────────────────┤
- *   │                Input Box                │
- *   └─────────────────────────────────────────┘
  */
 import * as blessed from 'blessed'
 import * as contrib from 'blessed-contrib'
@@ -30,32 +21,21 @@ export interface JobRow {
 
 export interface TUIOptions {
   workspaceRoot: string
-  /** Called when the user submits a command from the Input Box */
   onCommand: (input: string) => Promise<void>
 }
 
-// ─── jobs.md parser ───────────────────────────────────────────────────────────
-
-/**
- * Parse jobs.md into an array of JobRow objects.
- * Gracefully skips malformed lines.
- */
 export function parseJobsMd(content: string): JobRow[] {
   const rows: JobRow[] = []
   const lines = content.split('\n')
-
   let pastHeader = false
   for (const line of lines) {
     if (!line.trim().startsWith('|')) continue
-    // Skip header separator lines like | --- |
     if (/^\|\s*[-:]+\s*\|/.test(line)) {
       pastHeader = true
       continue
     }
     if (!pastHeader) continue
-
     const cols = line.split('|').map((c) => c.trim())
-    // cols[0] is empty (before first |), cols[1..5] are the data columns
     if (cols.length < 6) continue
     const [, company, title, url, status, time] = cols
     if (!company && !title) continue
@@ -64,13 +44,12 @@ export function parseJobsMd(content: string): JobRow[] {
   return rows
 }
 
-// Column headers for the Job Monitor table
 const JOB_TABLE_HEADERS = ['公司', '职位', '链接', '状态', '时间']
 
 export class TUI {
   private screen: blessed.Widgets.Screen
   private jobTable: contrib.Widgets.TableElement
-  private activityLog: contrib.Widgets.LogElement
+  private activityLog: blessed.Widgets.Log
   private inputBox: blessed.Widgets.TextboxElement
   private channel: TUIChannel
 
@@ -79,79 +58,82 @@ export class TUI {
   private onCommand: (input: string) => Promise<void>
   private watcher: fs.FSWatcher | null = null
   private refreshTimer: ReturnType<typeof setTimeout> | null = null
+  private showingJobs: boolean = false
+  private lastCtrlC: number = 0
 
   constructor(options: TUIOptions) {
     this.workspaceRoot = options.workspaceRoot
     this.jobsPath = path.resolve(options.workspaceRoot, 'data/jobs.md')
     this.onCommand = options.onCommand
 
-    // ── Screen ──────────────────────────────────────────────────────────────
     this.screen = blessed.screen({
       smartCSR: true,
       title: 'JobClaw 🦞',
       fullUnicode: true,
     })
 
-    // ── Grid (12 rows × 12 cols) ─────────────────────────────────────────────
-    const grid = new contrib.grid({ rows: 12, cols: 12, screen: this.screen })
-
-    // ── Job Monitor (top 7 rows × 12 cols) ──────────────────────────────────
-    this.jobTable = grid.set(0, 0, 7, 12, contrib.table, {
-      keys: true,
-      vi: true,
-      label: ' Job Monitor ',
-      border: { type: 'line' },
-      style: {
-        header: { fg: 'cyan', bold: true },
-        cell: { fg: 'white', selected: { bg: 'blue' } },
-      },
+    // 1. 预先创建所有组件，保持引用唯一
+    this.jobTable = contrib.table({
+      keys: true, vi: true, label: ' Job Monitor ', border: { type: 'line' },
+      style: { header: { fg: 'cyan', bold: true }, cell: { fg: 'white', selected: { bg: 'blue' } } },
       columnWidth: [16, 20, 48, 12, 12],
+      top: 0, left: 0, width: '100%', height: '50%',
     } as contrib.Widgets.TableOptions)
 
-    // ── Agent Activity Log (middle 4 rows × 12 cols) ─────────────────────────
-    this.activityLog = grid.set(7, 0, 4, 12, contrib.log, {
-      label: ' Agent Activity ',
-      border: { type: 'line' },
-      scrollable: true,
-      style: { fg: 'green' },
-      bufferLength: 200,
-      fullUnicode: true,
-      tags: true,
-      wrap: true, // 开启自动换行
-    } as contrib.Widgets.LogOptions)
-
-    // ── Input Box (bottom 1 row × 12 cols) ───────────────────────────────────
-    this.inputBox = grid.set(11, 0, 1, 12, blessed.textbox, {
-      label: ' Command > ',
-      border: { type: 'line' },
-      style: { fg: 'yellow', focus: { border: { fg: 'yellow' } } },
-      inputOnFocus: true,
-      fullUnicode: true,
-      tags: true,
+    this.activityLog = blessed.log({
+      label: ' Agent Activity ', border: { type: 'line' },
+      scrollable: true, alwaysScroll: true,
+      scrollbar: { ch: ' ', inverse: true },
+      style: { fg: 'green' }, bufferLength: 1000,
+      fullUnicode: true, tags: true, wrap: true, mouse: true,
+      top: 0, left: 0, width: '100%', height: 11,
     })
 
-    // ── TUIChannel wired to Activity Log ─────────────────────────────────────
+    this.inputBox = blessed.textbox({
+      label: ' Command (Type /jobs to toggle) > ', border: { type: 'line' },
+      style: { fg: 'yellow', focus: { border: { fg: 'yellow' } } },
+      inputOnFocus: true, fullUnicode: true, tags: true,
+      top: 11, left: 0, width: '100%', height: 1,
+    })
+
+    // 2. 初始化布局：默认不显示 jobTable
+    this.screen.append(this.activityLog)
+    this.screen.append(this.inputBox)
+
     this.channel = new TUIChannel((line, type) => {
       const color = type === 'error' ? '{red-fg}' : type === 'warn' ? '{yellow-fg}' : '{green-fg}'
       this.activityLog.log(`${color}${line}{/}`)
+      this.activityLog.setScrollPerc(100)
       this.screen.render()
     })
 
-    // ── Key bindings ─────────────────────────────────────────────────────────
-    this.screen.key(['escape', 'q', 'C-c'], () => {
+    // 3. 核心退出逻辑：底层拦截 C-c
+    this.screen.on('keypress', (_ch, key) => {
+      if (key && key.ctrl && key.name === 'c') {
+        const now = Date.now()
+        if (now - this.lastCtrlC < 2000) {
+          this.destroy()
+          process.exit(0)
+        } else {
+          this.lastCtrlC = now
+          this.activityLog.log('{yellow-fg}[System] 再按一次 Ctrl-C 退出 JobClaw{/}')
+          this.activityLog.setScrollPerc(100)
+          this.screen.render()
+        }
+      }
+    })
+
+    this.screen.key(['escape', 'q'], () => {
       this.destroy()
       process.exit(0)
     })
 
+    // 4. 输入处理
     this.inputBox.key('enter', async () => {
       const value = this.inputBox.getValue().trim()
       this.inputBox.clearValue()
-      if (!value) {
-        this.screen.render()
-        return
-      }
+      if (!value) { this.screen.render(); return }
 
-      // Show busy status
       const originalLabel = this.inputBox.options.label || ' Command > '
       this.inputBox.setLabel(' [Running...] ')
       this.screen.render()
@@ -160,6 +142,7 @@ export class TUI {
         await this.onCommand(value)
       } catch (err) {
         this.activityLog.log(`{red-fg}[error] ${(err as Error).message}{/}`)
+        this.activityLog.setScrollPerc(100)
       } finally {
         this.inputBox.setLabel(originalLabel)
         this.inputBox.focus()
@@ -171,142 +154,93 @@ export class TUI {
     this.screen.render()
   }
 
-  // ── Public API ──────────────────────────────────────────────────────────────
+  // ── Layout Toggling ────────────────────────────────────────────────────────
 
-  /** The TUIChannel instance to pass to agents */
-  get tuiChannel(): TUIChannel {
-    return this.channel
-  }
-
-  /**
-   * Subscribe to a BaseAgent's lifecycle events.
-   * Wires up `intervention_required` → modal prompt.
-   */
-  attachAgent(agent: BaseAgent): void {
-    const onRequired = ({ prompt, resolve }: { prompt: string; resolve: (v: string) => void }) => {
-      this.showInterventionModal(prompt, resolve, agent)
+  toggleJobs(): void {
+    this.showingJobs = !this.showingJobs
+    
+    if (this.showingJobs) {
+      // 显示 JobTable，压缩日志
+      this.screen.append(this.jobTable)
+      this.jobTable.height = '50%'
+      this.activityLog.top = '50%'
+      this.activityLog.height = 11 - (this.screen.height as number / 2) // 粗略计算
+      // 使用更简单且准确的绝对行数分配
+      const totalHeight = this.screen.height as number
+      const jobHeight = Math.floor(totalHeight * 0.5)
+      this.jobTable.height = jobHeight
+      this.activityLog.top = jobHeight
+      this.activityLog.height = totalHeight - jobHeight - 3 // 减去 input 空间
+      this.startWatching()
+    } else {
+      // 隐藏 JobTable，日志全屏
+      this.screen.remove(this.jobTable)
+      this.activityLog.top = 0
+      this.activityLog.height = (this.screen.height as number) - 3
     }
-    agent.on('intervention_required', onRequired)
-  }
 
-  /** Start watching jobs.md for changes */
-  startWatching(): void {
-    if (this.watcher) return
-
-    // Initial render
-    this.refreshJobTable()
-
-    try {
-      this.watcher = fs.watch(this.jobsPath, () => {
-        // Debounce: refresh within 100ms of the last change
-        if (this.refreshTimer) clearTimeout(this.refreshTimer)
-        this.refreshTimer = setTimeout(() => {
-          this.refreshJobTable()
-        }, 100)
-      })
-    } catch {
-      // File might not exist yet; poll instead
-      setInterval(() => this.refreshJobTable(), 500)
-    }
-  }
-
-  /** Render the TUI (call after setup) */
-  render(): void {
+    this.inputBox.focus()
+    this.activityLog.setScrollPerc(100)
     this.screen.render()
   }
 
-  /** Clean up watchers and destroy the screen */
+  // ── Public API ──────────────────────────────────────────────────────────────
+
+  get tuiChannel(): TUIChannel { return this.channel }
+
+  attachAgent(agent: BaseAgent): void {
+    agent.on('intervention_required', ({ prompt, resolve }) => {
+      this.showInterventionModal(prompt, resolve, agent)
+    })
+  }
+
+  startWatching(): void {
+    this.refreshJobTable()
+    if (this.watcher) return
+    try {
+      this.watcher = fs.watch(this.jobsPath, () => {
+        if (this.refreshTimer) clearTimeout(this.refreshTimer)
+        this.refreshTimer = setTimeout(() => this.refreshJobTable(), 100)
+      })
+    } catch {
+      setInterval(() => this.refreshJobTable(), 1000)
+    }
+  }
+
+  render(): void { this.screen.render() }
+
   destroy(): void {
-    if (this.watcher) {
-      this.watcher.close()
-      this.watcher = null
-    }
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer)
-      this.refreshTimer = null
-    }
+    if (this.watcher) this.watcher.close()
     this.screen.destroy()
   }
 
-  // ── Private helpers ─────────────────────────────────────────────────────────
-
   private refreshJobTable(): void {
+    if (!this.showingJobs) return
     let rows: JobRow[] = []
     try {
       const content = fs.readFileSync(this.jobsPath, 'utf-8')
       rows = parseJobsMd(content)
-    } catch {
-      rows = []
-    }
-
-    const headers = JOB_TABLE_HEADERS
-    const data = rows.map((r) => [r.company, r.title, r.url, r.status, r.time])
-
-    this.jobTable.setData({ headers, data })
+    } catch { rows = [] }
+    this.jobTable.setData({ headers: JOB_TABLE_HEADERS, data: rows.map((r) => [r.company, r.title, r.url, r.status, r.time]) })
     this.screen.render()
   }
 
-  /** Show a modal asking the user to enter intervention input */
   private showInterventionModal(prompt: string, resolve: (v: string) => void, agent: BaseAgent): void {
     const modal = blessed.box({
-      top: 'center',
-      left: 'center',
-      width: '60%',
-      height: 9,
-      border: { type: 'line' },
-      label: ' ⚠ 人工干预 ',
-      style: { border: { fg: 'yellow' }, fg: 'white' },
-      tags: true,
-      content: `{yellow-fg}${prompt}{/}\n\n请在下方输入后按 Enter 继续：`,
-      fullUnicode: true,
+      top: 'center', left: 'center', width: '60%', height: 10, border: { type: 'line' },
+      label: ' ⚠ 人工干预 ', style: { border: { fg: 'yellow' }, fg: 'white' }, tags: true,
+      content: `\n {yellow-fg}${prompt}{/}\n\n 请在下方输入后按 Enter 继续：`, fullUnicode: true,
     })
-
-    const input = blessed.textbox({
-      parent: modal,
-      top: 6,
-      left: 2,
-      right: 2,
-      height: 1,
-      style: { fg: 'yellow' },
-      inputOnFocus: true,
-      fullUnicode: true,
-    })
-
+    const input = blessed.textbox({ parent: modal, top: 7, left: 2, right: 2, height: 1, style: { fg: 'yellow' }, inputOnFocus: true, fullUnicode: true })
     const cleanup = () => {
-      this.screen.remove(modal)
-      this.inputBox.focus()
-      this.screen.render()
-      agent.removeListener('intervention_timeout', onTimeout)
-      agent.removeListener('intervention_handled', onHandled)
+      this.screen.remove(modal); this.inputBox.focus(); this.screen.render()
+      agent.removeListener('intervention_timeout', onTimeout); agent.removeListener('intervention_handled', onHandled)
     }
-
-    const onTimeout = () => {
-      this.activityLog.log(`{yellow-fg}[HITL] 超时已自动跳过{/}`)
-      cleanup()
-    }
-
-    const onHandled = () => {
-      cleanup()
-    }
-
-    agent.once('intervention_timeout', onTimeout)
-    agent.once('intervention_handled', onHandled)
-
-    this.screen.append(modal)
-    input.focus()
-    this.screen.render()
-
-    const submit = () => {
-      const value = input.getValue()
-      cleanup()
-      resolve(value)
-    }
-
-    input.key('enter', submit)
-    // Also allow Escape to resolve with empty string so Agent is not permanently stuck
-    input.key('escape', () => {
-      cleanup()
-      resolve('')
-    })
+    const onTimeout = () => { this.activityLog.log(`{yellow-fg}[HITL] 超时已自动跳过{/}`); this.activityLog.setScrollPerc(100); cleanup() }
+    const onHandled = () => cleanup()
+    agent.once('intervention_timeout', onTimeout); agent.once('intervention_handled', onHandled)
+    this.screen.append(modal); input.focus(); this.screen.render()
+    input.key('enter', () => { const v = input.getValue(); cleanup(); resolve(v) })
+    input.key('escape', () => { cleanup(); resolve('') })
   }
 }

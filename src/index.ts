@@ -61,7 +61,10 @@ async function main() {
             tui.destroy()
             process.exit(0)
           }
-          // If other commands are added later, check them here
+          if (cmd === 'jobs') {
+            tui.toggleJobs()
+            return
+          }
         }
 
         // ── Default: Send to Agent ──────────────────────────────────────────
@@ -94,6 +97,26 @@ async function main() {
       mcpClient,
       channel: tui.tuiChannel,
     })
+
+    // ── Load History ────────────────────────────────────────────────────────
+    await mainAgent.loadSession()
+    const history = mainAgent.getMessages()
+    for (const msg of history) {
+      if (msg.role === 'user' && typeof msg.content === 'string') {
+        tui.tuiChannel.send({
+          type: 'user_input' as any,
+          payload: { message: `{cyan-fg}> ${msg.content}{/}` },
+          timestamp: new Date(), // 虽然时间戳不准，但能保证显示
+        })
+      } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
+        tui.tuiChannel.send({
+          type: 'agent_response' as any,
+          payload: { message: msg.content },
+          timestamp: new Date(),
+        })
+      }
+    }
+    tui.render() // 历史加载完后渲染一次，触发 TUIChannel 内部的滚动逻辑
 
     // Start server with config
     startServer(WORKSPACE_ROOT, config.SERVER_PORT)
