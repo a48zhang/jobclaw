@@ -861,3 +861,71 @@ describe('未知工具', () => {
     expect(result.error).toContain('未知工具')
   })
 })
+
+// ============================================================================
+// upsertJob 宽容行解析测试
+// ============================================================================
+
+import { upsertJob } from './upsertJob'
+import * as os from 'node:os'
+
+describe('upsertJob 宽容行解析', () => {
+  let tmpWorkspace: string
+
+  beforeEach(() => {
+    tmpWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-upsert-'))
+    fs.mkdirSync(path.join(tmpWorkspace, 'data'), { recursive: true })
+    fs.mkdirSync(path.join(tmpWorkspace, '.locks'), { recursive: true })
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmpWorkspace, { recursive: true, force: true })
+  })
+
+  test('正常职位行可被正确解析和写入', async () => {
+    const result = await upsertJob(
+      { company: 'Acme', title: 'Engineer', url: 'https://acme.com/job1', status: 'discovered' },
+      tmpWorkspace
+    )
+    expect(result.success).toBe(true)
+    expect(result.action).toBe('added')
+  })
+
+  test('含有损坏行的 jobs.md 仍能成功插入新职位', async () => {
+    // 构造含损坏行的 jobs.md（缺少足够的列）
+    const brokenContent =
+      '| 公司 | 职位 | 链接 | 状态 | 时间 |\n' +
+      '| --- | --- | --- | --- | --- |\n' +
+      '| 损坏行\n' +                          // 只有 1 列，格式损坏
+      '| Acme | Dev | https://acme.com/old | discovered | 2024-01-01 |\n'
+    fs.writeFileSync(path.join(tmpWorkspace, 'data', 'jobs.md'), brokenContent, 'utf-8')
+
+    const result = await upsertJob(
+      { company: 'Beta', title: 'Designer', url: 'https://beta.com/job2', status: 'discovered' },
+      tmpWorkspace
+    )
+    expect(result.success).toBe(true)
+    expect(result.action).toBe('added')
+
+    // 新职位应被写入文件
+    const content = fs.readFileSync(path.join(tmpWorkspace, 'data', 'jobs.md'), 'utf-8')
+    expect(content).toContain('https://beta.com/job2')
+  })
+
+  test('损坏行不影响已有正常行的去重逻辑', async () => {
+    const brokenContent =
+      '| 公司 | 职位 | 链接 | 状态 | 时间 |\n' +
+      '| --- | --- | --- | --- | --- |\n' +
+      '| 损坏行\n' +
+      '| Acme | Dev | https://acme.com/existing | discovered | 2024-01-01 |\n'
+    fs.writeFileSync(path.join(tmpWorkspace, 'data', 'jobs.md'), brokenContent, 'utf-8')
+
+    // 插入与已有行 URL 相同的条目，应被更新
+    const result = await upsertJob(
+      { company: 'Acme', title: 'Dev', url: 'https://acme.com/existing', status: 'applied' },
+      tmpWorkspace
+    )
+    expect(result.success).toBe(true)
+    expect(result.action).toBe('updated')
+  })
+})

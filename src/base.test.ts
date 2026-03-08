@@ -1013,7 +1013,7 @@ describe('状态转换', () => {
 })
 
 // ============================================================================
-// requestIntervention & EventEmitter 测试 — Phase 4 Team A
+// requestIntervention & EventEmitter 测试 — 综合 Team A & Team B
 // ============================================================================
 
 describe('requestIntervention (HITL)', () => {
@@ -1030,30 +1030,56 @@ describe('requestIntervention (HITL)', () => {
     })
   })
 
-  test('TC-HITL-01: BaseAgent 继承自 EventEmitter，具备 on() 方法', () => {
+  test('BaseAgent 继承自 EventEmitter，具备 on() 方法', () => {
     expect(typeof agent.on).toBe('function')
     expect(typeof agent.emit).toBe('function')
   })
 
-  test('TC-HITL-02: requestIntervention 发出 intervention_required 事件', async () => {
-    const handler = mock(({ resolve }: { prompt: string; resolve: (v: string) => void }) => {
-      resolve('用户答复')
+  test('发出 intervention_required 事件并携带 prompt', async () => {
+    let emittedPrompt = ''
+    let emittedResolve: ((input: string) => void) | undefined
+
+    agent.on('intervention_required', (payload: { prompt: string; resolve: (input: string) => void }) => {
+      emittedPrompt = payload.prompt
+      emittedResolve = payload.resolve
     })
 
-    agent.on('intervention_required', handler)
-    const result = await agent.requestIntervention('请输入验证码')
+    const interventionPromise = agent.requestIntervention('需要人工介入')
 
-    expect(handler).toHaveBeenCalledTimes(1)
-    const payload = (handler.mock.calls[0] as [{ prompt: string; resolve: (v: string) => void }])[0]
-    expect(payload.prompt).toBe('请输入验证码')
-    expect(result).toBe('用户答复')
+    expect(emittedPrompt).toBe('需要人工介入')
+    expect(typeof emittedResolve).toBe('function')
+
+    // 通过事件中的 resolve 函数解除挂起
+    emittedResolve?.('通过事件解决')
+
+    const result = await interventionPromise
+    expect(result).toBe('通过事件解决')
   })
 
-  test('TC-HITL-03: resolve 调用后 Agent 收到正确字符串', async () => {
-    agent.on('intervention_required', ({ resolve }: { prompt: string; resolve: (v: string) => void }) => {
-      setTimeout(() => resolve('abc123'), 10)
+  test('挂起并等待外部解决 (resolveIntervention)', async () => {
+    let resolved = false
+    const interventionPromise = agent.requestIntervention('请确认操作').then((input) => {
+      resolved = true
+      return input
     })
-    const result = await agent.requestIntervention('验证码')
-    expect(result).toBe('abc123')
+
+    // Promise 应尚未解决
+    expect(resolved).toBe(false)
+
+    // 外部调用 resolveIntervention 解除挂起
+    agent.resolveIntervention('用户已确认')
+
+    const result = await interventionPromise
+    expect(resolved).toBe(true)
+    expect(result).toBe('用户已确认')
+  })
+
+  test('resolveIntervention 调用后清除内部 resolve 引用', async () => {
+    const p = agent.requestIntervention('test')
+    agent.resolveIntervention('done')
+    await p
+
+    // 再次调用 resolveIntervention 不应抛出异常
+    expect(() => agent.resolveIntervention('extra')).not.toThrow()
   })
 })

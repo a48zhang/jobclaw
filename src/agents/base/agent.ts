@@ -73,7 +73,8 @@ export abstract class BaseAgent extends EventEmitter {
     })
   }
 
-  private resolveIntervention(input: string): void {
+  /** 供外部（如 TUI）调用以解决挂起的 intervention Promise */
+  public resolveIntervention(input: string): void {
     this.interventionResolve?.(input)
     this.interventionResolve = undefined
   }
