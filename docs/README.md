@@ -38,8 +38,8 @@
 | 阶段 | 状态 | 说明 |
 |------|------|------|
 | Phase 0 | ✅ 完成 | 项目脚手架 - 环境搭建与目录结构初始化 |
-| Phase 1 | ⏳ 待开始 | 类型定义与工具层 |
-| Phase 2 | ⏳ 待开始 | BaseAgent |
-| Phase 3 | ⏳ 待开始 | 具体 Agent 实现 |
-| Phase 4 | ⏳ 待开始 | Channel 通知 |
-| Phase 5 | ⏳ 待开始 | Web UI |
+| Phase 1 | ✅ 完成 | 类型定义与工具层 |
+| Phase 2 | ✅ 完成 | BaseAgent |
+| Phase 3 | ✅ 完成 | 具体 Agent 实现 |
+| Phase 4 | ✅ 完成 | Channel 通知 |
+| Phase 5 | ✅ 完成 | Web UI |
