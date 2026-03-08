@@ -48,6 +48,16 @@ const runDeliveryAgentTool: ChatCompletionTool = {
 const MCP_NOT_CONNECTED_WARNING =
   '\n> ⚠️ **注意：MCP 未连接**。当前不可用 Playwright 浏览器工具，无法执行自动化网页搜索。\n'
 
+/** 简历编译系统提示块 */
+const RESUME_SYSTEM_PROMPT = `
+## 简历制作技能
+- 使用 \`read_file\` 读取 \`data/userinfo.md\` 获取用户信息，结合 Typst 模板生成简历源文件。
+- 使用 \`typst_compile\` 工具（参数 \`input_path\`）将 .typ 文件编译为 PDF。
+- 生成的简历 PDF 路径固定为 \`output/resume.pdf\`。
+- 支持用户通过对话要求修改（如"把项目 A 的描述精简到 2 行"），修改后重新编译。
+- 中文字符渲染依赖系统字体（Noto Sans CJK SC 等），模板已配置字体回退。
+`
+
 // ============================================================================
 // MainAgent 实现
 // ============================================================================
@@ -81,10 +91,11 @@ ${mcpWarning}
 
 ## 核心 SOP (执行优先级最高)
 ${skills}
-
+${RESUME_SYSTEM_PROMPT}
 ## 可用工具概览
 - **upsert_job**: 更新或插入职位信息（推荐方式，内置文件锁与查重）。
 - **run_delivery_agent**: 启动 DeliveryAgent 执行投递。
+- **typst_compile**: 将 Typst 源文件编译为 PDF 简历。
 - **Playwright MCP 工具**: 浏览器操作。
 - **文件工具**: read_file, list_directory 等。
 
@@ -145,11 +156,18 @@ ${skills}
   }
 
   /**
-   * 移除正则通知钩子
-   * 现在通知由 Daily Digest 或外部逻辑处理，Agent 仅负责精准写入。
+   * 工具执行结果钩子
+   * typst_compile 成功时通过 EventEmitter 通知前端文件已生成
    */
-  protected async onToolResult(_toolName: string, _result: ToolResult): Promise<void> {
-    // 静默处理，不再在此处嗅探正则
+  protected async onToolResult(toolName: string, result: ToolResult): Promise<void> {
+    if (toolName === 'typst_compile' && result.success) {
+      this.emit('agent:log', {
+        level: 'info',
+        message: `简历 PDF 已生成：${result.content}`,
+        agentName: this.agentName,
+        timestamp: new Date(),
+      })
+    }
   }
 
   protected extractContext(): Record<string, unknown> {

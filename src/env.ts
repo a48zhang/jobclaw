@@ -9,6 +9,7 @@
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { execFileSync } from 'node:child_process'
 
 /** 必須環境変数の定義 */
 const REQUIRED_BASE: Array<{ key: string; description: string }> = [
@@ -52,6 +53,16 @@ export function validateEnv(features: Array<'smtp'> = []): void {
     throw new Error(
       `[JobClaw] 缺少必要的环境变量，请在 .env 文件中配置：\n${lines.join('\n')}\n\n` +
         `参考 .env.example 文件了解完整配置说明。`
+    )
+  }
+
+  // 检查 typst 是否可用（非致命，仅打印警告）
+  try {
+    execFileSync('typst', ['--version'], { stdio: 'ignore' })
+  } catch {
+    console.warn(
+      '[JobClaw] 警告：typst 未安装或不在 PATH 中。简历编译功能（typst_compile 工具）将不可用。\n' +
+        '          安装方法：https://typst.app/docs/installation/ 或 `cargo install typst-cli`'
     )
   }
 }

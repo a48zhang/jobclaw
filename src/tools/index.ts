@@ -8,9 +8,11 @@ import { executeAppendFile } from './appendFile'
 import { executeListDirectory } from './listDirectory'
 import { executeLockFile, executeUnlockFile } from './lockFile'
 import { executeUpsertJob } from './upsertJobWrapper'
+import { executeTypstCompile } from './typstCompile'
 
 // 导出共享工具（供测试和其他模块使用）
 export { getLockFilePath, normalizeAndValidatePath } from './utils'
+export { FONT_PATHS, findTypstBinary } from './typstCompile'
 
 /**
  * 工具名称常量
@@ -23,6 +25,7 @@ export const TOOL_NAMES = {
   LOCK_FILE: 'lock_file',
   UNLOCK_FILE: 'unlock_file',
   UPSERT_JOB: 'upsert_job',
+  TYPST_COMPILE: 'typst_compile',
 } as const
 
 /**
@@ -239,6 +242,29 @@ const upsertJobTool: ChatCompletionTool = {
 }
 
 /**
+ * typst_compile 工具定义
+ */
+const typstCompileTool: ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: TOOL_NAMES.TYPST_COMPILE,
+    description:
+      '将 Typst (.typ) 文件编译为 PDF 简历。输出路径固定为 workspace/output/resume.pdf。需确保 typst 已安装。',
+    parameters: {
+      type: 'object',
+      properties: {
+        input_path: {
+          type: 'string',
+          description: '相对于 workspace 的 .typ 源文件路径',
+        },
+      },
+      required: ['input_path'],
+      additionalProperties: false,
+    },
+  },
+}
+
+/**
  * 所有工具的数组，可直接用于 OpenAI API 调用
  */
 export const TOOLS: ChatCompletionTool[] = [
@@ -249,6 +275,7 @@ export const TOOLS: ChatCompletionTool[] = [
   lockFileTool,
   unlockFileTool,
   upsertJobTool,
+  typstCompileTool,
 ]
 
 // ============================================================================
@@ -282,6 +309,8 @@ export async function executeTool(
       return executeUnlockFile(args, context)
     case TOOL_NAMES.UPSERT_JOB:
       return executeUpsertJob(args, context)
+    case TOOL_NAMES.TYPST_COMPILE:
+      return executeTypstCompile(args, context)
     default:
       return { success: false, content: '', error: `未知工具：${name}` }
   }
