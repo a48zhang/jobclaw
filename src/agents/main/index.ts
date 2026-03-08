@@ -4,6 +4,7 @@ import { BaseAgent } from '../base'
 import type { BaseAgentConfig, AgentSnapshot } from '../base/types'
 import type { ToolResult } from '../../tools/index'
 import type { Channel } from '../../channel/base'
+import { eventBus } from '../../eventBus'
 
 // ============================================================================
 // 接口定义
@@ -52,7 +53,8 @@ const MCP_NOT_CONNECTED_WARNING =
 const RESUME_SYSTEM_PROMPT = `
 ## 简历制作技能
 - 使用 \`read_file\` 读取 \`data/userinfo.md\` 获取用户信息，结合 Typst 模板生成简历源文件。
-- 使用 \`typst_compile\` 工具（参数 \`input_path\`）将 .typ 文件编译为 PDF。
+- 使用 \`write_file\` 或 \`append_file\` 将填充后的简历内容写入 \`data/resume.typ\`。
+- 使用 \`typst_compile\` 工具（参数 \`input_path: "data/resume.typ"\`）将 .typ 文件编译为 PDF。
 - 生成的简历 PDF 路径固定为 \`output/resume.pdf\`。
 - 支持用户通过对话要求修改（如"把项目 A 的描述精简到 2 行"），修改后重新编译。
 - 中文字符渲染依赖系统字体（Noto Sans CJK SC 等），模板已配置字体回退。
@@ -157,11 +159,11 @@ ${RESUME_SYSTEM_PROMPT}
 
   /**
    * 工具执行结果钩子
-   * typst_compile 成功时通过 EventEmitter 通知前端文件已生成
+   * typst_compile 成功时通过全局 eventBus 通知前端文件已生成
    */
   protected async onToolResult(toolName: string, result: ToolResult): Promise<void> {
     if (toolName === 'typst_compile' && result.success) {
-      this.emit('agent:log', {
+      eventBus.emit('agent:log', {
         level: 'info',
         message: `简历 PDF 已生成：${result.content}`,
         agentName: this.agentName,
