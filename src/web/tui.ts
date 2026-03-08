@@ -150,14 +150,24 @@ export class TUI {
     this.inputBox.key('enter', async () => {
       const value = this.inputBox.getValue().trim()
       this.inputBox.clearValue()
+      if (!value) {
+        this.screen.render()
+        return
+      }
+
+      // Show busy status
+      const originalLabel = this.inputBox.options.label || ' Command > '
+      this.inputBox.setLabel(' [Running...] ')
       this.screen.render()
-      if (!value) return
+
       this.activityLog.log(`{cyan-fg}> ${value}{/}`)
       this.screen.render()
       try {
         await this.onCommand(value)
       } catch (err) {
         this.activityLog.log(`{red-fg}[error] ${(err as Error).message}{/}`)
+      } finally {
+        this.inputBox.setLabel(originalLabel)
         this.screen.render()
       }
     })

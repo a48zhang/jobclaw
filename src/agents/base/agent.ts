@@ -97,7 +97,7 @@ export abstract class BaseAgent extends EventEmitter {
     try {
       return await Promise.race([interventionPromise, timeoutPromise])
     } finally {
-      if (timeoutId!) clearTimeout(timeoutId!)
+      if (timeoutId) clearTimeout(timeoutId)
     }
   }
 
