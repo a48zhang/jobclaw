@@ -23,6 +23,8 @@ const SUBJECT_MAP: Record<ChannelMessageType, string> = {
   delivery_failed: '【JobClaw】投递失败',
   delivery_blocked: '【JobClaw】投递需人工介入',
   cron_complete: '【JobClaw】定时任务完成',
+  tool_warn: '【JobClaw】工具运行警告',
+  tool_error: '【JobClaw】工具运行错误',
 }
 
 /** 对字符串做 HTML escape，防止注入 */

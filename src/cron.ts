@@ -16,7 +16,7 @@ import { createMCPClient } from './mcp'
 async function main() {
   const mode = process.argv[2] === 'digest' ? 'digest' : 'search';
   
-  validateEnv(['smtp', 'openai']);
+  validateEnv(['smtp']);
   validateWorkspace('./workspace');
 
   const channel = new EmailChannel({
@@ -34,6 +34,7 @@ async function main() {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     const deliveryAgent = new DeliveryAgent({
+      agentName: 'delivery',
       openai,
       model: process.env.MODEL ?? 'gpt-4o',
       workspaceRoot: './workspace',
@@ -42,6 +43,7 @@ async function main() {
     });
 
     const mainAgent = new MainAgent({
+      agentName: 'main',
       openai,
       model: process.env.MODEL ?? 'gpt-4o',
       workspaceRoot: './workspace',
