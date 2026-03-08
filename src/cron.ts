@@ -2,9 +2,7 @@
  * src/cron.ts — 定时任务脚本
  * 支持两种模式：
  * 1. search: 搜索新职位 (默认)
- *    # bun src/cron.ts search
  * 2. digest: 发送日报汇总
- *    # bun src/cron.ts digest
  */
 import OpenAI from 'openai'
 import { MainAgent } from './agents/main'
@@ -14,13 +12,10 @@ import { validateEnv } from './env'
 import { createMCPClient } from './mcp'
 import { loadConfig } from './config'
 
-async function main() {
-  const mode = process.argv[2] === 'digest' ? 'digest' : 'search';
-  const WORKSPACE_ROOT = './workspace';
-  
-  validateEnv(WORKSPACE_ROOT, ['smtp']);
+export async function runCron(workspaceRoot: string, mode: 'search' | 'digest' = 'search') {
+  validateEnv(workspaceRoot, ['smtp']);
 
-  const config = loadConfig(WORKSPACE_ROOT);
+  const config = loadConfig(workspaceRoot);
 
   const channel = new EmailChannel({
     smtpHost: process.env.SMTP_HOST!,
@@ -44,7 +39,7 @@ async function main() {
       openai,
       model: config.MODEL_ID,
       summaryModel: config.SUMMARY_MODEL_ID,
-      workspaceRoot: WORKSPACE_ROOT,
+      workspaceRoot: workspaceRoot,
       mcpClient,
       channel,
     });
@@ -54,7 +49,7 @@ async function main() {
       openai,
       model: config.MODEL_ID,
       summaryModel: config.SUMMARY_MODEL_ID,
-      workspaceRoot: WORKSPACE_ROOT,
+      workspaceRoot: workspaceRoot,
       deliveryAgent,
       mcpClient,
       channel,
@@ -81,7 +76,3 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(`[cron] ${process.argv[2] || 'search'} 任务失败:`, err);
-  process.exit(1);
-});
