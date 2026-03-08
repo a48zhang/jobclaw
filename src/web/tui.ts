@@ -1,0 +1,304 @@
+/**
+ * TUI Dashboard - Phase 4 Team A
+ * Full-screen interactive terminal dashboard using blessed & blessed-contrib
+ *
+ * Layout:
+ *   ┌──────────────────────┬──────────────────┐
+ *   │     Job Monitor      │  Stats Panel     │
+ *   ├──────────────────────┴──────────────────┤
+ *   │            Agent Activity Log           │
+ *   ├─────────────────────────────────────────┤
+ *   │                Input Box                │
+ *   └─────────────────────────────────────────┘
+ */
+import * as blessed from 'blessed'
+import * as contrib from 'blessed-contrib'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import { TUIChannel } from '../channel/tui'
+import type { BaseAgent } from '../agents/base/agent'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface JobRow {
+  company: string
+  title: string
+  url: string
+  status: string
+  time: string
+}
+
+export interface TUIOptions {
+  workspaceRoot: string
+  /** Called when the user submits a command from the Input Box */
+  onCommand: (input: string) => Promise<void>
+}
+
+// ─── jobs.md parser ───────────────────────────────────────────────────────────
+
+/**
+ * Parse jobs.md into an array of JobRow objects.
+ * Gracefully skips malformed lines.
+ */
+export function parseJobsMd(content: string): JobRow[] {
+  const rows: JobRow[] = []
+  const lines = content.split('\n')
+
+  let pastHeader = false
+  for (const line of lines) {
+    if (!line.trim().startsWith('|')) continue
+    // Skip header separator lines like | --- |
+    if (/^\|\s*[-:]+\s*\|/.test(line)) {
+      pastHeader = true
+      continue
+    }
+    if (!pastHeader) continue
+
+    const cols = line.split('|').map((c) => c.trim())
+    // cols[0] is empty (before first |), cols[1..5] are the data columns
+    if (cols.length < 6) continue
+    const [, company, title, url, status, time] = cols
+    if (!company && !title) continue
+    rows.push({ company: company ?? '', title: title ?? '', url: url ?? '', status: status ?? '', time: time ?? '' })
+  }
+  return rows
+}
+
+// Column headers for the Job Monitor table
+const JOB_TABLE_HEADERS = ['公司', '职位', '链接', '状态', '时间']
+
+export class TUI {
+  private screen: blessed.Widgets.Screen
+  private jobTable: contrib.Widgets.TableElement
+  private activityLog: contrib.Widgets.LogElement
+  private statsBox: blessed.Widgets.BoxElement
+  private inputBox: blessed.Widgets.TextboxElement
+  private channel: TUIChannel
+
+  private workspaceRoot: string
+  private jobsPath: string
+  private onCommand: (input: string) => Promise<void>
+  private watcher: fs.FSWatcher | null = null
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+  constructor(options: TUIOptions) {
+    this.workspaceRoot = options.workspaceRoot
+    this.jobsPath = path.resolve(options.workspaceRoot, 'data/jobs.md')
+    this.onCommand = options.onCommand
+
+    // ── Screen ──────────────────────────────────────────────────────────────
+    this.screen = blessed.screen({
+      smartCSR: true,
+      title: 'JobClaw 🦞',
+    })
+
+    // ── Grid (12 rows × 12 cols) ─────────────────────────────────────────────
+    const grid = new contrib.grid({ rows: 12, cols: 12, screen: this.screen })
+
+    // ── Job Monitor (top-left 7 rows × 8 cols) ───────────────────────────────
+    this.jobTable = grid.set(0, 0, 7, 8, contrib.table, {
+      keys: true,
+      vi: true,
+      label: ' Job Monitor ',
+      border: { type: 'line' },
+      style: {
+        header: { fg: 'cyan', bold: true },
+        cell: { fg: 'white', selected: { bg: 'blue' } },
+      },
+      columnWidth: [16, 20, 36, 12, 12],
+    } as contrib.Widgets.TableOptions)
+
+    // ── Stats Panel (top-right 7 rows × 4 cols) ──────────────────────────────
+    this.statsBox = grid.set(0, 8, 7, 4, blessed.box, {
+      label: ' Stats ',
+      border: { type: 'line' },
+      content: this.buildStatsContent(0, 0, 0),
+      tags: true,
+      style: { fg: 'white' },
+    })
+
+    // ── Agent Activity Log (middle 4 rows × 12 cols) ─────────────────────────
+    this.activityLog = grid.set(7, 0, 4, 12, contrib.log, {
+      label: ' Agent Activity ',
+      border: { type: 'line' },
+      scrollable: true,
+      style: { fg: 'green' },
+      bufferLength: 200,
+    } as contrib.Widgets.LogOptions)
+
+    // ── Input Box (bottom 1 row × 12 cols) ───────────────────────────────────
+    this.inputBox = grid.set(11, 0, 1, 12, blessed.textbox, {
+      label: ' Command > ',
+      border: { type: 'line' },
+      style: { fg: 'yellow', focus: { border: { fg: 'yellow' } } },
+      inputOnFocus: true,
+    })
+
+    // ── TUIChannel wired to Activity Log ─────────────────────────────────────
+    this.channel = new TUIChannel((line, type) => {
+      const color = type === 'error' ? '{red-fg}' : type === 'warn' ? '{yellow-fg}' : '{green-fg}'
+      this.activityLog.log(`${color}${line}{/}`)
+      this.screen.render()
+    })
+
+    // ── Key bindings ─────────────────────────────────────────────────────────
+    this.screen.key(['escape', 'q', 'C-c'], () => {
+      this.destroy()
+      process.exit(0)
+    })
+
+    this.inputBox.key('enter', async () => {
+      const value = this.inputBox.getValue().trim()
+      this.inputBox.clearValue()
+      this.screen.render()
+      if (!value) return
+      this.activityLog.log(`{cyan-fg}> ${value}{/}`)
+      this.screen.render()
+      try {
+        await this.onCommand(value)
+      } catch (err) {
+        this.activityLog.log(`{red-fg}[error] ${(err as Error).message}{/}`)
+        this.screen.render()
+      }
+    })
+
+    this.inputBox.focus()
+    this.screen.render()
+  }
+
+  // ── Public API ──────────────────────────────────────────────────────────────
+
+  /** The TUIChannel instance to pass to agents */
+  get tuiChannel(): TUIChannel {
+    return this.channel
+  }
+
+  /**
+   * Subscribe to a BaseAgent's lifecycle events.
+   * Wires up `intervention_required` → modal prompt.
+   */
+  attachAgent(agent: BaseAgent): void {
+    agent.on('intervention_required', ({ prompt, resolve }: { prompt: string; resolve: (v: string) => void }) => {
+      this.showInterventionModal(prompt, resolve)
+    })
+  }
+
+  /** Start watching jobs.md for changes */
+  startWatching(): void {
+    if (this.watcher) return
+
+    // Initial render
+    this.refreshJobTable()
+
+    try {
+      this.watcher = fs.watch(this.jobsPath, () => {
+        // Debounce: refresh within 100ms of the last change (well within the 500ms requirement)
+        if (this.refreshTimer) clearTimeout(this.refreshTimer)
+        this.refreshTimer = setTimeout(() => {
+          this.refreshJobTable()
+        }, 100) // well within the 500ms requirement
+      })
+    } catch {
+      // File might not exist yet; poll instead
+      setInterval(() => this.refreshJobTable(), 500)
+    }
+  }
+
+  /** Render the TUI (call after setup) */
+  render(): void {
+    this.screen.render()
+  }
+
+  /** Clean up watchers and destroy the screen */
+  destroy(): void {
+    if (this.watcher) {
+      this.watcher.close()
+      this.watcher = null
+    }
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer)
+      this.refreshTimer = null
+    }
+    this.screen.destroy()
+  }
+
+  // ── Private helpers ─────────────────────────────────────────────────────────
+
+  private refreshJobTable(): void {
+    let rows: JobRow[] = []
+    try {
+      const content = fs.readFileSync(this.jobsPath, 'utf-8')
+      rows = parseJobsMd(content)
+    } catch {
+      rows = []
+    }
+
+    const headers = JOB_TABLE_HEADERS
+    const data = rows.map((r) => [r.company, r.title, r.url, r.status, r.time])
+
+    this.jobTable.setData({ headers, data })
+
+    // Update stats
+    const found = rows.length
+    const applied = rows.filter((r) => r.status === 'applied').length
+    const failed = rows.filter((r) => r.status === 'failed').length
+    this.statsBox.setContent(this.buildStatsContent(found, applied, failed))
+
+    this.screen.render()
+  }
+
+  private buildStatsContent(found: number, applied: number, failed: number): string {
+    return [
+      '',
+      `  {cyan-fg}发现:{/}   ${found}`,
+      `  {green-fg}投递:{/}  ${applied}`,
+      `  {red-fg}失败:{/}   ${failed}`,
+    ].join('\n')
+  }
+
+  /** Show a modal asking the user to enter intervention input */
+  private showInterventionModal(prompt: string, resolve: (v: string) => void): void {
+    const modal = blessed.box({
+      top: 'center',
+      left: 'center',
+      width: '60%',
+      height: 9,
+      border: { type: 'line' },
+      label: ' ⚠ 人工干预 ',
+      style: { border: { fg: 'yellow' }, fg: 'white' },
+      tags: true,
+      content: `{yellow-fg}${prompt}{/}\n\n请在下方输入后按 Enter 继续：`,
+    })
+
+    const input = blessed.textbox({
+      parent: modal,
+      top: 6,
+      left: 2,
+      right: 2,
+      height: 1,
+      style: { fg: 'yellow' },
+      inputOnFocus: true,
+    })
+
+    this.screen.append(modal)
+    input.focus()
+    this.screen.render()
+
+    const submit = () => {
+      const value = input.getValue()
+      this.screen.remove(modal)
+      this.inputBox.focus()
+      this.screen.render()
+      resolve(value)
+    }
+
+    input.key('enter', submit)
+    // Also allow Escape to resolve with empty string so Agent is not permanently stuck
+    input.key('escape', () => {
+      this.screen.remove(modal)
+      this.inputBox.focus()
+      this.screen.render()
+      resolve('')
+    })
+  }
+}

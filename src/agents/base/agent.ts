@@ -8,6 +8,7 @@ import type {
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { EventEmitter } from 'node:events'
 import { executeTool, TOOLS, type ToolContext, type ToolResult } from '../../tools/index'
 import type { AgentState, Session, Task } from '../../types'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants'
@@ -17,7 +18,7 @@ import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types'
 /** 工具调用超时时间（2 分钟） */
 const TOOL_CALL_TIMEOUT_MS = 120_000
 
-export abstract class BaseAgent {
+export abstract class BaseAgent extends EventEmitter {
   protected openai: OpenAI
   protected mcpClient?: MCPClient
   public readonly agentName: string
@@ -35,7 +36,10 @@ export abstract class BaseAgent {
   protected compressor: ContextCompressor
   protected availableTools: ChatCompletionTool[] | null = null
 
+  private interventionResolve?: (value: string) => void
+
   constructor(config: BaseAgentConfig) {
+    super()
     this.openai = config.openai
     this.agentName = config.agentName
     this.model = config.model
@@ -54,6 +58,25 @@ export abstract class BaseAgent {
 
   /** 系统提示词 - 子类必须实现 */
   protected abstract get systemPrompt(): string
+
+  /**
+   * 请求人工干预（HITL）
+   * 发出 `intervention_required` 事件，挂起 Agent 循环，等待外部调用 resolve 后恢复
+   */
+  async requestIntervention(prompt: string): Promise<string> {
+    return new Promise<string>((resolve) => {
+      this.interventionResolve = resolve
+      this.emit('intervention_required', {
+        prompt,
+        resolve: (input: string) => this.resolveIntervention(input),
+      })
+    })
+  }
+
+  private resolveIntervention(input: string): void {
+    this.interventionResolve?.(input)
+    this.interventionResolve = undefined
+  }
 
   /** 运行 Agent 主循环 */
   async run(input: string): Promise<string> {

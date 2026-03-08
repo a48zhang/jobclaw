@@ -1011,3 +1011,49 @@ describe('状态转换', () => {
     expect(agent.getState().state).toBe('error')
   })
 })
+
+// ============================================================================
+// requestIntervention & EventEmitter 测试 — Phase 4 Team A
+// ============================================================================
+
+describe('requestIntervention (HITL)', () => {
+  let mockOpenAI: OpenAI
+  let agent: TestAgent
+
+  beforeEach(() => {
+    mockOpenAI = createMockOpenAI()
+    agent = new TestAgent({
+      openai: mockOpenAI,
+      agentName: 'test',
+      model: 'gpt-4o',
+      workspaceRoot: TEST_WORKSPACE,
+    })
+  })
+
+  test('TC-HITL-01: BaseAgent 继承自 EventEmitter，具备 on() 方法', () => {
+    expect(typeof agent.on).toBe('function')
+    expect(typeof agent.emit).toBe('function')
+  })
+
+  test('TC-HITL-02: requestIntervention 发出 intervention_required 事件', async () => {
+    const handler = mock(({ resolve }: { prompt: string; resolve: (v: string) => void }) => {
+      resolve('用户答复')
+    })
+
+    agent.on('intervention_required', handler)
+    const result = await agent.requestIntervention('请输入验证码')
+
+    expect(handler).toHaveBeenCalledTimes(1)
+    const payload = (handler.mock.calls[0] as [{ prompt: string; resolve: (v: string) => void }])[0]
+    expect(payload.prompt).toBe('请输入验证码')
+    expect(result).toBe('用户答复')
+  })
+
+  test('TC-HITL-03: resolve 调用后 Agent 收到正确字符串', async () => {
+    agent.on('intervention_required', ({ resolve }: { prompt: string; resolve: (v: string) => void }) => {
+      setTimeout(() => resolve('abc123'), 10)
+    })
+    const result = await agent.requestIntervention('验证码')
+    expect(result).toBe('abc123')
+  })
+})
