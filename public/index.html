@@ -170,31 +170,44 @@ let interventionAgentName = 'main'
 // ─── WebSocket with auto-reconnect ──────────────────────────────────────────
 let ws = null
 let reconnectTimer = null
+const WS_RECONNECT_DELAY_MS = 3000
+
+// Named WS event handlers — stored so they can be removed with removeEventListener
+function onWsOpen() {
+  setWsStatus(true)
+  clearTimeout(reconnectTimer)
+}
+
+function onWsMessage(ev) {
+  try {
+    const { event, data } = JSON.parse(ev.data)
+    handleWsEvent(event, data)
+  } catch { /* ignore malformed */ }
+}
+
+function onWsClose() {
+  setWsStatus(false)
+  reconnectTimer = setTimeout(connectWS, WS_RECONNECT_DELAY_MS)
+}
+
+function onWsError() {
+  ws.close()
+}
 
 function connectWS() {
+  // Remove listeners from previous socket before creating a new one
+  if (ws) {
+    ws.removeEventListener('open', onWsOpen)
+    ws.removeEventListener('message', onWsMessage)
+    ws.removeEventListener('close', onWsClose)
+    ws.removeEventListener('error', onWsError)
+  }
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   ws = new WebSocket(`${proto}://${location.host}/ws`)
-
-  ws.addEventListener('open', () => {
-    setWsStatus(true)
-    clearTimeout(reconnectTimer)
-  })
-
-  ws.addEventListener('message', (ev) => {
-    try {
-      const { event, data } = JSON.parse(ev.data)
-      handleWsEvent(event, data)
-    } catch { /* ignore malformed */ }
-  })
-
-  ws.addEventListener('close', () => {
-    setWsStatus(false)
-    reconnectTimer = setTimeout(connectWS, 3000)
-  })
-
-  ws.addEventListener('error', () => {
-    ws.close()
-  })
+  ws.addEventListener('open', onWsOpen)
+  ws.addEventListener('message', onWsMessage)
+  ws.addEventListener('close', onWsClose)
+  ws.addEventListener('error', onWsError)
 }
 
 function setWsStatus(connected) {
