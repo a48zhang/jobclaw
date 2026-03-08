@@ -56,41 +56,22 @@ export function validateEnv(features: Array<'smtp'> = []): void {
     )
   }
 
-  // 检查 typst 是否可用（自动尝试安装）
+  // 检查 typst 是否可用（仅警告，不自动安装）
   try {
     execFileSync('typst', ['--version'], { stdio: 'ignore' })
   } catch {
-    // 检查 cargo 安装路径是否在 PATH 中，如果不在则尝试自动安装
     const home = process.env.HOME || ''
     const cargoBinDir = path.join(home, '.cargo', 'bin')
     const typstPath = path.join(cargoBinDir, 'typst')
-    const cargoPath = path.join(cargoBinDir, 'cargo')
-    
+
     if (fs.existsSync(typstPath)) {
-      // 如果二进制存在但不在 PATH 中，尝试临时添加到 PATH
+      // 路径存在但不在 PATH 中
       process.env.PATH = `${cargoBinDir}${path.delimiter}${process.env.PATH}`
     } else {
-      console.log('[JobClaw] 检测到 typst 未安装，准备自动安装...')
-      try {
-        // 1. 确保 cargo 存在
-        if (!fs.existsSync(cargoPath)) {
-          console.log('[JobClaw] 检测到 cargo 未安装，正在通过 rustup 安装 Rust 工具链...')
-          const installCmd = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-          execSync(installCmd, { stdio: 'inherit' })
-        }
-        
-        // 2. 将 cargo 路径加入临时 PATH 以便执行安装
-        process.env.PATH = `${cargoBinDir}${path.delimiter}${process.env.PATH}`
-        
-        // 3. 通过 cargo 安装 typst-cli
-        console.log('[JobClaw] 正在通过 cargo 安装 typst-cli...')
-        execFileSync('cargo', ['install', 'typst-cli'], { stdio: 'inherit' })
-      } catch (err) {
-        console.warn(
-          `[JobClaw] 警告：typst 自动安装失败（${(err as Error).message}）。简历编译功能将不可用。\n` +
-            '          请手动安装：https://typst.app/docs/installation/'
-        )
-      }
+      console.warn(
+        '[JobClaw] 提示：检测到 typst 未安装。简历编译功能暂不可用。\n' +
+        '          你可以在运行过程中要求 Agent “安装 typst” 来自动配置环境。'
+      )
     }
   }
 }

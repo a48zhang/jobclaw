@@ -55,8 +55,9 @@ const RESUME_SYSTEM_PROMPT = `
 - 使用 \`read_file\` 读取 \`data/userinfo.md\` 获取用户信息，结合 Typst 模板生成简历源文件。
 - 使用 \`write_file\` 或 \`append_file\` 将填充后的简历内容写入 \`data/resume.typ\`。
 - 使用 \`typst_compile\` 工具（参数 \`input_path: "data/resume.typ"\`）将 .typ 文件编译为 PDF。
+- **环境依赖**: 如果 \`typst_compile\` 提示未安装环境，必须先询问用户：“检测到系统未安装 Typst 环境，是否需要我为您自动安装？”。
+- **自动安装**: 只有在用户明确同意后，才能调用 \`install_typst\` 工具。安装完成后即可继续编译。
 - 生成的简历 PDF 路径固定为 \`output/resume.pdf\`。
-- 支持用户通过对话要求修改（如"把项目 A 的描述精简到 2 行"），修改后重新编译。
 - 中文字符渲染依赖系统字体（Noto Sans CJK SC 等），模板已配置字体回退。
 `
 

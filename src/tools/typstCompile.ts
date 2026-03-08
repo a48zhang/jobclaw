@@ -33,9 +33,15 @@ export async function findTypstBinary(): Promise<string | null> {
   } catch {
     // 检查常见安装路径是否在 PATH 中（针对刚刚安装的情况）
     const home = process.env.HOME || ''
-    const cargoBin = path.join(home, '.cargo', 'bin', 'typst')
-    if (fs.existsSync(cargoBin)) return cargoBin
-
+    const cargoBinDir = path.join(home, '.cargo', 'bin')
+    const typstBin = path.join(cargoBinDir, 'typst')
+    if (fs.existsSync(typstBin)) {
+      // 临时更新当前进程的 PATH 以便后续调用
+      if (!process.env.PATH?.includes(cargoBinDir)) {
+        process.env.PATH = `${cargoBinDir}${path.delimiter}${process.env.PATH}`
+      }
+      return typstBin
+    }
     return null
   }
 }
@@ -60,7 +66,6 @@ export async function autoInstallCargo(): Promise<boolean> {
   console.log('[JobClaw] 检测到 cargo 未安装，正在通过 rustup 自动安装 Rust 工具链...')
   try {
     // 使用 curl 下载并运行 rustup 安装脚本 (非交互模式 -y)
-    // 这是一个常见的 Linux/Codespace 环境操作
     const installCmd = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
     execSync(installCmd, { stdio: 'inherit' })
     
@@ -75,8 +80,7 @@ export async function autoInstallCargo(): Promise<boolean> {
 }
 
 /**
- * 自动安装 typst
- * 优先尝试使用 cargo 安装，因为这是 Codespace 和 Linux 开发环境最通用的方式
+ * 自动安装 typst (由 install_typst 工具调用)
  */
 export async function autoInstallTypst(): Promise<boolean> {
   console.log('[JobClaw] 正在尝试自动安装 typst...')
@@ -101,27 +105,20 @@ export async function autoInstallTypst(): Promise<boolean> {
 
 /**
  * 构建 typst compile 命令参数
- * @param inputPath 输入 .typ 文件的绝对路径
- * @param outputPath 输出 PDF 文件的绝对路径
- * @returns 命令参数数组
  */
 export function buildTypstArgs(inputPath: string, outputPath: string): string[] {
   const args = ['compile']
-
-  // 添加存在的字体路径
   for (const fontPath of FONT_PATHS) {
     if (fs.existsSync(fontPath)) {
       args.push('--font-path', fontPath)
     }
   }
-
   args.push(inputPath, outputPath)
   return args
 }
 
 /**
  * typst_compile 工具实现
- * 将指定的 .typ 文件编译为 PDF，输出到 workspace/output/resume.pdf
  */
 export async function executeTypstCompile(
   args: Record<string, unknown>,
@@ -133,18 +130,15 @@ export async function executeTypstCompile(
     return { success: false, content: '', error: 'input_path 参数必须是字符串' }
   }
 
-  // 校验输入路径安全性
   const normalizedInput = normalizeAndValidatePath(input_path, context.workspaceRoot)
   if (!normalizedInput) {
     return { success: false, content: '', error: '路径不安全，拒绝访问' }
   }
 
-  // 检查输入文件是否存在
   if (!fs.existsSync(normalizedInput)) {
     return { success: false, content: '', error: `输入文件不存在：${input_path}` }
   }
 
-  // 确保输出目录存在且可写
   const outputDir = path.resolve(context.workspaceRoot, 'output')
   try {
     if (!fs.existsSync(outputDir)) {
@@ -152,51 +146,47 @@ export async function executeTypstCompile(
     }
     fs.accessSync(outputDir, fs.constants.W_OK)
   } catch (err) {
-    return {
-      success: false,
-      content: '',
-      error: `输出目录不可写或无法创建：${outputDir}`,
-    }
+    return { success: false, content: '', error: `输出目录不可写或无法创建：${outputDir}` }
   }
 
   const outputPath = path.resolve(outputDir, 'resume.pdf')
 
-  // 检查 typst 是否可用
-  let typstBin = await findTypstBinary()
-  if (!typstBin) {
-    // 尝试自动安装
-    const installed = await autoInstallTypst()
-    if (installed) {
-      typstBin = await findTypstBinary()
-    }
-  }
-
+  // 检查 typst 是否可用（此时不自动安装）
+  const typstBin = await findTypstBinary()
   if (!typstBin) {
     return {
       success: false,
       content: '',
       error:
-        'typst 未安装且自动安装失败。请手动安装：https://typst.app/docs/installation/',
+        'typst 未安装，无法执行编译。请告知用户环境缺失，如果用户要求安装，请调用 install_typst 工具。',
     }
   }
 
-  // 构建并执行编译命令
   const typstArgs = buildTypstArgs(normalizedInput, outputPath)
 
   try {
     await execFileAsync(typstBin, typstArgs, { timeout: TYPST_COMPILE_TIMEOUT_MS })
     const relativeOutput = path.relative(context.workspaceRoot, outputPath)
-    return {
-      success: true,
-      content: `简历编译成功，已输出到 ${relativeOutput}`,
-    }
+    return { success: true, content: `简历编译成功，已输出到 ${relativeOutput}` }
   } catch (err) {
     const error = err as { stderr?: string; message?: string }
     const detail = error.stderr ?? error.message ?? String(err)
-    return {
-      success: false,
-      content: '',
-      error: `typst 编译失败：${detail}`,
-    }
+    return { success: false, content: '', error: `typst 编译失败：${detail}` }
+  }
+}
+
+/**
+ * install_typst 工具实现
+ * 只有在用户明确授权后，Agent 才会调用此工具。
+ */
+export async function executeInstallTypst(
+  _args: Record<string, unknown>,
+  _context: ToolContext
+): Promise<ToolResult> {
+  const installed = await autoInstallTypst()
+  if (installed) {
+    return { success: true, content: 'typst 环境安装成功。现在可以继续生成简历了。' }
+  } else {
+    return { success: false, content: '', error: '自动安装 typst 失败，请用户检查终端输出或手动安装。' }
   }
 }
