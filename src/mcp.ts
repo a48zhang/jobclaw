@@ -34,7 +34,16 @@ export async function createMCPClient(): Promise<MCPClient & { close(): Promise<
 
     async callTool(name: string, args: Record<string, unknown>) {
       const result = await client.callTool({ name, arguments: args })
-      // MCP SDK returns content array; stringify for BaseAgent
+      // Extract text content if available to save tokens
+      const textParts = (result.content as any[])
+        .filter((c) => c.type === 'text')
+        .map((c) => c.text)
+
+      if (textParts.length > 0) {
+        return textParts.join('\n')
+      }
+
+      // Fallback to JSON if no text parts found
       return JSON.stringify(result.content)
     },
 

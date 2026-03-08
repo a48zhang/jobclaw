@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 import { MainAgent } from './agents/main'
 import { DeliveryAgent } from './agents/delivery'
 import { needsBootstrap, BOOTSTRAP_PROMPT } from './bootstrap'
-import { validateEnv } from './env'
+import { validateEnv, validateWorkspace } from './env'
 import { createMCPClient } from './mcp'
 import { TUI } from './web/tui'
 import { TUIChannel } from './channel/tui'
@@ -18,7 +18,6 @@ async function main() {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
 
     // Bootstrap 引导循环：持续运行直到用户完成配置并生成 config.yaml
-    // During bootstrap we use a no-op channel since TUI is not yet running
     if (needsBootstrap(WORKSPACE_ROOT)) {
       // During bootstrap we use a stderr-backed channel since TUI is not yet running
       const bootstrapChannel = new TUIChannel((line) => process.stderr.write(line + '\n'))
@@ -37,12 +36,15 @@ async function main() {
         workspaceRoot: WORKSPACE_ROOT,
         deliveryAgent: bootstrapDelivery,
         mcpClient,
+        channel: bootstrapChannel,
       })
       while (needsBootstrap(WORKSPACE_ROOT)) {
-        const result = await bootstrapAgent.run(BOOTSTRAP_PROMPT)
-        process.stderr.write(`[JobClaw] ${result}\n`)
+        await bootstrapAgent.run(BOOTSTRAP_PROMPT)
       }
     }
+
+    // ── Pre-launch Workspace Validation ──────────────────────────────────────
+    validateWorkspace(WORKSPACE_ROOT)
 
     // ── Launch TUI ──────────────────────────────────────────────────────────
     let mainAgent: MainAgent

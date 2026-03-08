@@ -10,13 +10,14 @@ import OpenAI from 'openai'
 import { MainAgent } from './agents/main'
 import { DeliveryAgent } from './agents/delivery'
 import { EmailChannel } from './channel/email'
-import { validateEnv } from './env'
+import { validateEnv, validateWorkspace } from './env'
 import { createMCPClient } from './mcp'
 
 async function main() {
   const mode = process.argv[2] === 'digest' ? 'digest' : 'search';
   
   validateEnv(['smtp', 'openai']);
+  validateWorkspace('./workspace');
 
   const channel = new EmailChannel({
     smtpHost: process.env.SMTP_HOST!,

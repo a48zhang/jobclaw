@@ -15,10 +15,10 @@ export interface UpsertJobArgs {
  * upsertJob 工具：结构化地更新或插入职位信息到 jobs.md
  */
 export async function upsertJob(args: UpsertJobArgs, context: ToolContext): Promise<{ success: boolean; action: 'added' | 'updated' | 'skipped'; message: string }> {
-  const { workspaceRoot, logger } = context;
+  const { workspaceRoot, logger, agentName } = context;
   const jobsPath = path.join(workspaceRoot, 'data/jobs.md');
   const relativeJobsPath = 'data/jobs.md'; // 用于 lockFile 的相对路径标识
-  const holder = 'system';
+  const holder = agentName;
 
   try {
     // 调用重构后的底层 lockFile
