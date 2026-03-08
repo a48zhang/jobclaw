@@ -85,30 +85,33 @@ describe('cron main()', () => {
 // ─── validateEnv ────────────────────────────────────────────────────────────
 describe('validateEnv', () => {
   const originalEnv = process.env
+  let tmpDir: string
 
   beforeEach(() => {
     // 隔离环境变量
     process.env = { ...originalEnv }
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-env-test-'))
   })
 
   afterEach(() => {
     process.env = originalEnv
+    fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
   test('所有必须变量都存在时不抛出异常', () => {
     process.env.OPENAI_API_KEY = 'sk-test'
-    expect(() => validateEnv()).not.toThrow()
+    expect(() => validateEnv(tmpDir)).not.toThrow()
   })
 
-  test('缺少 OPENAI_API_KEY 时抛出友好错误', () => {
+  test('缺少 LLM API Key 时抛出友好错误', () => {
     delete process.env.OPENAI_API_KEY
-    expect(() => validateEnv()).toThrow(/OPENAI_API_KEY/)
+    expect(() => validateEnv(tmpDir)).toThrow(/LLM API Key/)
   })
 
   test('smtp 模式下缺少 SMTP_HOST 时抛出友好错误', () => {
     process.env.OPENAI_API_KEY = 'sk-test'
     delete process.env.SMTP_HOST
-    expect(() => validateEnv(['smtp'])).toThrow(/SMTP_HOST/)
+    expect(() => validateEnv(tmpDir, ['smtp'])).toThrow(/SMTP_HOST/)
   })
 
   test('smtp 模式下所有变量都存在时不抛出异常', () => {
@@ -117,12 +120,15 @@ describe('validateEnv', () => {
     process.env.SMTP_USER = 'noreply@example.com'
     process.env.SMTP_PASSWORD = 'secret'
     process.env.NOTIFY_EMAIL = 'user@example.com'
-    expect(() => validateEnv(['smtp'])).not.toThrow()
+    expect(() => validateEnv(tmpDir, ['smtp'])).not.toThrow()
   })
 
-  test('错误信息引用 .env.example', () => {
+  test('可以使用 config.json 代替环境变量', () => {
     delete process.env.OPENAI_API_KEY
-    expect(() => validateEnv()).toThrow(/.env.example/)
+    fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
+      llm: { apiKey: 'sk-from-file', model: 'gpt-4' }
+    }))
+    expect(() => validateEnv(tmpDir)).not.toThrow()
   })
 })
 
@@ -133,12 +139,16 @@ describe('needsBootstrap', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-test-'))
   })
 
-  test('TC-B-09: config.yaml 存在时返回 false', () => {
-    fs.writeFileSync(path.join(tmpDir, 'config.yaml'), 'version: "1"\n')
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  test('TC-B-09: config.json 存在时返回 false', () => {
+    fs.writeFileSync(path.join(tmpDir, 'config.json'), '{"llm":{}}\n')
     expect(needsBootstrap(tmpDir)).toBe(false)
   })
 
-  test('TC-B-10: config.yaml 不存在时返回 true', () => {
+  test('TC-B-10: config.json 不存在时返回 true', () => {
     expect(needsBootstrap(tmpDir)).toBe(true)
   })
 })

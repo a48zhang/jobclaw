@@ -11,9 +11,11 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
+import { loadConfig } from './config'
+
 /** 必須環境変数の定義 */
 const REQUIRED_BASE: Array<{ key: string; description: string }> = [
-  { key: 'OPENAI_API_KEY', description: 'OpenAI API 密钥' },
+  // OPENAI_API_KEY 仍作为默认必填，除非 config.json 中提供了
 ]
 
 const REQUIRED_SMTP: Array<{ key: string; description: string }> = [
@@ -34,25 +36,31 @@ const USERINFO_REQUIRED_FIELDS: Array<{ pattern: RegExp; description: string }> 
 ]
 
 /**
- * 在程序启动前校验必要的环境变量。
- * 缺少任意必需变量时，打印友好提示并抛出错误（fail fast）。
+ * 在程序启动前校验必要的环境变量或配置文件。
  *
+ * @param workspaceRoot 工作区路径
  * @param features 额外需要校验的功能模块。目前支持 `'smtp'`。
  */
-export function validateEnv(features: Array<'smtp'> = []): void {
-  const required = [...REQUIRED_BASE]
+export function validateEnv(workspaceRoot: string, features: Array<'smtp'> = []): void {
+  const config = loadConfig(workspaceRoot)
+  const errors: string[] = []
 
-  if (features.includes('smtp')) {
-    required.push(...REQUIRED_SMTP)
+  if (!config.llm.apiKey) {
+    errors.push('  - LLM API Key：未在 config.json 或环境变量 (OPENAI_API_KEY) 中配置')
   }
 
-  const missing = required.filter(({ key }) => !process.env[key])
+  if (features.includes('smtp')) {
+    for (const { key, description } of REQUIRED_SMTP) {
+      if (!process.env[key]) {
+        errors.push(`  - ${key}：${description}`)
+      }
+    }
+  }
 
-  if (missing.length > 0) {
-    const lines = missing.map(({ key, description }) => `  - ${key}：${description}`)
+  if (errors.length > 0) {
     throw new Error(
-      `[JobClaw] 缺少必要的环境变量，请在 .env 文件中配置：\n${lines.join('\n')}\n\n` +
-        `参考 .env.example 文件了解完整配置说明。`
+      `[JobClaw] 基础配置不完整，请修复以下问题后重新启动：\n${errors.join('\n')}\n\n` +
+        `参考 .env.example 或引导说明。`
     )
   }
 

@@ -12,12 +12,16 @@ import { DeliveryAgent } from './agents/delivery'
 import { EmailChannel } from './channel/email'
 import { validateEnv, validateWorkspace } from './env'
 import { createMCPClient } from './mcp'
+import { loadConfig } from './config'
 
 async function main() {
   const mode = process.argv[2] === 'digest' ? 'digest' : 'search';
+  const WORKSPACE_ROOT = './workspace';
   
-  validateEnv(['smtp']);
-  validateWorkspace('./workspace');
+  validateEnv(WORKSPACE_ROOT, ['smtp']);
+  validateWorkspace(WORKSPACE_ROOT);
+
+  const config = loadConfig(WORKSPACE_ROOT);
 
   const channel = new EmailChannel({
     smtpHost: process.env.SMTP_HOST!,
@@ -31,13 +35,14 @@ async function main() {
   const mcpClient = await createMCPClient();
 
   try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const openai = new OpenAI({ apiKey: config.llm.apiKey });
 
     const deliveryAgent = new DeliveryAgent({
       agentName: 'delivery',
       openai,
-      model: process.env.MODEL ?? 'gpt-4o',
-      workspaceRoot: './workspace',
+      model: config.llm.model,
+      summaryModel: config.llm.summaryModel,
+      workspaceRoot: WORKSPACE_ROOT,
       mcpClient,
       channel,
     });
@@ -45,8 +50,9 @@ async function main() {
     const mainAgent = new MainAgent({
       agentName: 'main',
       openai,
-      model: process.env.MODEL ?? 'gpt-4o',
-      workspaceRoot: './workspace',
+      model: config.llm.model,
+      summaryModel: config.llm.summaryModel,
+      workspaceRoot: WORKSPACE_ROOT,
       deliveryAgent,
       mcpClient,
       channel,

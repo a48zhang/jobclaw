@@ -7,25 +7,27 @@ import { createMCPClient } from './mcp'
 import { TUI } from './web/tui'
 import { TUIChannel } from './channel/tui'
 import { startServer, registerAgent } from './web/server'
+import { loadConfig } from './config'
 
 const WORKSPACE_ROOT = './workspace'
 
 async function main() {
-  validateEnv()
+  validateEnv(WORKSPACE_ROOT)
 
+  const config = loadConfig(WORKSPACE_ROOT)
   const mcpClient = await createMCPClient()
 
   try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    const openai = new OpenAI({ apiKey: config.llm.apiKey })
 
-    // Bootstrap 引导循环：持续运行直到用户完成配置并生成 config.yaml
+    // Bootstrap 引导循环：持续运行直到用户完成配置并生成 config.json
     if (needsBootstrap(WORKSPACE_ROOT)) {
       // During bootstrap we use a stderr-backed channel since TUI is not yet running
       const bootstrapChannel = new TUIChannel((line) => process.stderr.write(line + '\n'))
       const bootstrapDelivery = new DeliveryAgent({
         openai,
         agentName: 'delivery',
-        model: process.env.MODEL ?? 'gpt-4o',
+        model: config.llm.model,
         workspaceRoot: WORKSPACE_ROOT,
         mcpClient,
         channel: bootstrapChannel,
@@ -33,7 +35,7 @@ async function main() {
       const bootstrapAgent = new MainAgent({
         openai,
         agentName: 'main',
-        model: process.env.MODEL ?? 'gpt-4o',
+        model: config.llm.model,
         workspaceRoot: WORKSPACE_ROOT,
         deliveryAgent: bootstrapDelivery,
         mcpClient,
@@ -65,7 +67,8 @@ async function main() {
     const deliveryAgent = new DeliveryAgent({
       openai,
       agentName: 'delivery',
-      model: process.env.MODEL ?? 'gpt-4o',
+      model: config.llm.model,
+      summaryModel: config.llm.summaryModel,
       workspaceRoot: WORKSPACE_ROOT,
       mcpClient,
       channel: tui.tuiChannel,
@@ -74,7 +77,8 @@ async function main() {
     mainAgent = new MainAgent({
       openai,
       agentName: 'main',
-      model: process.env.MODEL ?? 'gpt-4o',
+      model: config.llm.model,
+      summaryModel: config.llm.summaryModel,
       workspaceRoot: WORKSPACE_ROOT,
       deliveryAgent,
       mcpClient,
