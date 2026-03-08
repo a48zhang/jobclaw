@@ -83,7 +83,26 @@ export async function executeTypstCompile(
   // 确保输出目录存在
   const outputDir = path.resolve(context.workspaceRoot, 'output')
   if (!fs.existsSync(outputDir)) {
-    fs.mkdirSync(outputDir, { recursive: true })
+    try {
+      fs.mkdirSync(outputDir, { recursive: true })
+    } catch (mkdirErr) {
+      return {
+        success: false,
+        content: '',
+        error: `无法创建输出目录 "${outputDir}"：${(mkdirErr as Error).message}`,
+      }
+    }
+  }
+
+  // 预检输出目录写权限
+  try {
+    fs.accessSync(outputDir, fs.constants.W_OK)
+  } catch {
+    return {
+      success: false,
+      content: '',
+      error: `输出目录 "${outputDir}" 不可写，请检查文件系统权限`,
+    }
   }
 
   const outputPath = path.resolve(outputDir, 'resume.pdf')

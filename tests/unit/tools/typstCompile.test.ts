@@ -128,6 +128,40 @@ describe('typst_compile 工具（路径安全校验）', () => {
     expect(result.error).toContain('input_path 参数必须是字符串')
   })
 
+  test('输出目录不可写时返回详细权限错误', async () => {
+    // 仅在 Linux / macOS（非 root）环境下执行此测试
+    if (process.platform === 'win32' || process.getuid?.() === 0) {
+      expect(true).toBe(true) // root 或 Windows 下跳过
+      return
+    }
+
+    // 创建一个只读的输出目录（权限 0o444）
+    const readonlyWorkspace = path.resolve(TEMP_DIR, 'readonly_ws')
+    const readonlyOutput = path.resolve(readonlyWorkspace, 'output')
+    fs.mkdirSync(readonlyOutput, { recursive: true })
+
+    // 在 output 目录里创建一个合法 .typ 文件
+    const typPath = path.resolve(readonlyWorkspace, 'test.typ')
+    fs.writeFileSync(typPath, '#set page(paper: "a4")\nHello')
+
+    // 将输出目录设置为只读
+    fs.chmodSync(readonlyOutput, 0o444)
+
+    try {
+      const result = await executeTool(
+        TOOL_NAMES.TYPST_COMPILE,
+        { input_path: 'test.typ' },
+        { workspaceRoot: readonlyWorkspace, agentName: 'test' }
+      )
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('输出目录')
+      expect(result.error).toContain('不可写')
+    } finally {
+      // 恢复权限，允许清理
+      try { fs.chmodSync(readonlyOutput, 0o755) } catch { /* ignore */ }
+    }
+  })
+
   test('typst 不可用时返回友好错误', async () => {
     // 创建一个真实的 .typ 文件用于测试
     const typPath = path.resolve(TEMP_DIR, 'test.typ')
