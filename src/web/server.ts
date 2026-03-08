@@ -118,7 +118,7 @@ export function createApp(workspaceRoot: string): Hono {
     if (name !== 'targets' && name !== 'userinfo') {
       return c.json({ ok: false, error: 'Unknown config name' }, 400)
     }
-    const filePath = path.resolve(workspaceRoot, `${name}.md`)
+    const filePath = path.resolve(workspaceRoot, `data/${name}.md`)
     try {
       const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : ''
       return c.json({ ok: true, content })
@@ -133,7 +133,7 @@ export function createApp(workspaceRoot: string): Hono {
     if (name !== 'targets' && name !== 'userinfo') {
       return c.json({ ok: false, error: 'Unknown config name' }, 400)
     }
-    const relPath = `${name}.md`
+    const relPath = `data/${name}.md`
     try {
       const body = await c.req.json<{ content?: string }>()
       const content = typeof body.content === 'string' ? body.content : ''
@@ -148,6 +148,19 @@ export function createApp(workspaceRoot: string): Hono {
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }
+  })
+
+  // ── REST: POST /api/resume/build ─────────────────────────────────────────
+  // Stub endpoint — Team A will implement the full build logic here.
+  // Returns { ok: true } immediately so the frontend can be wired up now.
+  app.post('/api/resume/build', async (_c) => {
+    eventBus.emit('agent:log', {
+      agentName: 'web-server',
+      type: 'info',
+      message: '[resume] build requested (stub — awaiting Team A integration)',
+      timestamp: new Date().toISOString(),
+    })
+    return _c.json({ ok: true })
   })
 
   // ── Serve static files from public/ ──────────────────────────────────────

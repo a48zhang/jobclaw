@@ -13,10 +13,17 @@ beforeAll(() => {
 
 // Cleanup test config files after tests
 afterAll(() => {
-  const targets = path.join(TEST_WORKSPACE, 'targets.md')
-  const userinfo = path.join(TEST_WORKSPACE, 'userinfo.md')
-  if (fs.existsSync(targets)) fs.unlinkSync(targets)
-  if (fs.existsSync(userinfo)) fs.unlinkSync(userinfo)
+  const targets = path.join(TEST_WORKSPACE, 'data/targets.md')
+  const userinfo = path.join(TEST_WORKSPACE, 'data/userinfo.md')
+  // Only remove files that were created by the tests (check if they have test content)
+  for (const f of [targets, userinfo]) {
+    if (fs.existsSync(f)) {
+      const content = fs.readFileSync(f, 'utf-8')
+      if (content.includes('Test Targets') || content.includes('张三')) {
+        fs.unlinkSync(f)
+      }
+    }
+  }
 })
 
 describe('Web Server API', () => {
@@ -87,14 +94,19 @@ describe('Web Server API', () => {
   // ── GET /api/config/:name ───────────────────────────────────────────────────
 
   test('TC-C-05: GET /api/config/targets 文件不存在时返回空内容', async () => {
-    const targets = path.join(TEST_WORKSPACE, 'targets.md')
+    const targets = path.join(TEST_WORKSPACE, 'data/targets.md')
+    const backup = fs.existsSync(targets) ? fs.readFileSync(targets, 'utf-8') : null
     if (fs.existsSync(targets)) fs.unlinkSync(targets)
 
-    const res = await app.fetch(new Request('http://localhost/api/config/targets'))
-    expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.ok).toBe(true)
-    expect(body.content).toBe('')
+    try {
+      const res = await app.fetch(new Request('http://localhost/api/config/targets'))
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.ok).toBe(true)
+      expect(body.content).toBe('')
+    } finally {
+      if (backup !== null) fs.writeFileSync(targets, backup, 'utf-8')
+    }
   })
 
   test('TC-C-06: GET /api/config/unknown 返回 400', async () => {
@@ -105,6 +117,9 @@ describe('Web Server API', () => {
   // ── POST /api/config/:name ──────────────────────────────────────────────────
 
   test('TC-C-07: POST /api/config/targets 写入文件并返回 ok:true', async () => {
+    const targetsPath = path.join(TEST_WORKSPACE, 'data/targets.md')
+    const backup = fs.existsSync(targetsPath) ? fs.readFileSync(targetsPath, 'utf-8') : null
+
     const res = await app.fetch(
       new Request('http://localhost/api/config/targets', {
         method: 'POST',
@@ -116,8 +131,12 @@ describe('Web Server API', () => {
     const body = await res.json()
     expect(body.ok).toBe(true)
 
-    const written = fs.readFileSync(path.join(TEST_WORKSPACE, 'targets.md'), 'utf-8')
+    const written = fs.readFileSync(targetsPath, 'utf-8')
     expect(written).toContain('公司 A')
+
+    // Restore
+    if (backup !== null) fs.writeFileSync(targetsPath, backup, 'utf-8')
+    else fs.unlinkSync(targetsPath)
   })
 
   test('TC-C-08: POST /api/config/unknown 返回 400', async () => {
@@ -131,7 +150,24 @@ describe('Web Server API', () => {
     expect(res.status).toBe(400)
   })
 
+  // ── POST /api/resume/build ──────────────────────────────────────────────────
+
+  test('TC-C-10: POST /api/resume/build 返回 ok:true', async () => {
+    const res = await app.fetch(
+      new Request('http://localhost/api/resume/build', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.ok).toBe(true)
+  })
+
   test('TC-C-09: POST /api/config/userinfo 写入用户信息', async () => {
+    const userinfoPath = path.join(TEST_WORKSPACE, 'data/userinfo.md')
+    const backup = fs.existsSync(userinfoPath) ? fs.readFileSync(userinfoPath, 'utf-8') : null
+
     const res = await app.fetch(
       new Request('http://localhost/api/config/userinfo', {
         method: 'POST',
@@ -143,7 +179,11 @@ describe('Web Server API', () => {
     const body = await res.json()
     expect(body.ok).toBe(true)
 
-    const written = fs.readFileSync(path.join(TEST_WORKSPACE, 'userinfo.md'), 'utf-8')
+    const written = fs.readFileSync(userinfoPath, 'utf-8')
     expect(written).toContain('张三')
+
+    // Restore
+    if (backup !== null) fs.writeFileSync(userinfoPath, backup, 'utf-8')
+    else fs.unlinkSync(userinfoPath)
   })
 })

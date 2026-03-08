@@ -410,10 +410,9 @@ document.getElementById('gen-resume').addEventListener('click', async () => {
   btn.setAttribute('aria-busy', 'true')
   btn.textContent = '生成中...'
   try {
-    const res = await fetch('/api/intervention', {
+    const res = await fetch('/api/resume/build', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: '生成简历', agentName: 'main' })
     })
     const json = await res.json()
     if (json.ok) {

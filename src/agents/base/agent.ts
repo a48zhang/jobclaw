@@ -128,7 +128,7 @@ export abstract class BaseAgent extends EventEmitter {
         this.emit('intervention_handled', { prompt })
       }
     }
-    eventBus.once('intervention:resolved', webResolveHandler)
+    eventBus.on('intervention:resolved', webResolveHandler)
 
     const timeoutPromise = new Promise<string>((resolve) => {
       timeoutId = setTimeout(() => {
