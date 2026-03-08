@@ -68,9 +68,10 @@ export async function unlockFile(inputPath: string, holder: string, workspaceRoo
  * 锁定文件工具包装器 (Tool Wrapper)
  */
 export async function executeLockFile(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
-  const { path: inputPath, holder } = args as { path: unknown; holder: unknown }
+  const { path: inputPath } = args as { path: unknown }
+  const holder = context.agentName
 
-  if (typeof inputPath !== 'string' || typeof holder !== 'string') {
+  if (typeof inputPath !== 'string') {
     return { success: false, content: '', error: '参数必须是字符串' }
   }
 
@@ -91,9 +92,10 @@ export async function executeLockFile(args: Record<string, unknown>, context: To
  * 解锁文件工具包装器 (Tool Wrapper)
  */
 export async function executeUnlockFile(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
-  const { path: inputPath, holder } = args as { path: unknown; holder: unknown }
+  const { path: inputPath } = args as { path: unknown }
+  const holder = context.agentName
 
-  if (typeof inputPath !== 'string' || typeof holder !== 'string') {
+  if (typeof inputPath !== 'string') {
     return { success: false, content: '', error: '参数必须是字符串' }
   }
 

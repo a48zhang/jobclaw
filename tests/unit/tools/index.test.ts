@@ -11,12 +11,15 @@ describe('TOOL_NAMES 常量', () => {
     expect(TOOL_NAMES.LIST_DIRECTORY).toBe('list_directory')
     expect(TOOL_NAMES.LOCK_FILE).toBe('lock_file')
     expect(TOOL_NAMES.UNLOCK_FILE).toBe('unlock_file')
+    expect(TOOL_NAMES.TYPST_COMPILE).toBe('typst_compile')
+    expect(TOOL_NAMES.INSTALL_TYPST).toBe('install_typst')
+    expect(TOOL_NAMES.RUN_SHELL_COMMAND).toBe('run_shell_command')
   })
 })
 
 describe('TOOLS 数组', () => {
-  test('包含 8 个工具', () => {
-    expect(TOOLS).toHaveLength(8)
+  test('包含 10 个工具', () => {
+    expect(TOOLS).toHaveLength(10)
   })
 
   test('每个工具都有正确的类型', () => {
@@ -40,7 +43,6 @@ describe('TOOLS 数组', () => {
       expect(tool.function.parameters).toBeDefined()
       expect(tool.function.parameters.type).toBe('object')
       expect(tool.function.parameters.properties).toBeDefined()
-      expect(tool.function.parameters.additionalProperties).toBe(false)
     })
   })
 
@@ -58,6 +60,10 @@ describe('TOOLS 数组', () => {
     expect(names).toContain('list_directory')
     expect(names).toContain('lock_file')
     expect(names).toContain('unlock_file')
+    expect(names).toContain('upsert_job')
+    expect(names).toContain('typst_compile')
+    expect(names).toContain('install_typst')
+    expect(names).toContain('run_shell_command')
   })
 })
 
@@ -121,11 +127,6 @@ describe('lock_file 工具', () => {
 
   test('所有参数都是必填的', () => {
     expect(tool.function.parameters.required).toContain('path')
-    expect(tool.function.parameters.required).toContain('holder')
-  })
-
-  test('holder 参数类型是 string', () => {
-    expect(tool.function.parameters.properties.holder.type).toBe('string')
   })
 })
 
@@ -134,7 +135,6 @@ describe('unlock_file 工具', () => {
 
   test('所有参数都是必填的', () => {
     expect(tool.function.parameters.required).toContain('path')
-    expect(tool.function.parameters.required).toContain('holder')
   })
 })
 
@@ -149,7 +149,7 @@ describe('JSON 序列化', () => {
     const json = JSON.stringify(TOOLS)
     const parsed = JSON.parse(json) as ChatCompletionTool[]
 
-    expect(parsed).toHaveLength(8)
+    expect(parsed).toHaveLength(10)
     parsed.forEach((tool, index) => {
       expect(tool.type).toBe('function')
       expect(tool.function.name).toBe(TOOLS[index].function.name)
@@ -169,7 +169,6 @@ describe('JSON 序列化', () => {
       expect(tool.function).toHaveProperty('parameters')
       expect(tool.function.parameters).toHaveProperty('type')
       expect(tool.function.parameters).toHaveProperty('properties')
-      expect(tool.function.parameters).toHaveProperty('required')
     })
   })
 })

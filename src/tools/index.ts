@@ -3,10 +3,13 @@ import { executeWriteFile } from './writeFile'
 import { executeAppendFile } from './appendFile'
 import { executeListDirectory } from './listDirectory'
 import { executeLockFile, executeUnlockFile } from './lockFile'
-import { executeUpsertJob } from './upsertJob'
+import { executeUpsertJob } from './upsertJobWrapper'
 import { executeTypstCompile, executeInstallTypst } from './typstCompile'
 import { executeShellCommand, detectShell, detectOS } from './shell'
+import { getLockFilePath } from './utils'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
+
+export { getLockFilePath }
 
 export interface ToolContext {
   workspaceRoot: string
