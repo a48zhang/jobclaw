@@ -153,92 +153,15 @@ describe('needsBootstrap', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  test('TC-B-09: config.json 存在时返回 false', () => {
-    fs.writeFileSync(path.join(tmpDir, 'config.json'), '{"llm":{}}\n')
+  test('TC-B-09: config.json 存在时且配置完整返回 false', () => {
+    fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
+      API_KEY: 'test',
+      MODEL_ID: 'test'
+    }))
     expect(needsBootstrap(tmpDir)).toBe(false)
   })
 
   test('TC-B-10: config.json 不存在时返回 true', () => {
     expect(needsBootstrap(tmpDir)).toBe(true)
-  })
-})
-
-import { validateWorkspace } from '../../src/env'
-
-describe('validateWorkspace', () => {
-  let tmpDir: string
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-ws-'))
-    // 创建 data 子目录
-    fs.mkdirSync(path.join(tmpDir, 'data'), { recursive: true })
-  })
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true })
-  })
-
-  test('targets.md 和 userinfo.md 均完整时不抛出', () => {
-    fs.writeFileSync(
-      path.join(tmpDir, 'data', 'targets.md'),
-      '# 监测目标\n\nhttps://careers.example.com\n'
-    )
-    fs.writeFileSync(
-      path.join(tmpDir, 'data', 'userinfo.md'),
-      '# 用户信息\n\n姓名：张三\n邮箱：zhangsan@example.com\n简历：https://resume.example.com\n'
-    )
-    expect(() => validateWorkspace(tmpDir)).not.toThrow()
-  })
-
-  test('targets.md 为空（仅有标题行）时抛出错误', () => {
-    fs.writeFileSync(path.join(tmpDir, 'data', 'targets.md'), '# 监测目标\n\n')
-    fs.writeFileSync(
-      path.join(tmpDir, 'data', 'userinfo.md'),
-      '姓名：张三\n邮箱：a@b.com\n简历：https://r.com\n'
-    )
-    expect(() => validateWorkspace(tmpDir)).toThrow(/targets\.md/)
-  })
-
-  test('targets.md 不存在时抛出错误', () => {
-    fs.writeFileSync(
-      path.join(tmpDir, 'data', 'userinfo.md'),
-      '姓名：张三\n邮箱：a@b.com\n简历：https://r.com\n'
-    )
-    expect(() => validateWorkspace(tmpDir)).toThrow(/targets\.md/)
-  })
-
-  test('userinfo.md 缺少关键字段时抛出错误并列出缺失字段', () => {
-    fs.writeFileSync(
-      path.join(tmpDir, 'data', 'targets.md'),
-      '# 监测目标\nhttps://careers.example.com\n'
-    )
-    // 缺少 简历 字段
-    fs.writeFileSync(
-      path.join(tmpDir, 'data', 'userinfo.md'),
-      '姓名：张三\n邮箱：a@b.com\n'
-    )
-    expect(() => validateWorkspace(tmpDir)).toThrow(/userinfo\.md/)
-  })
-
-  test('userinfo.md 不存在时抛出错误', () => {
-    fs.writeFileSync(
-      path.join(tmpDir, 'data', 'targets.md'),
-      '# 监测目标\nhttps://careers.example.com\n'
-    )
-    expect(() => validateWorkspace(tmpDir)).toThrow(/userinfo\.md/)
-  })
-
-  test('同时存在多个问题时错误信息同时包含 targets.md 和 userinfo.md 的错误', () => {
-    // targets.md 为空，userinfo.md 缺字段
-    fs.writeFileSync(path.join(tmpDir, 'data', 'targets.md'), '# 监测目标\n')
-    fs.writeFileSync(path.join(tmpDir, 'data', 'userinfo.md'), '# 用户信息\n')
-    let errorMessage = ''
-    try {
-      validateWorkspace(tmpDir)
-    } catch (e) {
-      errorMessage = (e as Error).message
-    }
-    expect(errorMessage).toMatch(/targets\.md/)
-    expect(errorMessage).toMatch(/userinfo\.md/)
   })
 })

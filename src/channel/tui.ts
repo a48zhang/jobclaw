@@ -1,50 +1,53 @@
 import type { Channel, ChannelMessage } from './base'
 
-/** TUIChannel 消息处理回调 */
-export type TUILogCallback = (line: string, type: 'info' | 'warn' | 'error') => void
-
-/**
- * TUIChannel - 将 Agent 消息实时输出到 TUI Activity Log 窗口
- * 实现 Channel 接口，供 MainAgent / DeliveryAgent 使用
- */
 export class TUIChannel implements Channel {
-  private onLog: TUILogCallback
-
-  constructor(onLog: TUILogCallback) {
-    this.onLog = onLog
-  }
+  constructor(private logger: (line: string, type: 'info' | 'warn' | 'error') => void) {}
 
   async send(message: ChannelMessage): Promise<void> {
-    const type = this.resolveLogType(message)
-    const line = this.formatMessage(message)
-    this.onLog(line, type)
-  }
+    const time = message.timestamp.toLocaleTimeString()
+    let prefix = `[${time}]`
+    let text = ''
+    let level: 'info' | 'warn' | 'error' = 'info'
 
-  private resolveLogType(message: ChannelMessage): 'info' | 'warn' | 'error' {
     switch (message.type) {
+      case 'new_job':
+        text = `🦞 发现新职位: ${message.payload['company']} - ${message.payload['title']}`
+        break
+      case 'delivery_start':
+        text = `🚀 开始投递: ${message.payload['company']}`
+        break
+      case 'delivery_success':
+        text = `✅ 投递成功: ${message.payload['company']}`
+        break
       case 'delivery_failed':
-      case 'tool_error':
-        return 'error'
+        text = `❌ 投递失败: ${message.payload['company']} (原因: ${message.payload['reason'] || '未知'})`
+        level = 'error'
+        break
       case 'delivery_blocked':
-      case 'tool_warn':
-        return 'warn'
+        text = `⚠️ 投递受阻: ${message.payload['company']} (需要人工介入)`
+        level = 'warn'
+        break
+      case 'cron_complete':
+        text = `📅 定时任务完成: ${message.payload['summary'] || message.payload['message']}`
+        break
+      case 'user_input' as any: // 新增用户输入类型
+        text = `${message.payload['message']}` // 保持原始颜色标签
+        break
+      case 'agent_response' as any:
+        text = `🤖 ${message.payload['message']}`
+        break
+      case 'tool_error' as any:
+        text = `🛠️ 工具错误: ${message.payload['message']}`
+        level = 'error'
+        break
+      case 'tool_warn' as any:
+        text = `🛠️ 工具警告: ${message.payload['message']}`
+        level = 'warn'
+        break
       default:
-        return 'info'
+        text = `[${message.type}] ${JSON.stringify(message.payload)}`
     }
-  }
 
-  private formatMessage(message: ChannelMessage): string {
-    const ts = message.timestamp.toLocaleTimeString()
-    const company = typeof message.payload['company'] === 'string' ? message.payload['company'] : ''
-    const title = typeof message.payload['title'] === 'string' ? message.payload['title'] : ''
-    const msg = typeof message.payload['message'] === 'string' ? message.payload['message'] : ''
-    const subject = [company, title].filter(Boolean).join(' · ')
-    
-    let content = subject
-    if (msg) content = content ? `${content} | ${msg}` : msg
-
-    return content
-      ? `[${ts}] [${message.type}] ${content}`
-      : `[${ts}] [${message.type}]`
+    this.logger(`${prefix} ${text}`, level)
   }
 }

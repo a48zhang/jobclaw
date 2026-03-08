@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 import { MainAgent } from './agents/main'
 import { DeliveryAgent } from './agents/delivery'
 import { needsBootstrap, BOOTSTRAP_PROMPT } from './bootstrap'
-import { validateEnv, validateWorkspace } from './env'
+import { validateEnv } from './env'
 import { createMCPClient } from './mcp'
 import { TUI } from './web/tui'
 import { TUIChannel } from './channel/tui'
@@ -48,18 +48,20 @@ async function main() {
       }
     }
 
-    // ── Pre-launch Workspace Validation ──────────────────────────────────────
-    validateWorkspace(WORKSPACE_ROOT)
-
     // ── Launch TUI ──────────────────────────────────────────────────────────
     let mainAgent: MainAgent
 
     const tui = new TUI({
       workspaceRoot: WORKSPACE_ROOT,
       onCommand: async (input) => {
+        tui.tuiChannel.send({
+          type: 'user_input' as any,
+          payload: { message: `{cyan-fg}> ${input}{/}` },
+          timestamp: new Date(),
+        })
         const response = await mainAgent.run(input)
         tui.tuiChannel.send({
-          type: 'cron_complete',
+          type: 'agent_response' as any,
           payload: { message: response },
           timestamp: new Date(),
         })

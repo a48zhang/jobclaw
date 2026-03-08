@@ -23,8 +23,21 @@ const DEFAULT_CONFIG: Config = {
  */
 export function loadConfig(workspaceRoot: string): Config {
   const configPath = path.join(workspaceRoot, 'config.json')
-  let fileConfig: Partial<Config> = {}
+  
+  // 如果配置文件不存在，自动创建一个模板
+  if (!fs.existsSync(configPath)) {
+    try {
+      if (!fs.existsSync(workspaceRoot)) {
+        fs.mkdirSync(workspaceRoot, { recursive: true })
+      }
+      fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf-8')
+      console.log(`[Config] 已在 ${configPath} 创建配置模板，请填写后运行。`)
+    } catch (err) {
+      console.error(`[Config] 无法创建模板文件:`, (err as Error).message)
+    }
+  }
 
+  let fileConfig: Partial<Config> = {}
   if (fs.existsSync(configPath)) {
     try {
       fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'))

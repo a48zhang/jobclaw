@@ -90,6 +90,7 @@ export class TUI {
     this.screen = blessed.screen({
       smartCSR: true,
       title: 'JobClaw 🦞',
+      fullUnicode: true,
     })
 
     // ── Grid (12 rows × 12 cols) ─────────────────────────────────────────────
@@ -115,6 +116,7 @@ export class TUI {
       content: this.buildStatsContent(0, 0, 0),
       tags: true,
       style: { fg: 'white' },
+      fullUnicode: true,
     })
 
     // ── Agent Activity Log (middle 4 rows × 12 cols) ─────────────────────────
@@ -124,6 +126,8 @@ export class TUI {
       scrollable: true,
       style: { fg: 'green' },
       bufferLength: 200,
+      fullUnicode: true,
+      tags: true, // 开启标签解析
     } as contrib.Widgets.LogOptions)
 
     // ── Input Box (bottom 1 row × 12 cols) ───────────────────────────────────
@@ -132,6 +136,8 @@ export class TUI {
       border: { type: 'line' },
       style: { fg: 'yellow', focus: { border: { fg: 'yellow' } } },
       inputOnFocus: true,
+      fullUnicode: true,
+      tags: true, // 开启标签解析
     })
 
     // ── TUIChannel wired to Activity Log ─────────────────────────────────────
@@ -160,14 +166,13 @@ export class TUI {
       this.inputBox.setLabel(' [Running...] ')
       this.screen.render()
 
-      this.activityLog.log(`{cyan-fg}> ${value}{/}`)
-      this.screen.render()
       try {
         await this.onCommand(value)
       } catch (err) {
         this.activityLog.log(`{red-fg}[error] ${(err as Error).message}{/}`)
       } finally {
         this.inputBox.setLabel(originalLabel)
+        this.inputBox.focus() // 重新聚焦，允许下一轮输入
         this.screen.render()
       }
     })
@@ -279,6 +284,7 @@ export class TUI {
       style: { border: { fg: 'yellow' }, fg: 'white' },
       tags: true,
       content: `{yellow-fg}${prompt}{/}\n\n请在下方输入后按 Enter 继续：`,
+      fullUnicode: true,
     })
 
     const input = blessed.textbox({
@@ -289,6 +295,7 @@ export class TUI {
       height: 1,
       style: { fg: 'yellow' },
       inputOnFocus: true,
+      fullUnicode: true,
     })
 
     const cleanup = () => {

@@ -126,17 +126,35 @@ export abstract class BaseAgent extends EventEmitter {
     while (this.iterations < this.maxIterations) {
       this.iterations++
       this.lastAction = 'llm_call'
-      const response = await this.callLLM(tools)
-      const message = response.choices[0]?.message
-      if (!message) throw new Error('LLM 返回空响应')
+      let response
+      try {
+        response = await this.callLLM(tools)
+      } catch (e: any) {
+        // 捕获 OpenAI SDK 抛出的详细错误 (如 401, 429 等)
+        const status = e.status || e.statusCode || 'Unknown'
+        const code = e.code || e.type || 'None'
+        const apiMsg = e.message || String(e)
+        throw new Error(`LLM API 请求失败 [Status: ${status}, Code: ${code}]: ${apiMsg}`)
+      }
+
+      const message = response.choices && response.choices[0]?.message
+      if (!message) {
+        // 如果请求成功但没有 choices，打印原始响应的 JSON 片段
+        const rawSnippet = JSON.stringify(response).slice(0, 200)
+        throw new Error(`LLM 响应格式异常: 缺少 choices。原始响应前200位: ${rawSnippet}`)
+      }
       if (message.content) result = message.content
+
+      // 无论是否有工具调用，都应记录助手消息
+      this.messages.push(message)
+
       if (message.tool_calls && message.tool_calls.length > 0) {
         this.lastAction = 'tool_call'
-        this.messages.push({ role: 'assistant', content: message.content, tool_calls: message.tool_calls })
         const toolResults = await this.executeToolCalls(message.tool_calls)
         for (const tr of toolResults) this.messages.push(tr)
         continue
       }
+
       if (result) {
         this.setState('idle'); this.lastAction = 'completed'; break
       }
@@ -243,7 +261,21 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   protected initMessages(input: string): void {
-    this.messages = utils.initMessages(this.messages, this.systemPrompt, input)
+    const systemContent = `${this.systemPrompt}\n\n重要：请始终使用中文与用户交流。`
+    if (this.messages.length === 0) {
+      this.messages = [
+        { role: 'system', content: systemContent },
+        { role: 'user', content: input },
+      ]
+    } else {
+      const hasSystem = this.messages.length > 0 && this.messages[0].role === 'system'
+      if (!hasSystem) {
+        this.messages.unshift({ role: 'system', content: systemContent })
+      } else {
+        this.messages[0].content = systemContent
+      }
+      this.messages.push({ role: 'user', content: input })
+    }
   }
 
   protected calculateTokens(): number {

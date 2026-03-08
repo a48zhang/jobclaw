@@ -10,7 +10,7 @@ import OpenAI from 'openai'
 import { MainAgent } from './agents/main'
 import { DeliveryAgent } from './agents/delivery'
 import { EmailChannel } from './channel/email'
-import { validateEnv, validateWorkspace } from './env'
+import { validateEnv } from './env'
 import { createMCPClient } from './mcp'
 import { loadConfig } from './config'
 
@@ -19,7 +19,6 @@ async function main() {
   const WORKSPACE_ROOT = './workspace';
   
   validateEnv(WORKSPACE_ROOT, ['smtp']);
-  validateWorkspace(WORKSPACE_ROOT);
 
   const config = loadConfig(WORKSPACE_ROOT);
 

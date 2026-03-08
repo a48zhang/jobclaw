@@ -1,14 +1,25 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
+import { loadConfig } from './config'
+
 /**
  * 检查是否需要执行 Bootstrap 引导流程。
- * Bootstrap 完成的标志位是 workspace/config.json 存在。
+ * 判定标准：config.json 不存在，或者其中的关键配置 (API_KEY/MODEL_ID) 为空。
  *
  * @param workspaceRoot workspace 根目录路径
  */
 export function needsBootstrap(workspaceRoot: string): boolean {
-  return !fs.existsSync(path.join(workspaceRoot, 'config.json'))
+  const configPath = path.join(workspaceRoot, 'config.json')
+  if (!fs.existsSync(configPath)) return true
+
+  try {
+    const config = loadConfig(workspaceRoot)
+    // 如果没有配置 API_KEY 或 MODEL_ID，说明只是个初始模板，仍需引导
+    return !config.API_KEY || !config.MODEL_ID
+  } catch {
+    return true
+  }
 }
 
 /**
