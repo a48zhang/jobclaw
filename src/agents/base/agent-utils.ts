@@ -25,12 +25,15 @@ export function wrapChannel(channel: Channel, agentName: string): Channel {
         typeof message.payload['message'] === 'string'
           ? `[${message.type}] ${message.payload['message']}`
           : `[${message.type}]`
-      eventBus.emit('agent:log', {
-        agentName,
-        type,
-        message: text,
-        timestamp: new Date().toISOString(),
-      })
+      
+      if (!message.streaming) {
+        eventBus.emit('agent:log', {
+          agentName,
+          type,
+          message: text,
+          timestamp: new Date().toISOString(),
+        })
+      }
       return channel.send(message)
     },
   }

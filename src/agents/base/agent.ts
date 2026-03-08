@@ -114,13 +114,12 @@ export abstract class BaseAgent extends EventEmitter {
     let result: string | null = null
     while (this.iterations < this.maxIterations) {
       this.iterations++; this.lastAction = 'llm_call'
-      let fullContent = ''; let toolCalls: any[] = []
+      let fullContent = ''; let toolCalls: any[] = []; let isFirstChunk = true
       try {
         const stream = await this.openai.chat.completions.create({
           model: this.model, messages: this.messages, tools, tool_choice: 'auto', stream: true
         })
 
-        let isFirstChunk = true
         for await (const chunk of stream) {
           const delta = chunk.choices[0]?.delta
           if (!delta) continue
@@ -129,7 +128,7 @@ export abstract class BaseAgent extends EventEmitter {
           if (delta.content) {
             fullContent += delta.content
             if (this.channel) {
-              this.channel.send({
+              await this.channel.send({
                 type: 'agent_response', timestamp: new Date(), payload: {},
                 streaming: { isFirst: isFirstChunk, isFinal: false, chunk: delta.content }
               })
@@ -148,9 +147,9 @@ export abstract class BaseAgent extends EventEmitter {
           }
         }
 
-        // 流结束：如果是内容流，发送 Final 标识
-        if (fullContent && this.channel) {
-          this.channel.send({
+        // 流结束：只要流启动过，就必须发送 Final 标识以重置 TUI 状态
+        if (!isFirstChunk && this.channel) {
+          await this.channel.send({
             type: 'agent_response', timestamp: new Date(), payload: {},
             streaming: { isFirst: false, isFinal: true, chunk: '' }
           })
@@ -165,7 +164,7 @@ export abstract class BaseAgent extends EventEmitter {
       if (finalToolCalls.length > 0) {
         this.lastAction = 'tool_call'
         for (const tc of finalToolCalls) {
-          if (this.channel) this.channel.send({ type: 'tool_call', payload: { toolName: tc.function.name, args: tc.function.arguments }, timestamp: new Date() })
+          if (this.channel) await this.channel.send({ type: 'tool_call', payload: { toolName: tc.function.name, args: tc.function.arguments }, timestamp: new Date() })
         }
         const toolResults = await this.executeToolCalls(finalToolCalls)
         for (const tr of toolResults) this.messages.push(tr)
@@ -175,6 +174,10 @@ export abstract class BaseAgent extends EventEmitter {
 
       if (fullContent) {
         result = fullContent; this.setState('idle'); this.lastAction = 'completed'
+        // 确保非流式模式下也能看到回复，或者作为流式结束的兜底
+        if (this.channel && isFirstChunk) {
+          await this.channel.send({ type: 'agent_response', payload: { message: fullContent }, timestamp: new Date() })
+        }
         if (!this.runningEphemeral) await this.saveSession()
         break
       }

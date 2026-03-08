@@ -5,6 +5,8 @@ export class TUIChannel implements Channel {
   private isStreaming: boolean = false
   private streamStartLines: number = 0
 
+  private lastStreamLineCount: number = 0
+
   constructor(private logger: (line: string, type: 'info' | 'warn' | 'error') => void, private getRawLog?: () => any) {}
 
   async send(message: ChannelMessage): Promise<void> {
@@ -19,39 +21,35 @@ export class TUIChannel implements Channel {
       const logObj = this.getRawLog ? this.getRawLog() : null
 
       if (message.streaming.isFirst) {
-        // 1. 打印页眉
-        this.logger(`${headerPrefix} (Agent)`, 'info')
-        this.streamingContent = '🤖 '
-        this.isStreaming = true
-        
-        // 2. 记录当前缓冲区长度，作为流内容的起始位置
-        if (logObj && Array.isArray(logObj.items)) {
-          this.streamStartLines = logObj.items.length
-          logObj.log('') // 为内容预留第一行
+        this.logger(`${headerPrefix} (Agent)`, 'info');
+        this.streamingContent = '';
+        this.isStreaming = true;
+        if (logObj) {
+          logObj.log('🤖 '); // 占位
+          this.streamStartLines = (logObj as any).getLines().length - 1;
         }
       }
 
-      this.streamingContent += message.streaming.chunk
-      
+      if (message.streaming.chunk) {
+        this.streamingContent += message.streaming.chunk;
+      }
+
       if (logObj && this.isStreaming) {
-        const items = logObj.items
-        if (Array.isArray(items)) {
-          // 关键修复：计算新内容会占据多少行（粗略按换行符拆分）
-          const newLines = this.streamingContent.split('\n').map(l => `{green-fg}${l}{/}`)
+        const contentLines = ('🤖 ' + this.streamingContent).split('\n');
+        contentLines.forEach((l, i) => {
+          const targetIdx = this.streamStartLines + i;
+          const currentLinesCount = (logObj as any).getLines().length;
+          const tagged = `{green-fg}${l}{/}`;
           
-          // 替换从起始位置开始的所有行
-          // 这样即便内容从单行变成了多行，旧的多行也会被正确覆盖，而不是残留在屏幕上
-          items.splice(this.streamStartLines, items.length - this.streamStartLines, ...newLines)
-          
-          // 触发 Blessed 的内部内容更新
-          if (typeof logObj.setContent === 'function') {
-            logObj.setContent(items.join('\n'))
+          if (targetIdx < currentLinesCount) {
+            (logObj as any).setLine(targetIdx, tagged);
+          } else {
+            logObj.log(tagged);
           }
-          logObj.setScrollPerc(100)
-          logObj.screen.render()
-        }
-      } else if (!this.getRawLog && message.streaming.isFinal) {
-        if (this.streamingContent) this.logger(`🤖 ${this.streamingContent}`, 'info')
+        });
+        
+        logObj.setScrollPerc(100);
+        logObj.screen.render();
       }
 
       if (message.streaming.isFinal) {
