@@ -10,13 +10,11 @@ export interface DeliveryAgentConfig extends BaseAgentConfig {
 }
 
 export class DeliveryAgent extends BaseAgent {
-  private channel: Channel
   /** 当前正在处理的招聘链接，由 browser_navigate 结果设置 */
   private currentJobUrl: string | null = null
 
   constructor(config: DeliveryAgentConfig) {
     super({ ...config, agentName: 'delivery' })
-    this.channel = config.channel
   }
 
   protected get systemPrompt(): string {
@@ -31,11 +29,13 @@ export class DeliveryAgent extends BaseAgent {
         const urlMatch = result.content.match(/https?:\/\/\S+/)
         if (urlMatch) {
           this.currentJobUrl = urlMatch[0]
-          await this.channel.send({
-            type: 'delivery_start',
-            payload: { url: this.currentJobUrl },
-            timestamp: new Date(),
-          })
+          if (this.channel) {
+            await this.channel.send({
+              type: 'delivery_start',
+              payload: { url: this.currentJobUrl },
+              timestamp: new Date(),
+            })
+          }
         }
         return
       }
@@ -59,17 +59,19 @@ export class DeliveryAgent extends BaseAgent {
         login_required: 'delivery_blocked',
       }
 
-      await this.channel.send({
-        type: typeMap[status] ?? 'delivery_failed',
-        payload: {
-          company: company.trim(),
-          title: title.trim(),
-          url: this.currentJobUrl,
-          status: status.trim(),
-          time: time.trim(),
-        },
-        timestamp: new Date(),
-      })
+      if (this.channel) {
+        await this.channel.send({
+          type: typeMap[status] ?? 'delivery_failed',
+          payload: {
+            company: company.trim(),
+            title: title.trim(),
+            url: this.currentJobUrl,
+            status: status.trim(),
+            time: time.trim(),
+          },
+          timestamp: new Date(),
+        })
+      }
     } catch (error) {
       console.error('[DeliveryAgent] channel.send 失败:', error)
     }

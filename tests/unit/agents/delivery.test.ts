@@ -7,9 +7,9 @@ mock.module('gpt-tokenizer', () => ({
   encode: (text: string) => new Array(Math.ceil(text.length / 4)).fill(0),
 }))
 
-import { DeliveryAgent } from './index'
-import type { DeliveryAgentConfig } from './index'
-import type { Channel, ChannelMessage } from '../../channel/base'
+import { DeliveryAgent } from '../../../src/agents/delivery/index'
+import type { DeliveryAgentConfig } from '../../../src/agents/delivery/index'
+import type { Channel, ChannelMessage } from '../../../src/channel/base'
 import OpenAI from 'openai'
 import * as path from 'node:path'
 

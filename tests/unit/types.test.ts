@@ -1,6 +1,6 @@
 // 类型定义单元测试 - Phase 1a
 import { describe, test, expect } from 'bun:test'
-import type { AgentState, Task, Session, TaskType, TaskStatus } from './types'
+import type { AgentState, Task, Session, TaskType, TaskStatus } from '../../src/types'
 
 describe('AgentState', () => {
   test('允许有效的状态值', () => {

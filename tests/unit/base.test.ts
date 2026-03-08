@@ -1,6 +1,6 @@
 // BaseAgent 单元测试
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
-import { BaseAgent, type BaseAgentConfig, type MCPClient } from './agents/base'
+import { BaseAgent, type BaseAgentConfig, type MCPClient } from '../../src/agents/base'
 import OpenAI from 'openai'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -54,7 +54,7 @@ const createMockOpenAI = () => {
 }
 
 // 测试工作区
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../workspace')
+const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../../workspace')
 const TEST_AGENT_DIR = path.join(TEST_WORKSPACE, 'agents', 'test')
 
 describe('BaseAgent', () => {

@@ -33,6 +33,8 @@ export interface ToolContext {
   workspaceRoot: string
   /** Agent 名称 */
   agentName: string
+  /** 可选的日志回调，用于将工具内部的警告/错误转发到 UI */
+  logger?: (line: string, type: 'info' | 'warn' | 'error') => void
 }
 
 /**

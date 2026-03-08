@@ -1,6 +1,6 @@
 // TUI utility tests — Phase 4 Team A
 import { describe, test, expect } from 'bun:test'
-import { parseJobsMd } from '../web/tui'
+import { parseJobsMd } from '../../../src/web/tui'
 
 describe('parseJobsMd', () => {
   test('TC-A-10: 空文件返回空数组', () => {

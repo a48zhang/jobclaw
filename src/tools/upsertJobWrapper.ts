@@ -20,8 +20,8 @@ export async function executeUpsertJob(
       };
     }
 
-    // 传递 context.workspaceRoot
-    const result = await upsertJob(upsertArgs, context.workspaceRoot);
+    // 传递 context
+    const result = await upsertJob(upsertArgs, context);
     
     if (result.success) {
       return {

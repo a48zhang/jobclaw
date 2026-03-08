@@ -178,9 +178,10 @@ export class TUI {
    * Wires up `intervention_required` → modal prompt.
    */
   attachAgent(agent: BaseAgent): void {
-    agent.on('intervention_required', ({ prompt, resolve }: { prompt: string; resolve: (v: string) => void }) => {
-      this.showInterventionModal(prompt, resolve)
-    })
+    const onRequired = ({ prompt, resolve }: { prompt: string; resolve: (v: string) => void }) => {
+      this.showInterventionModal(prompt, resolve, agent)
+    }
+    agent.on('intervention_required', onRequired)
   }
 
   /** Start watching jobs.md for changes */
@@ -257,7 +258,7 @@ export class TUI {
   }
 
   /** Show a modal asking the user to enter intervention input */
-  private showInterventionModal(prompt: string, resolve: (v: string) => void): void {
+  private showInterventionModal(prompt: string, resolve: (v: string) => void, agent: BaseAgent): void {
     const modal = blessed.box({
       top: 'center',
       left: 'center',
@@ -280,24 +281,40 @@ export class TUI {
       inputOnFocus: true,
     })
 
+    const cleanup = () => {
+      this.screen.remove(modal)
+      this.inputBox.focus()
+      this.screen.render()
+      agent.removeListener('intervention_timeout', onTimeout)
+      agent.removeListener('intervention_handled', onHandled)
+    }
+
+    const onTimeout = () => {
+      this.activityLog.log(`{yellow-fg}[HITL] 超时已自动跳过{/}`)
+      cleanup()
+    }
+
+    const onHandled = () => {
+      cleanup()
+    }
+
+    agent.once('intervention_timeout', onTimeout)
+    agent.once('intervention_handled', onHandled)
+
     this.screen.append(modal)
     input.focus()
     this.screen.render()
 
     const submit = () => {
       const value = input.getValue()
-      this.screen.remove(modal)
-      this.inputBox.focus()
-      this.screen.render()
+      cleanup()
       resolve(value)
     }
 
     input.key('enter', submit)
     // Also allow Escape to resolve with empty string so Agent is not permanently stuck
     input.key('escape', () => {
-      this.screen.remove(modal)
-      this.inputBox.focus()
-      this.screen.render()
+      cleanup()
       resolve('')
     })
   }

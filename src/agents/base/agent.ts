@@ -14,6 +14,7 @@ import type { AgentState, Session, Task } from '../../types'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants'
 import { ContextCompressor } from './context-compressor'
 import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types'
+import type { Channel } from '../../channel/base'
 
 /** 工具调用超时时间（2 分钟） */
 const TOOL_CALL_TIMEOUT_MS = 120_000
@@ -21,6 +22,7 @@ const TOOL_CALL_TIMEOUT_MS = 120_000
 export abstract class BaseAgent extends EventEmitter {
   protected openai: OpenAI
   protected mcpClient?: MCPClient
+  protected channel?: Channel
   public readonly agentName: string
   protected model: string
   protected workspaceRoot: string
@@ -35,6 +37,7 @@ export abstract class BaseAgent extends EventEmitter {
   protected currentTask: Task | null = null
   protected compressor: ContextCompressor
   protected availableTools: ChatCompletionTool[] | null = null
+  protected runningEphemeral: boolean = false
 
   private interventionResolve?: (value: string) => void
 
@@ -45,6 +48,7 @@ export abstract class BaseAgent extends EventEmitter {
     this.model = config.model
     this.workspaceRoot = config.workspaceRoot
     this.mcpClient = config.mcpClient
+    this.channel = config.channel
     this.maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS
     this.keepRecentMessages = config.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
     this.summaryModel = config.summaryModel ?? 'gpt-4o-mini'
@@ -63,14 +67,38 @@ export abstract class BaseAgent extends EventEmitter {
    * 请求人工干预（HITL）
    * 发出 `intervention_required` 事件，挂起 Agent 循环，等待外部调用 resolve 后恢复
    */
-  async requestIntervention(prompt: string): Promise<string> {
-    return new Promise<string>((resolve) => {
+  async requestIntervention(prompt: string, timeoutMs?: number): Promise<string> {
+    const defaultTimeout = this.runningEphemeral ? 30_000 : 300_000
+    const timeout = timeoutMs ?? defaultTimeout
+
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    const interventionPromise = new Promise<string>((resolve) => {
       this.interventionResolve = resolve
       this.emit('intervention_required', {
         prompt,
-        resolve: (input: string) => this.resolveIntervention(input),
+        resolve: (input: string) => {
+          this.resolveIntervention(input)
+          this.emit('intervention_handled', { prompt })
+        },
       })
     })
+
+    const timeoutPromise = new Promise<string>((resolve) => {
+      timeoutId = setTimeout(() => {
+        if (this.interventionResolve) {
+          this.resolveIntervention('')
+          this.emit('intervention_timeout', { prompt })
+        }
+        resolve('')
+      }, timeout)
+    })
+
+    try {
+      return await Promise.race([interventionPromise, timeoutPromise])
+    } finally {
+      if (timeoutId!) clearTimeout(timeoutId!)
+    }
   }
 
   /** 供外部（如 TUI）调用以解决挂起的 intervention Promise */
@@ -168,11 +196,13 @@ export abstract class BaseAgent extends EventEmitter {
   ): Promise<string> {
     const savedMessages = this.messages
     const savedState = this.state
+    const savedEphemeral = this.runningEphemeral
 
     this.messages = []
     this.state = 'running'
     this.iterations = 0
     this.lastAction = 'ephemeral_start'
+    this.runningEphemeral = true
 
     let timeoutId: ReturnType<typeof setTimeout> | undefined
 
@@ -204,6 +234,7 @@ export abstract class BaseAgent extends EventEmitter {
       // 销毁临时上下文，不调用 saveSession()
       this.messages = savedMessages
       this.state = savedState
+      this.runningEphemeral = savedEphemeral
     }
   }
 
@@ -277,6 +308,15 @@ export abstract class BaseAgent extends EventEmitter {
       const context: ToolContext = {
         workspaceRoot: this.workspaceRoot,
         agentName: this.agentName,
+        logger: (line, type) => {
+          if (this.channel) {
+            this.channel.send({
+              type: type === 'error' ? 'tool_error' : 'tool_warn',
+              payload: { message: line, toolName },
+              timestamp: new Date(),
+            })
+          }
+        },
       }
       result = await executeTool(toolName, args, context)
     } else if (this.mcpClient) {

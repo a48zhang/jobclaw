@@ -23,8 +23,11 @@ export class TUIChannel implements Channel {
   private resolveLogType(message: ChannelMessage): 'info' | 'warn' | 'error' {
     switch (message.type) {
       case 'delivery_failed':
+      case 'tool_error':
+        return 'error'
       case 'delivery_blocked':
-        return message.type === 'delivery_failed' ? 'error' : 'warn'
+      case 'tool_warn':
+        return 'warn'
       default:
         return 'info'
     }
@@ -34,9 +37,14 @@ export class TUIChannel implements Channel {
     const ts = message.timestamp.toLocaleTimeString()
     const company = typeof message.payload['company'] === 'string' ? message.payload['company'] : ''
     const title = typeof message.payload['title'] === 'string' ? message.payload['title'] : ''
+    const msg = typeof message.payload['message'] === 'string' ? message.payload['message'] : ''
     const subject = [company, title].filter(Boolean).join(' · ')
-    return subject
-      ? `[${ts}] [${message.type}] ${subject}`
+    
+    let content = subject
+    if (msg) content = content ? `${content} | ${msg}` : msg
+
+    return content
+      ? `[${ts}] [${message.type}] ${content}`
       : `[${ts}] [${message.type}]`
   }
 }

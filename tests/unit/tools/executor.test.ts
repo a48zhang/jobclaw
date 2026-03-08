@@ -1,11 +1,11 @@
 // Phase 1b 工具执行器全面测试
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { executeTool, TOOL_NAMES, type ToolContext, type ToolResult, getLockFilePath } from './index'
+import { executeTool, TOOL_NAMES, type ToolContext, type ToolResult, getLockFilePath } from '../../../src/tools/index'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 // 测试用临时目录
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../workspace')
+const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../../workspace')
 const TEMP_DIR = path.resolve(TEST_WORKSPACE, '.test_temp')
 
 // 测试上下文
@@ -866,7 +866,7 @@ describe('未知工具', () => {
 // upsertJob 宽容行解析测试
 // ============================================================================
 
-import { upsertJob } from './upsertJob'
+import { upsertJob } from '../../../src/tools/upsertJob'
 import * as os from 'node:os'
 
 describe('upsertJob 宽容行解析', () => {
@@ -885,7 +885,7 @@ describe('upsertJob 宽容行解析', () => {
   test('正常职位行可被正确解析和写入', async () => {
     const result = await upsertJob(
       { company: 'Acme', title: 'Engineer', url: 'https://acme.com/job1', status: 'discovered' },
-      tmpWorkspace
+      { workspaceRoot: tmpWorkspace, agentName: 'test' }
     )
     expect(result.success).toBe(true)
     expect(result.action).toBe('added')
@@ -900,12 +900,18 @@ describe('upsertJob 宽容行解析', () => {
       '| Acme | Dev | https://acme.com/old | discovered | 2024-01-01 |\n'
     fs.writeFileSync(path.join(tmpWorkspace, 'data', 'jobs.md'), brokenContent, 'utf-8')
 
+    let logCalled = false
     const result = await upsertJob(
       { company: 'Beta', title: 'Designer', url: 'https://beta.com/job2', status: 'discovered' },
-      tmpWorkspace
+      { 
+        workspaceRoot: tmpWorkspace, 
+        agentName: 'test',
+        logger: () => { logCalled = true }
+      }
     )
     expect(result.success).toBe(true)
     expect(result.action).toBe('added')
+    expect(logCalled).toBe(true) // 验证 logger 被调用
 
     // 新职位应被写入文件
     const content = fs.readFileSync(path.join(tmpWorkspace, 'data', 'jobs.md'), 'utf-8')
@@ -923,7 +929,7 @@ describe('upsertJob 宽容行解析', () => {
     // 插入与已有行 URL 相同的条目，应被更新
     const result = await upsertJob(
       { company: 'Acme', title: 'Dev', url: 'https://acme.com/existing', status: 'applied' },
-      tmpWorkspace
+      { workspaceRoot: tmpWorkspace, agentName: 'test' }
     )
     expect(result.success).toBe(true)
     expect(result.action).toBe('updated')

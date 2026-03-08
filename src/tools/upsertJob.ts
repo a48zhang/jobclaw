@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { lockFile, unlockFile } from './lockFile';
+import type { ToolContext } from './index';
 
 export interface UpsertJobArgs {
   company: string;
@@ -13,7 +14,8 @@ export interface UpsertJobArgs {
 /**
  * upsertJob 工具：结构化地更新或插入职位信息到 jobs.md
  */
-export async function upsertJob(args: UpsertJobArgs, workspaceRoot: string): Promise<{ success: boolean; action: 'added' | 'updated' | 'skipped'; message: string }> {
+export async function upsertJob(args: UpsertJobArgs, context: ToolContext): Promise<{ success: boolean; action: 'added' | 'updated' | 'skipped'; message: string }> {
+  const { workspaceRoot, logger } = context;
   const jobsPath = path.join(workspaceRoot, 'data/jobs.md');
   const relativeJobsPath = 'data/jobs.md'; // 用于 lockFile 的相对路径标识
   const holder = 'system';
@@ -48,7 +50,9 @@ export async function upsertJob(args: UpsertJobArgs, workspaceRoot: string): Pro
       try {
         const columns = dataLines[i].split('|').map(c => c.trim());
         if (columns.length < MIN_COLUMNS) {
-          console.warn(`[upsertJob] jobs.md 第 ${i + 1} 行格式异常，已跳过：${dataLines[i]}`);
+          const msg = `jobs.md 第 ${i + 1} 行格式异常，已跳过：${dataLines[i]}`;
+          if (logger) logger(msg, 'warn');
+          else console.warn(`[upsertJob] ${msg}`);
           continue;
         }
         if (columns[3] === args.url) {
@@ -56,7 +60,9 @@ export async function upsertJob(args: UpsertJobArgs, workspaceRoot: string): Pro
           break;
         }
       } catch (lineError) {
-        console.warn(`[upsertJob] jobs.md 第 ${i + 1} 行解析失败，已跳过：${(lineError as Error).message}`);
+        const msg = `jobs.md 第 ${i + 1} 行解析失败，已跳过：${(lineError as Error).message}`;
+        if (logger) logger(msg, 'warn');
+        else console.warn(`[upsertJob] ${msg}`);
       }
     }
 

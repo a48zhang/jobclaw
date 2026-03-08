@@ -6,6 +6,8 @@ export type ChannelMessageType =
   | 'delivery_failed'   // DeliveryAgent 投递失败
   | 'delivery_blocked'  // DeliveryAgent 遇到需要登录/人工介入的情况
   | 'cron_complete'     // CronJob 执行完毕的汇总通知
+  | 'tool_warn'         // 工具执行过程中的非致命警告
+  | 'tool_error'        // 工具执行过程中的业务错误
 
 /** 通知消息结构 */
 export interface ChannelMessage {

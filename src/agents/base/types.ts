@@ -1,6 +1,7 @@
 /** BaseAgent 类型定义 */
 import type OpenAI from 'openai'
 import type { Task } from '../../types'
+import type { Channel } from '../../channel/base'
 
 /** MCP Client 接口 */
 export interface MCPClient {
@@ -25,6 +26,7 @@ export interface BaseAgentConfig {
   model: string
   workspaceRoot: string
   mcpClient?: MCPClient
+  channel?: Channel
   maxIterations?: number
   keepRecentMessages?: number
   summaryModel?: string

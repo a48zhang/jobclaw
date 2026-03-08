@@ -1,6 +1,6 @@
 // MainAgent 单元测试
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test'
-import { MainAgent, type MainAgentConfig, type IDeliveryAgent } from './index'
+import { MainAgent, type MainAgentConfig, type IDeliveryAgent } from '../../../src/agents/main/index'
 import type { AgentSnapshot } from '../base/types'
 import type { Channel, ChannelMessage } from '../../channel/base'
 import OpenAI from 'openai'

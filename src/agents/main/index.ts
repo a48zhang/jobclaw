@@ -54,13 +54,11 @@ const MCP_NOT_CONNECTED_WARNING =
 
 export class MainAgent extends BaseAgent {
   private deliveryAgent: IDeliveryAgent
-  private channel?: Channel
   private lastCronAt: string | null = null
 
   constructor(config: MainAgentConfig) {
     super({ ...config, agentName: config.agentName ?? 'main' })
     this.deliveryAgent = config.deliveryAgent
-    this.channel = config.channel
 
     if (!config.mcpClient) {
       console.warn(

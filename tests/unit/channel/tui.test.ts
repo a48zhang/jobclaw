@@ -1,8 +1,8 @@
 // TUIChannel 单元测试 — Phase 4 Team A
 import { describe, test, expect, mock } from 'bun:test'
-import { TUIChannel } from './tui'
-import type { TUILogCallback } from './tui'
-import type { ChannelMessage } from './base'
+import { TUIChannel } from '../../../src/channel/tui'
+import type { TUILogCallback } from '../../../src/channel/tui'
+import type { ChannelMessage } from '../../../src/channel/base'
 
 // ─── TC-A-01: TUIChannel 实例化 ───────────────────────────────────────────────
 describe('TUIChannel 构造', () => {

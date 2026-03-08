@@ -1,8 +1,8 @@
 // Channel 单元测试 — Team B
 import { describe, test, expect, mock, beforeEach } from 'bun:test'
-import type { Channel, ChannelMessage } from './base'
-import { EmailChannel } from './email'
-import type { EmailChannelConfig } from './email'
+import type { Channel, ChannelMessage } from '../../../src/channel/base'
+import { EmailChannel } from '../../../src/channel/email'
+import type { EmailChannelConfig } from '../../../src/channel/email'
 
 // ─── TC-B-01: Channel 接口类型检查 ─────────────────────────────────────────
 describe('Channel 接口', () => {

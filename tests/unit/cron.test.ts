@@ -3,9 +3,9 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
 import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test'
-import type { Channel, ChannelMessage } from './channel/base'
-import { validateEnv } from './env'
-import { needsBootstrap } from './bootstrap'
+import type { Channel, ChannelMessage } from '../../src/channel/base'
+import { validateEnv } from '../../src/env'
+import { needsBootstrap } from '../../src/bootstrap'
 
 // ─── 辅助：创建 mock Channel ──────────────────────────────────────────────
 function makeMockChannel() {
@@ -143,7 +143,7 @@ describe('needsBootstrap', () => {
   })
 })
 
-import { validateWorkspace } from './env'
+import { validateWorkspace } from '../../src/env'
 
 describe('validateWorkspace', () => {
   let tmpDir: string
