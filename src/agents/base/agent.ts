@@ -150,13 +150,32 @@ export abstract class BaseAgent extends EventEmitter {
 
       if (message.tool_calls && message.tool_calls.length > 0) {
         this.lastAction = 'tool_call'
+        // 发送工具调用通知到 Channel
+        for (const tc of message.tool_calls) {
+          if (this.channel) {
+            this.channel.send({
+              type: 'tool_call',
+              payload: { toolName: tc.function.name, args: tc.function.arguments },
+              timestamp: new Date(),
+            })
+          }
+        }
         const toolResults = await this.executeToolCalls(message.tool_calls)
         for (const tr of toolResults) this.messages.push(tr)
         continue
       }
 
       if (result) {
-        this.setState('idle'); this.lastAction = 'completed'; break
+        this.setState('idle'); this.lastAction = 'completed'
+        // 如果是在持久化会话中运行，且有 Channel，则主动推送最终结果
+        if (!this.runningEphemeral && this.channel) {
+          await this.channel.send({
+            type: 'agent_response',
+            payload: { message: result },
+            timestamp: new Date(),
+          })
+        }
+        break
       }
     }
     if (this.iterations >= this.maxIterations) {

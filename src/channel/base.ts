@@ -8,6 +8,9 @@ export type ChannelMessageType =
   | 'cron_complete'     // CronJob 执行完毕的汇总通知
   | 'tool_warn'         // 工具执行过程中的非致命警告
   | 'tool_error'        // 工具执行过程中的业务错误
+  | 'tool_call'         // 工具调用开始
+  | 'agent_response'    // Agent 的直接回复
+  | 'user_input'        // 用户输入
 
 /** 通知消息结构 */
 export interface ChannelMessage {

@@ -54,17 +54,23 @@ async function main() {
     const tui = new TUI({
       workspaceRoot: WORKSPACE_ROOT,
       onCommand: async (input) => {
+        // ── Command System ──────────────────────────────────────────────────
+        if (input.startsWith('/')) {
+          const cmd = input.slice(1).toLowerCase().trim()
+          if (cmd === 'quit' || cmd === 'exit') {
+            tui.destroy()
+            process.exit(0)
+          }
+          // If other commands are added later, check them here
+        }
+
+        // ── Default: Send to Agent ──────────────────────────────────────────
         tui.tuiChannel.send({
           type: 'user_input' as any,
           payload: { message: `{cyan-fg}> ${input}{/}` },
           timestamp: new Date(),
         })
-        const response = await mainAgent.run(input)
-        tui.tuiChannel.send({
-          type: 'agent_response' as any,
-          payload: { message: response },
-          timestamp: new Date(),
-        })
+        await mainAgent.run(input)
       },
     })
 

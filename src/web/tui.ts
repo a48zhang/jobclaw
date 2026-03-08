@@ -71,7 +71,6 @@ export class TUI {
   private screen: blessed.Widgets.Screen
   private jobTable: contrib.Widgets.TableElement
   private activityLog: contrib.Widgets.LogElement
-  private statsBox: blessed.Widgets.BoxElement
   private inputBox: blessed.Widgets.TextboxElement
   private channel: TUIChannel
 
@@ -96,8 +95,8 @@ export class TUI {
     // ── Grid (12 rows × 12 cols) ─────────────────────────────────────────────
     const grid = new contrib.grid({ rows: 12, cols: 12, screen: this.screen })
 
-    // ── Job Monitor (top-left 7 rows × 8 cols) ───────────────────────────────
-    this.jobTable = grid.set(0, 0, 7, 8, contrib.table, {
+    // ── Job Monitor (top 7 rows × 12 cols) ──────────────────────────────────
+    this.jobTable = grid.set(0, 0, 7, 12, contrib.table, {
       keys: true,
       vi: true,
       label: ' Job Monitor ',
@@ -106,18 +105,8 @@ export class TUI {
         header: { fg: 'cyan', bold: true },
         cell: { fg: 'white', selected: { bg: 'blue' } },
       },
-      columnWidth: [16, 20, 36, 12, 12],
+      columnWidth: [16, 20, 48, 12, 12],
     } as contrib.Widgets.TableOptions)
-
-    // ── Stats Panel (top-right 7 rows × 4 cols) ──────────────────────────────
-    this.statsBox = grid.set(0, 8, 7, 4, blessed.box, {
-      label: ' Stats ',
-      border: { type: 'line' },
-      content: this.buildStatsContent(0, 0, 0),
-      tags: true,
-      style: { fg: 'white' },
-      fullUnicode: true,
-    })
 
     // ── Agent Activity Log (middle 4 rows × 12 cols) ─────────────────────────
     this.activityLog = grid.set(7, 0, 4, 12, contrib.log, {
@@ -127,7 +116,8 @@ export class TUI {
       style: { fg: 'green' },
       bufferLength: 200,
       fullUnicode: true,
-      tags: true, // 开启标签解析
+      tags: true,
+      wrap: true, // 开启自动换行
     } as contrib.Widgets.LogOptions)
 
     // ── Input Box (bottom 1 row × 12 cols) ───────────────────────────────────
@@ -137,7 +127,7 @@ export class TUI {
       style: { fg: 'yellow', focus: { border: { fg: 'yellow' } } },
       inputOnFocus: true,
       fullUnicode: true,
-      tags: true, // 开启标签解析
+      tags: true,
     })
 
     // ── TUIChannel wired to Activity Log ─────────────────────────────────────
@@ -172,7 +162,7 @@ export class TUI {
         this.activityLog.log(`{red-fg}[error] ${(err as Error).message}{/}`)
       } finally {
         this.inputBox.setLabel(originalLabel)
-        this.inputBox.focus() // 重新聚焦，允许下一轮输入
+        this.inputBox.focus()
         this.screen.render()
       }
     })
@@ -208,11 +198,11 @@ export class TUI {
 
     try {
       this.watcher = fs.watch(this.jobsPath, () => {
-        // Debounce: refresh within 100ms of the last change (well within the 500ms requirement)
+        // Debounce: refresh within 100ms of the last change
         if (this.refreshTimer) clearTimeout(this.refreshTimer)
         this.refreshTimer = setTimeout(() => {
           this.refreshJobTable()
-        }, 100) // well within the 500ms requirement
+        }, 100)
       })
     } catch {
       // File might not exist yet; poll instead
@@ -253,23 +243,7 @@ export class TUI {
     const data = rows.map((r) => [r.company, r.title, r.url, r.status, r.time])
 
     this.jobTable.setData({ headers, data })
-
-    // Update stats
-    const found = rows.length
-    const applied = rows.filter((r) => r.status === 'applied').length
-    const failed = rows.filter((r) => r.status === 'failed').length
-    this.statsBox.setContent(this.buildStatsContent(found, applied, failed))
-
     this.screen.render()
-  }
-
-  private buildStatsContent(found: number, applied: number, failed: number): string {
-    return [
-      '',
-      `  {cyan-fg}发现:{/}   ${found}`,
-      `  {green-fg}投递:{/}  ${applied}`,
-      `  {red-fg}失败:{/}   ${failed}`,
-    ].join('\n')
   }
 
   /** Show a modal asking the user to enter intervention input */

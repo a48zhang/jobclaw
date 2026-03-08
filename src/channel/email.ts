@@ -25,6 +25,9 @@ const SUBJECT_MAP: Record<ChannelMessageType, string> = {
   cron_complete: '【JobClaw】定时任务完成',
   tool_warn: '【JobClaw】工具运行警告',
   tool_error: '【JobClaw】工具运行错误',
+  tool_call: '【JobClaw】工具调用通知',
+  agent_response: '【JobClaw】Agent 回复',
+  user_input: '【JobClaw】用户输入记录',
 }
 
 /** 对字符串做 HTML escape，防止注入 */
