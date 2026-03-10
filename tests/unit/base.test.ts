@@ -4,6 +4,7 @@ import { BaseAgent, type BaseAgentConfig, type MCPClient } from '../../src/agent
 import OpenAI from 'openai'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { eventBus } from '../../src/eventBus'
 
 // 测试用的具体 Agent 实现
 class TestAgent extends BaseAgent {
@@ -35,26 +36,50 @@ class TestAgent extends BaseAgent {
   }
 }
 
+/**
+ * 辅助函数：将简单的响应对象转换为 OpenAI 要求的格式（支持流式和非流式）
+ */
+function formatResponse(params: any, response: { content: string | null; tool_calls?: any[] }) {
+  if (params.stream) {
+    return (async function* () {
+      yield {
+        choices: [{
+          delta: {
+            content: response.content || undefined,
+            tool_calls: response.tool_calls?.map((tc, index) => ({
+              index,
+              id: tc.id,
+              function: tc.function,
+            })),
+          },
+        }],
+      }
+    })()
+  }
+  return Promise.resolve({
+    choices: [{
+      message: {
+        content: response.content,
+        tool_calls: response.tool_calls || null,
+      },
+    }],
+  })
+}
+
 // Mock OpenAI
 const createMockOpenAI = () => {
   return {
     chat: {
       completions: {
-        create: mock(() => Promise.resolve({
-          choices: [{
-            message: {
-              content: '测试响应',
-              tool_calls: null,
-            },
-          }],
-        })),
+        create: mock((params: any) => formatResponse(params, { content: '测试响应' })),
       },
     },
   } as unknown as OpenAI
 }
 
 // 测试工作区
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../../workspace')
+// NOTE: test file lives in tests/unit/, so ../../workspace points to repo-local workspace/
+const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../workspace')
 const TEST_AGENT_DIR = path.join(TEST_WORKSPACE, 'agents', 'test')
 
 describe('BaseAgent', () => {
@@ -149,6 +174,24 @@ describe('BaseAgent', () => {
       expect(session).toHaveProperty('messages')
       expect(session).toHaveProperty('currentTask')
       expect(session).toHaveProperty('context')
+    })
+  })
+
+  describe('runEphemeral 状态同步', () => {
+    test('runEphemeral 结束后恢复原 state 并发出 agent:state', async () => {
+      const states: string[] = []
+      const handler = (p: { agentName: string; state: string }) => {
+        if (p.agentName === 'test') states.push(p.state)
+      }
+      eventBus.on('agent:state', handler as any)
+      try {
+        expect(agent.getState().state).toBe('idle')
+        await agent.runEphemeral('测试临时任务')
+        expect(states).toContain('running')
+        expect(states[states.length - 1]).toBe('idle')
+      } finally {
+        eventBus.off('agent:state', handler as any)
+      }
     })
   })
 
@@ -248,13 +291,8 @@ describe('run() 主循环', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => Promise.resolve({
-            choices: [{
-              message: {
-                content: '这是最终的回答',
-                tool_calls: null,
-              },
-            }],
+          create: mock((params: any) => formatResponse(params, {
+            content: '这是最终的回答',
           })),
         },
       },
@@ -280,34 +318,25 @@ describe('run() 主循环', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => {
+          create: mock((params: any) => {
             callCount++
             if (callCount === 1) {
               // 第一次返回工具调用
-              return Promise.resolve({
-                choices: [{
-                  message: {
-                    content: null,
-                    tool_calls: [{
-                      id: 'call_1',
-                      type: 'function',
-                      function: {
-                        name: 'list_directory',
-                        arguments: '{"path": "data"}',
-                      },
-                    }],
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'list_directory',
+                    arguments: '{"path": "data"}',
                   },
                 }],
               })
             } else {
               // 第二次返回最终结果
-              return Promise.resolve({
-                choices: [{
-                  message: {
-                    content: '目录内容已列出',
-                    tool_calls: null,
-                  },
-                }],
+              return formatResponse(params, {
+                content: '目录内容已列出',
               })
             }
           }),
@@ -332,18 +361,14 @@ describe('run() 主循环', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => Promise.resolve({
-            choices: [{
-              message: {
-                content: null,
-                tool_calls: [{
-                  id: 'call_1',
-                  type: 'function',
-                  function: {
-                    name: 'list_directory',
-                    arguments: '{"path": "data"}',
-                  },
-                }],
+          create: mock((params: any) => formatResponse(params, {
+            content: null,
+            tool_calls: [{
+              id: 'call_1',
+              type: 'function',
+              function: {
+                name: 'list_directory',
+                arguments: '{"path": "data"}',
               },
             }],
           })),
@@ -425,34 +450,25 @@ describe('executeToolCall()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => {
+          create: mock((params: any) => {
             callCount++
             if (callCount === 1) {
               // 第一次返回工具调用 - 使用存在的目录
-              return Promise.resolve({
-                choices: [{
-                  message: {
-                    content: null,
-                    tool_calls: [{
-                      id: 'call_1',
-                      type: 'function',
-                      function: {
-                        name: 'list_directory',
-                        arguments: '{"path": "agents"}',
-                      },
-                    }],
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'list_directory',
+                    arguments: '{"path": "agents"}',
                   },
                 }],
               })
             }
             // 第二次返回最终结果
-            return Promise.resolve({
-              choices: [{
-                message: {
-                  content: '目录已列出',
-                  tool_calls: null,
-                },
-              }],
+            return formatResponse(params, {
+              content: '目录已列出',
             })
           }),
         },
@@ -486,32 +502,23 @@ describe('executeToolCall()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => {
+          create: mock((params: any) => {
             mcpCallCount++
             if (mcpCallCount === 1) {
-              return Promise.resolve({
-                choices: [{
-                  message: {
-                    content: null,
-                    tool_calls: [{
-                      id: 'call_1',
-                      type: 'function',
-                      function: {
-                        name: 'custom_tool',
-                        arguments: '{"param": "value"}',
-                      },
-                    }],
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'custom_tool',
+                    arguments: '{"param": "value"}',
                   },
                 }],
               })
             }
-            return Promise.resolve({
-              choices: [{
-                message: {
-                  content: 'MCP tool executed',
-                  tool_calls: null,
-                },
-              }],
+            return formatResponse(params, {
+              content: 'MCP tool executed',
             })
           }),
         },
@@ -532,12 +539,14 @@ describe('executeToolCall()', () => {
   })
 
   test('工具参数解析失败返回错误', async () => {
+    let callCount = 0
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => Promise.resolve({
-            choices: [{
-              message: {
+          create: mock((params: any) => {
+            callCount++
+            if (callCount === 1) {
+              return formatResponse(params, {
                 content: null,
                 tool_calls: [{
                   id: 'call_1',
@@ -547,36 +556,15 @@ describe('executeToolCall()', () => {
                     arguments: 'invalid json',
                   },
                 }],
-              },
-            }],
-          })),
+              })
+            }
+            return formatResponse(params, {
+              content: '继续执行',
+            })
+          }),
         },
       },
     } as unknown as OpenAI
-
-    // 第二次调用返回正常响应
-    ;(mockOpenAI.chat.completions.create as any).mockImplementationOnce(() => Promise.resolve({
-      choices: [{
-        message: {
-          content: null,
-          tool_calls: [{
-            id: 'call_1',
-            type: 'function',
-            function: {
-              name: 'list_directory',
-              arguments: 'invalid json',
-            },
-          }],
-        },
-      }],
-    })).mockImplementationOnce(() => Promise.resolve({
-      choices: [{
-        message: {
-          content: '继续执行',
-          tool_calls: null,
-        },
-      }],
-    }))
 
     const agent = new TestAgent({
       openai: mockOpenAI,
@@ -614,43 +602,34 @@ describe('并行工具调用', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => {
+          create: mock((params: any) => {
             llmCallCount++
             if (llmCallCount === 1) {
               // 返回多个并行工具调用
-              return Promise.resolve({
-                choices: [{
-                  message: {
-                    content: null,
-                    tool_calls: [
-                      {
-                        id: 'call_1',
-                        type: 'function',
-                        function: {
-                          name: 'list_directory',
-                          arguments: '{"path": "agents"}',
-                        },
-                      },
-                      {
-                        id: 'call_2',
-                        type: 'function',
-                        function: {
-                          name: 'list_directory',
-                          arguments: '{"path": "data"}',
-                        },
-                      },
-                    ],
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call_1',
+                    type: 'function',
+                    function: {
+                      name: 'list_directory',
+                      arguments: '{"path": "agents"}',
+                    },
                   },
-                }],
+                  {
+                    id: 'call_2',
+                    type: 'function',
+                    function: {
+                      name: 'list_directory',
+                      arguments: '{"path": "data"}',
+                    },
+                  },
+                ],
               })
             }
-            return Promise.resolve({
-              choices: [{
-                message: {
-                  content: '两个目录已列出',
-                  tool_calls: null,
-                },
-              }],
+            return formatResponse(params, {
+              content: '两个目录已列出',
             })
           }),
         },
@@ -682,42 +661,33 @@ describe('并行工具调用', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => {
+          create: mock((params: any) => {
             llmCallCount++
             if (llmCallCount === 1) {
-              return Promise.resolve({
-                choices: [{
-                  message: {
-                    content: null,
-                    tool_calls: [
-                      {
-                        id: 'call_1',
-                        type: 'function',
-                        function: {
-                          name: 'list_directory',
-                          arguments: '{"path": "data"}',
-                        },
-                      },
-                      {
-                        id: 'call_2',
-                        type: 'function',
-                        function: {
-                          name: 'read_file',
-                          arguments: '{"path": "data/jobs.md"}',
-                        },
-                      },
-                    ],
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'call_1',
+                    type: 'function',
+                    function: {
+                      name: 'list_directory',
+                      arguments: '{"path": "data"}',
+                    },
                   },
-                }],
+                  {
+                    id: 'call_2',
+                    type: 'function',
+                    function: {
+                      name: 'read_file',
+                      arguments: '{"path": "data/jobs.md"}',
+                    },
+                  },
+                ],
               })
             }
-            return Promise.resolve({
-              choices: [{
-                message: {
-                  content: '完成',
-                  tool_calls: null,
-                },
-              }],
+            return formatResponse(params, {
+              content: '完成',
             })
           }),
         },
@@ -766,13 +736,8 @@ describe('checkAndCompress()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => Promise.resolve({
-            choices: [{
-              message: {
-                content: '正常响应',
-                tool_calls: null,
-              },
-            }],
+          create: mock((params: any) => formatResponse(params, {
+            content: '正常响应',
           })),
         },
       },
@@ -798,15 +763,10 @@ describe('checkAndCompress()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => {
+          create: mock((params: any) => {
             summaryCallCount++
-            return Promise.resolve({
-              choices: [{
-                message: {
-                  content: '这是一个摘要内容',
-                  tool_calls: null,
-                },
-              }],
+            return formatResponse(params, {
+              content: '这是一个摘要内容',
             })
           }),
         },
@@ -845,13 +805,8 @@ describe('checkAndCompress()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => Promise.resolve({
-            choices: [{
-              message: {
-                content: '摘要：用户进行了多次对话',
-                tool_calls: null,
-              },
-            }],
+          create: mock((params: any) => formatResponse(params, {
+            content: '摘要：用户进行了多次对话',
           })),
         },
       },
@@ -889,13 +844,8 @@ describe('checkAndCompress()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => Promise.resolve({
-            choices: [{
-              message: {
-                content: '这是对话摘要',
-                tool_calls: null,
-              },
-            }],
+          create: mock((params: any) => formatResponse(params, {
+            content: '这是对话摘要',
           })),
         },
       },
@@ -926,15 +876,10 @@ describe('状态转换', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => {
+          create: mock((params: any) => {
             stateHistory.push('llm_called')
-            return Promise.resolve({
-              choices: [{
-                message: {
-                  content: '完成',
-                  tool_calls: null,
-                },
-              }],
+            return formatResponse(params, {
+              content: '完成',
             })
           }),
         },
@@ -959,18 +904,14 @@ describe('状态转换', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => Promise.resolve({
-            choices: [{
-              message: {
-                content: null,
-                tool_calls: [{
-                  id: 'call_1',
-                  type: 'function',
-                  function: {
-                    name: 'list_directory',
-                    arguments: '{"path": "data"}',
-                  },
-                }],
+          create: mock((params: any) => formatResponse(params, {
+            content: null,
+            tool_calls: [{
+              id: 'call_1',
+              type: 'function',
+              function: {
+                name: 'list_directory',
+                arguments: '{"path": "data"}',
               },
             }],
           })),

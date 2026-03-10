@@ -362,16 +362,24 @@ describe('锁超时机制', () => {
 
   test('锁超时后可被其他 Agent 获取', async () => {
     const oldTimestamp = Date.now() - 31000
+    const targetFile = path.join(TEST_WORKSPACE, 'data/timeout_test.md')
+    if (!fs.existsSync(path.dirname(targetFile))) fs.mkdirSync(path.dirname(targetFile), { recursive: true })
+    fs.writeFileSync(targetFile, '', 'utf-8')
     fs.writeFileSync(lockFile, JSON.stringify({ holder: 'main', timestamp: oldTimestamp }), 'utf-8')
     const result = await runTool(TOOL_NAMES.LOCK_FILE, { path: 'data/timeout_test.md' }, 'search')
     expect(result.success).toBe(true)
+    if (fs.existsSync(targetFile)) fs.unlinkSync(targetFile)
   })
 
   test('锁未超时时其他 Agent 无法获取', async () => {
+    const targetFile = path.join(TEST_WORKSPACE, 'data/timeout_test.md')
+    if (!fs.existsSync(path.dirname(targetFile))) fs.mkdirSync(path.dirname(targetFile), { recursive: true })
+    fs.writeFileSync(targetFile, '', 'utf-8')
     await runTool(TOOL_NAMES.LOCK_FILE, { path: 'data/timeout_test.md' }, 'main')
     const result = await runTool(TOOL_NAMES.LOCK_FILE, { path: 'data/timeout_test.md' }, 'search')
     expect(result.success).toBe(false)
     expect(result.error).toContain('文件已被 main 锁定')
+    if (fs.existsSync(targetFile)) fs.unlinkSync(targetFile)
   })
 })
 

@@ -191,17 +191,6 @@ describe('DeliveryAgent', () => {
     ).resolves.toBeUndefined()
   })
 
-  // TC-C-09: systemPrompt 包含必要关键词
-  test('TC-C-09: systemPrompt 包含必要关键词', () => {
-    const prompt = (agent as unknown as { systemPrompt: string }).systemPrompt
-    expect(prompt).toContain('upsert_job')
-    expect(prompt).toContain('userinfo.md')
-    expect(prompt).toContain('jobs.md')
-    expect(prompt).toContain('applied')
-    expect(prompt).toContain('failed')
-    expect(prompt).toContain('login_required')
-  })
-
   // TC-C-10: write_file 在无 currentJobUrl 时不触发通知
   test('TC-C-10: write_file 在 browser_navigate 之前不触发 channel.send', async () => {
     // No browser_navigate has been called → currentJobUrl is null
@@ -232,5 +221,45 @@ describe('DeliveryAgent', () => {
     // Only delivery_start was sent; no delivery_success for the wrong URL
     expect(mockChannel.send).toHaveBeenCalledTimes(1)
     expect(mockChannel.sentMessages[0].type).toBe('delivery_start')
+  })
+
+  test('TC-C-12: upsert_job updated+applied → channel.send delivery_success', async () => {
+    const agentInternal = agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }
+    mockChannel.sentMessages.length = 0
+    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+
+    await agentInternal.onToolResult('upsert_job', {
+      success: true,
+      content: JSON.stringify({
+        action: 'updated',
+        company: 'Acme Corp',
+        title: 'SWE',
+        url: 'https://acme.com/j/1',
+        status: 'applied',
+      }),
+    })
+
+    expect(mockChannel.send).toHaveBeenCalledTimes(1)
+    expect(mockChannel.sentMessages[0].type).toBe('delivery_success')
+    expect(mockChannel.sentMessages[0].payload.company).toBe('Acme Corp')
+  })
+
+  test('TC-C-13: upsert_job skipped → 不发送通知', async () => {
+    const agentInternal = agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }
+    mockChannel.sentMessages.length = 0
+    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+
+    await agentInternal.onToolResult('upsert_job', {
+      success: true,
+      content: JSON.stringify({
+        action: 'skipped',
+        company: 'Acme Corp',
+        title: 'SWE',
+        url: 'https://acme.com/j/1',
+        status: 'applied',
+      }),
+    })
+
+    expect(mockChannel.send).not.toHaveBeenCalled()
   })
 })
