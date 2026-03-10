@@ -21,5 +21,6 @@
 | 文件 | 说明 |
 |------|------|
 | [dev/plan.md](dev/plan.md) | 开发计划总览与阶段依赖关系 |
+| [phase6-p2-interview-resume.md](phase6-p2-interview-resume.md) | Phase 6 P2 重点计划：模拟面试与简历评价 |
 
 > 说明：历史 Phase 分拆文档已收敛整合到 `dev/plan.md`，避免多文件重复与失同步。
