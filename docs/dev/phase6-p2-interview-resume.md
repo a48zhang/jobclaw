@@ -1,98 +1,72 @@
 # Phase 6 P2：模拟面试 & 简历评价（按产品逻辑的开发计划）
 
-> 重点：这两项能力不是“独立工具”，而是服务于 Job 流水线（发现 → 选择 → 准备 → 投递 → 复盘）。计划只写需要开发的功能切片与验收。
+> 前提：用户与 Agent 的交互是自然语言；Agent 自己决策加载哪些 skill、调用哪些 tool；开发重点是“把决策做得稳定、可控、可复用”，而不是做固定的入口/按钮/输出模板。
 
-## A. 产品主流程（这阶段要对齐的逻辑）
+## A. 产品逻辑（要实现的用户体验）
 
-1. 用户在 Web Dashboard（或 TUI）看到 `jobs.md` 的岗位列表。
-2. 用户针对“某一个岗位”做准备：
-   - 简历：对该岗位做差距分析 → 给出可应用的改写建议 →（用户确认后）生成/更新简历 PDF。
-   - 面试：基于该岗位与用户背景进行多轮模拟面试（含追问），输出可执行的改进点。
-3. 以上过程必须做到：
-   - “以岗位为中心”：所有输出都必须绑定到某条 job（至少绑定 `url`）。
-   - “以交互为中心”：主要产出在 UI 中展示（日志/对话/HITL），不新增额外落盘文件作为交付物。
+用户只需要表达意图，例如：
+- “帮我准备这个岗位的面试”
+- “我的简历适配这个岗位吗？帮我改到能投”
 
-## B. UI 能力切片（必须做）
+系统行为（核心）：
+1) Agent 先确认目标（岗位/级别/偏好），缺信息就 HITL 问最少的问题。
+2) Agent 自动选择合适的 skill（例如 `interviewer` / `resume-mastery` / 未来的 `mock-interview`），并按 skill 指导调用 tool。
+3) 过程与结果直接在 UI（Web/TUI）对话/日志里呈现；不强制用户学指令，也不要求固定输出格式。
 
-### B1. Job 级别操作入口（Web Dashboard）
+## B. 这阶段真正需要开发的东西
 
-- 在 job 列表的每一行增加动作（最少 2 个）：
-  - `Review Resume`：对该 job 进行简历差距分析与改写建议（只读）
-  - `Mock Interview`：对该 job 开始面试回合
-- 交互要求：
-  - “Review Resume”默认一次性输出结构化报告（见 D2）。
-  - “Mock Interview”必须支持多轮：每轮问题 → 用户回答（HITL）→ 追问/下一题（见 D1）。
+### B1. “Skill 选择”稳定性（必须）
 
-### B2. Apply Rewrite（可选但建议做）
+目标：同样的用户意图，多次运行能稳定选择同一个 SOP 路径（而不是随机发挥）。
 
-- 在 “Review Resume” 输出后，提供一个确认入口（按钮或二次确认弹窗）：
-  - `Apply Rewrite + Build PDF`
-- 约束：必须二次确认后才允许改动 `workspace/data/resume.typ`。
+开发任务：
+- 强化 `workspace/skills/index.md`：
+  - 用“意图 → skill”映射写清楚（例：准备面试 → mock-interview；审阅简历 → interviewer；生成/应用改写 → resume-mastery）。
+  - 每个 skill 给 1–2 行“触发条件”和“停止条件”（何时该切换 skill 或结束）。
+- 在 `MainAgent` 的 system prompt 里明确“先看 skills index，再决定是否 read_file 加载 SOP”（如果当前已经包含 index，则只补充决策规则）。
+- 在 UI 日志中增加可观测性（不改变协议）：当 Agent 决定使用某个 SOP 时，打印一行“Using skill: <name>”（便于验收与调试）。
 
-## C. 服务端接口（必须做）
+### B2. “简历评价 → 改写 → 编译”闭环（必须）
 
-> 不依赖“用户输入指令文本”，由 UI 直接调用接口触发对应任务。
+目标：用户说“帮我把简历改到更适配这个岗位”，Agent 能自主把工作拆成两步并拿到可用 PDF。
 
-- 新增 REST：
-  - `POST /api/jobs/resume/review`（body: `{ url: string }`）
-  - `POST /api/jobs/interview/start`（body: `{ url: string }`）
-  - （可选）`POST /api/jobs/resume/apply`（body: `{ url: string }`，表示“基于刚刚的建议应用改写并编译”）
-- 行为：
-  - 通过 `jobs.md` 反查该 `url` 对应行（company/title/status/time）。
-  - 构造明确 prompt 传入 `MainAgent.runEphemeral(...)`，并要求：
-    - 使用既有 skills（见 D）
-    - 输出结构固定（便于 UI 渲染）
-    - 需要用户输入时，走 HITL（Dashboard 已有弹窗链路）
+开发任务：
+- 升级 `workspace/skills/interviewer.md`：
+  - 明确输入来源优先级：`data/resume.typ`（优先）→ 否则引导先生成简历。
+  - 明确输出必须包含“可直接应用的改写建议”（而不是只点评）。
+  - 明确当用户确认“应用改写”后，交接给 `resume-mastery` 进行落盘与编译。
+- 升级 `workspace/skills/resume-mastery.md`：
+  - 增加“应用改写”步骤：根据 interviewer 的改写建议更新 `data/resume.typ` 并 `typst_compile`。
+  - 保持现有的逐步 HITL 收集信息原则（缺关键信息就问，不要一次要一堆）。
 
-## D. Skill 与 Tool 编排（必须做）
+### B3. “模拟面试（多轮追问）”能力（必须）
 
-### D1. 模拟面试（改 `workspace/skills/interviewer.md` 或新增 `workspace/skills/mock-interview.md`，二选一）
+目标：用户说“模拟面试”，Agent 能多轮追问并根据回答动态调整。
 
-- 绑定 job：必须先读出该 job 的 `{company,title,url}`，并把它写入面试上下文开头（一行即可）。
-- 每轮输出结构固定（每轮一块）：
-  - `Q:`（问题）
-  - `Rubric:`（考察点/优秀回答要点）
-  - `Follow-up:`（基于用户回答的 1–2 个追问）
-  - `Takeaway:`（可执行改进点）
-- 多轮机制：
-  - 每轮必须 HITL 收集用户回答（否则无法追问）。
-  - 用户输入 `结束` 时立刻结束并输出总结。
+开发任务（二选一，推荐新增以避免污染 interviewer）：
+- 新增 `workspace/skills/mock-interview.md`：
+  - 明确每轮必须 HITL 收集回答，否则无法追问。
+  - 明确“终止条件”：用户说结束/时间到/达到轮次上限。
+  - 明确“质量杠杆”：每轮至少包含一个追问，且追问必须引用用户上一轮回答中的具体点。
+- 或者扩展 `workspace/skills/interviewer.md` 增加面试模式（不推荐，易混淆职责）。
 
-### D2. 简历评价（改 `workspace/skills/interviewer.md`）
+## C. 工程边界（这阶段不做什么）
 
-- 输入读取（必须）：
-  - `read_file data/userinfo.md`
-  - `read_file data/resume.typ`（不存在则提示用户先生成简历）
-- 输出结构固定（顺序固定）：
-  1) `## Red Flags (≤3)`
-  2) `## JD Gap`
-  3) `## Rewrite Suggestions (Copy/Paste Bullets)`
-  4) `## Interviewer Questions`
-  5) `## Action Items`
-- 绑定 job：报告开头必须包含该 job 的 `url`（一行即可）。
+- 不新增专用 REST 入口来触发这些能力（仍走现有 chat/HITL 流）。
+- 不要求固定输出模板；只要求“包含必要信息并可执行”，并能触发下一步 skill（例如从评价到改写）。
+- 不新增强制落盘的“报告文件”作为交付物（可以落盘作为实现手段，但不作为产品依赖）。
 
-### D3. 应用改写 + 编译（改 `workspace/skills/resume-mastery.md`，可选但建议）
+## D. 验收（必须能看出来做到了）
 
-- 必须二次确认后才允许：
-  - `write_file data/resume.typ`
-  - `typst_compile` → `workspace/output/resume.pdf`
-- 输出必须包含 PDF 可访问路径（Dashboard 已能静态访问 `/workspace/output/*`）。
+### D1. 人工验收场景
 
-## E. 测试与验收（必须可回归）
+1) 简历改写闭环：
+   - 用户表达“针对某岗位优化简历”
+   - Agent 主动选择 `interviewer` → 给出可应用建议 → 用户确认后切换 `resume-mastery` → 产出 `output/resume.pdf`
+2) 模拟面试：
+   - 用户表达“模拟面试某岗位”
+   - Agent 主动选择 `mock-interview`（或 interviewer 的面试模式）并完成多轮追问（至少 3 轮）
 
-### E1. 人工验收
+### D2. 可观测性验收
 
-- 在 Dashboard job 行点击 `Review Resume`：
-  - 输出包含固定 5 个标题
-  - 且包含该 job 的 `url`
-- 在 Dashboard job 行点击 `Mock Interview`：
-  - 完成 ≥ 3 轮（本阶段最低要求），每轮包含 `Q/Rubric/Follow-up/Takeaway`
-  - 能通过 HITL 输入回答并触发追问
-- （若做 Apply）点击 `Apply Rewrite + Build PDF`：
-  - 必须二次确认
-  - 生成 `workspace/output/resume.pdf`
-
-### E2. 自动化回归（建议加）
-
-- `src/web/server.ts`：新增接口单测（mock `agentRegistry.get('main')` 与 `runEphemeral` 调用参数，断言 prompt 包含 job url）。
-- `workspace/skills/*`：轻量测试（字符串断言）确保输出标题与关键约束存在，防止后续改动破坏结构。
+- 在 Web/TUI 的日志中能看到 Agent 选择了哪些 skill（至少能看到 skill 名称），方便定位“为什么走了这条路径”。
