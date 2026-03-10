@@ -1,96 +1,98 @@
-# Phase 6 P2：模拟面试 & 简历评价（开发计划）
+# Phase 6 P2：模拟面试 & 简历评价（按产品逻辑的开发计划）
 
-> 目标：用最少工程改动，把“模拟面试”和“简历评价/改写”做成稳定可复用的能力。计划只写开发任务与验收，不写背景分析。
+> 重点：这两项能力不是“独立工具”，而是服务于 Job 流水线（发现 → 选择 → 准备 → 投递 → 复盘）。计划只写需要开发的功能切片与验收。
 
-## A. 交付物（必须产出）
+## A. 产品主流程（这阶段要对齐的逻辑）
 
-- `workspace/skills/mock-interview.md`：新增 SOP（模拟面试）
-- `workspace/skills/interviewer.md`：输出模板固定化 + 结果落盘（简历评价）
-- `workspace/skills/resume-mastery.md`：两段式（评价不改文件 / 应用改写才改）+ 落盘与编译（简历改写）
-- `workspace/skills/index.md`：补充上述 2 个入口说明（减少模型选择漂移）
+1. 用户在 Web Dashboard（或 TUI）看到 `jobs.md` 的岗位列表。
+2. 用户针对“某一个岗位”做准备：
+   - 简历：对该岗位做差距分析 → 给出可应用的改写建议 →（用户确认后）生成/更新简历 PDF。
+   - 面试：基于该岗位与用户背景进行多轮模拟面试（含追问），输出可执行的改进点。
+3. 以上过程必须做到：
+   - “以岗位为中心”：所有输出都必须绑定到某条 job（至少绑定 `url`）。
+   - “以交互为中心”：主要产出在 UI 中展示（日志/对话/HITL），不新增额外落盘文件作为交付物。
 
-## B. 指令入口（必须能用，且无需 UI 改动）
+## B. UI 能力切片（必须做）
 
-> 入口统一走 `POST /api/chat` 或 TUI 输入 → `MainAgent.runEphemeral(...)`。
+### B1. Job 级别操作入口（Web Dashboard）
 
-- 模拟面试：
-  - `开始模拟面试：<目标岗位>；<级别>；<方向>`
-- 简历评价（只读）：
-  - `评价简历：<目标岗位>`
-- 应用改写（写文件 + 编译）：
-  - `应用简历改写：使用上一份评价，将改写落到 resume.typ 并编译`
+- 在 job 列表的每一行增加动作（最少 2 个）：
+  - `Review Resume`：对该 job 进行简历差距分析与改写建议（只读）
+  - `Mock Interview`：对该 job 开始面试回合
+- 交互要求：
+  - “Review Resume”默认一次性输出结构化报告（见 D2）。
+  - “Mock Interview”必须支持多轮：每轮问题 → 用户回答（HITL）→ 追问/下一题（见 D1）。
 
-## C. 产物落盘规范（必须遵守）
+### B2. Apply Rewrite（可选但建议做）
 
-- 面试记录：`workspace/data/interviews/<timestamp>-<role>.md`
-- 简历评价：`workspace/data/resume-review/<timestamp>-<role>.md`
-- 简历源文件：
-  - 默认覆盖：`workspace/data/resume.typ`
-  - 可选副本：`workspace/data/resume.<timestamp>.typ`（仅当指令明确要求“保留副本”）
-- PDF：`workspace/output/resume.pdf`
+- 在 “Review Resume” 输出后，提供一个确认入口（按钮或二次确认弹窗）：
+  - `Apply Rewrite + Build PDF`
+- 约束：必须二次确认后才允许改动 `workspace/data/resume.typ`。
 
-## D. Skill 变更清单（具体要改什么）
+## C. 服务端接口（必须做）
 
-### D1. `workspace/skills/mock-interview.md`（新增）
+> 不依赖“用户输入指令文本”，由 UI 直接调用接口触发对应任务。
 
-- 必须先 `read_file data/userinfo.md`。
-- 若缺少目标岗位/级别/方向：必须 HITL（一次只问 1–2 个关键字段）。
-- 面试流程（最小可用）：
-  - 总轮次 ≥ 5（允许用户随时 `结束`）。
-  - 每轮输出必须使用固定块结构（便于前端/TUI 渲染与回归）：
-    - `Q:`（问题）
-    - `Rubric:`（考察点/优秀回答要点）
-    - `Follow-up:`（基于用户回答的 1–2 个追问）
-    - `Takeaway:`（下一次怎么答，给可直接背诵的要点）
-- 结束时必须 `write_file` 写入 `data/interviews/...`，并在对话中打印文件路径。
+- 新增 REST：
+  - `POST /api/jobs/resume/review`（body: `{ url: string }`）
+  - `POST /api/jobs/interview/start`（body: `{ url: string }`）
+  - （可选）`POST /api/jobs/resume/apply`（body: `{ url: string }`，表示“基于刚刚的建议应用改写并编译”）
+- 行为：
+  - 通过 `jobs.md` 反查该 `url` 对应行（company/title/status/time）。
+  - 构造明确 prompt 传入 `MainAgent.runEphemeral(...)`，并要求：
+    - 使用既有 skills（见 D）
+    - 输出结构固定（便于 UI 渲染）
+    - 需要用户输入时，走 HITL（Dashboard 已有弹窗链路）
 
-### D2. `workspace/skills/interviewer.md`（修改）
+## D. Skill 与 Tool 编排（必须做）
 
-- 保留“严苛面试官”风格，但输出必须固定为以下标题（顺序固定）：
+### D1. 模拟面试（改 `workspace/skills/interviewer.md` 或新增 `workspace/skills/mock-interview.md`，二选一）
+
+- 绑定 job：必须先读出该 job 的 `{company,title,url}`，并把它写入面试上下文开头（一行即可）。
+- 每轮输出结构固定（每轮一块）：
+  - `Q:`（问题）
+  - `Rubric:`（考察点/优秀回答要点）
+  - `Follow-up:`（基于用户回答的 1–2 个追问）
+  - `Takeaway:`（可执行改进点）
+- 多轮机制：
+  - 每轮必须 HITL 收集用户回答（否则无法追问）。
+  - 用户输入 `结束` 时立刻结束并输出总结。
+
+### D2. 简历评价（改 `workspace/skills/interviewer.md`）
+
+- 输入读取（必须）：
+  - `read_file data/userinfo.md`
+  - `read_file data/resume.typ`（不存在则提示用户先生成简历）
+- 输出结构固定（顺序固定）：
   1) `## Red Flags (≤3)`
   2) `## JD Gap`
   3) `## Rewrite Suggestions (Copy/Paste Bullets)`
   4) `## Interviewer Questions`
   5) `## Action Items`
-- 输入读取约定：
-  - 必须 `read_file data/userinfo.md`
-  - 必须 `read_file data/resume.typ`（如果不存在则要求用户先生成或提供文本）
-- 完成后必须 `write_file` 写入 `data/resume-review/...`，并在对话中打印文件路径。
+- 绑定 job：报告开头必须包含该 job 的 `url`（一行即可）。
 
-### D3. `workspace/skills/resume-mastery.md`（修改）
+### D3. 应用改写 + 编译（改 `workspace/skills/resume-mastery.md`，可选但建议）
 
-- 强制两段式：
-  - `评价简历`：只读，不改 `resume.typ`
-  - `应用简历改写`：才允许 `write_file data/resume.typ`（或副本）并 `typst_compile`
-- 应用改写前：
-  - 若关键字段缺失（联系方式/教育等），必须 HITL 逐条补齐（沿用既有 SOP 原则）。
-- 应用改写后：
-  - 必须 `typst_compile`，并在对话中打印 `output/resume.pdf` 路径。
+- 必须二次确认后才允许：
+  - `write_file data/resume.typ`
+  - `typst_compile` → `workspace/output/resume.pdf`
+- 输出必须包含 PDF 可访问路径（Dashboard 已能静态访问 `/workspace/output/*`）。
 
-### D4. `workspace/skills/index.md`（修改）
+## E. 测试与验收（必须可回归）
 
-- 增加入口说明：
-  - “模拟面试：使用 mock-interview SOP”
-  - “简历评价：使用 interviewer SOP；应用改写：使用 resume-mastery SOP”
+### E1. 人工验收
 
-## E. 最小工程改动（可选项，只有在不稳定时才做）
+- 在 Dashboard job 行点击 `Review Resume`：
+  - 输出包含固定 5 个标题
+  - 且包含该 job 的 `url`
+- 在 Dashboard job 行点击 `Mock Interview`：
+  - 完成 ≥ 3 轮（本阶段最低要求），每轮包含 `Q/Rubric/Follow-up/Takeaway`
+  - 能通过 HITL 输入回答并触发追问
+- （若做 Apply）点击 `Apply Rewrite + Build PDF`：
+  - 必须二次确认
+  - 生成 `workspace/output/resume.pdf`
 
-- （可选）在 MainAgent 的 system prompt 或 skills index 中加强“指令 → SOP”映射（减少模型自由发挥）。
-- （可选）在输出中统一打印 `REPORT_PATH=` 与 `PDF_PATH=` 行，便于 UI 解析与跳转（只增不改）。
+### E2. 自动化回归（建议加）
 
-## F. 验收（必须可回归）
-
-### F1. 人工验收
-
-- 模拟面试：
-  - 仅通过 Web/TUI 输入指令即可完成 ≥ 5 轮，并生成 `data/interviews/...`。
-  - 每轮输出包含 `Q/Rubric/Follow-up/Takeaway` 四块。
-- 简历评价：
-  - `评价简历` 生成 `data/resume-review/...`，且标题结构固定。
-- 简历改写：
-  - `应用简历改写` 才会修改 `data/resume.typ`（或副本）并成功生成 `output/resume.pdf`。
-
-### F2. 自动化验收（建议加单测/轻量集成测）
-
-- 断言 skills 文件存在且包含关键标题/关键约束（字符串断言即可）。
-- 断言指令触发时，LLM system prompt 能“看到” skills index（回归：避免引用丢失）。
+- `src/web/server.ts`：新增接口单测（mock `agentRegistry.get('main')` 与 `runEphemeral` 调用参数，断言 prompt 包含 job url）。
+- `workspace/skills/*`：轻量测试（字符串断言）确保输出标题与关键约束存在，防止后续改动破坏结构。
