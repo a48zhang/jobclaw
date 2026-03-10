@@ -3,14 +3,12 @@
 ## 1) Resume：让“改简历”变成“针对岗位改简历”
 
 开发任务：
-- 强化 `workspace/skills/interviewer.md`（简历评价从“点评”升级为“可落地改写”）
-  - 目标岗位信息来源：优先 `data/jobs.md`（用户指明 url/公司/岗位）；无法定位时 HITL 让用户选一个 job
-  - JD 获取策略：有 MCP 就抓 JD；无 MCP 就让用户粘贴 JD（不要阻塞在“必须外部调研”）
-  - 输出必须包含“可直接写入简历的改写稿”（而不是泛建议）：每条建议都要对应到简历中的某一段/某一条 bullet
-  - 明确约束：不允许编造经历/指标；缺数据就 HITL 问 1 个关键问题再继续
-- 强化 `workspace/skills/resume-mastery.md`（把“改写稿”稳定落到 `resume.typ` 并编译）
-  - 允许输入为“改写稿/替换段落/新增 bullets”，并把它落到 `data/resume.typ`
-  - `typst_compile` 生成 `output/resume.pdf`
+- 新增独立 skill：`workspace/skills/resume-tailor.md`（不修改任何现有 skill）
+  - 输入：目标岗位（优先从 `data/jobs.md` 选择/定位；无法定位就 HITL 让用户选一个）+ JD（有 MCP 就抓；无 MCP 就让用户粘贴）
+  - 读取：`data/userinfo.md` + `data/resume.typ`
+  - 输出：直接给出“可写入简历的改写稿”（替换段落/新增 bullets），并保证不编造经历/指标；缺数据就 HITL 问 1 个关键问题再继续
+  - 应用：由 Agent 使用 `write_file` 写入 `data/resume.typ`，再 `typst_compile` 生成 `output/resume.pdf`
+  - 交互：必须在写入前做一次用户确认（HITL）
 
 验收：
 - 用户说“把简历改到能投这个岗位”（给出 job url 或从 jobs.md 选择）→ 输出一份针对该岗位的改写稿 → 用户确认后生成可用的 `output/resume.pdf`
