@@ -99,7 +99,7 @@
 ### 5.6 模拟面试
 
 - 目标：输入目标岗位信息 + 用户背景材料（简历/经历摘要），输出结构化面试流程与追问。
-- 细化计划：见 `docs/phase6-p2-interview-resume.md`。
+- 细化计划：见 `docs/dev/phase6-p2-interview-resume.md`。
 - 建议方案：
   - 形式：新增 `InterviewAgent` 或在 MainAgent 增加任务入口（通过 Chat 指令触发）。
   - 输入：从 `targets.md`/`jobs.md` 读取岗位信息，从 resume 或用户输入读取经历摘要。
@@ -111,7 +111,7 @@
 ### 5.7 简历评价 + 修改建议
 
 - 目标：对当前简历内容给出可执行修改项，并能输出“可直接落地的改写稿”。
-- 细化计划：见 `docs/phase6-p2-interview-resume.md`。
+- 细化计划：见 `docs/dev/phase6-p2-interview-resume.md`。
 - 建议方案：
   - 评价维度：岗位匹配度、量化指标、STAR 表达、关键词覆盖、排版一致性。
   - 输出：改进清单 + diff 风格改写建议；可选提供“一键生成新版 typst 源文件”的工具链串联（仍走 `write_file`/`typst_compile`）。
