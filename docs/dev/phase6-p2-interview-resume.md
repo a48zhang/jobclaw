@@ -15,28 +15,25 @@
 
 ## B. 这阶段真正需要开发的东西
 
-### B1. “Skill 选择”稳定性（必须）
+### B1. Skill 选择（已具备，不是本阶段重点）
 
-目标：同样的用户意图，多次运行能稳定选择同一个 SOP 路径（而不是随机发挥）。
+当前已实现的产品逻辑基础：
+- MainAgent system prompt 已内嵌 skills index（`src/agents/main/index.ts`）。
+- skills index 已明确要求：复杂任务先 `read_file` 对应 SOP（`workspace/skills/index.md` / `src/agents/skills/index.md`）。
 
-开发任务：
-- 强化 `workspace/skills/index.md`：
-  - 用“意图 → skill”映射写清楚（例：准备面试 → mock-interview；审阅简历 → interviewer；生成/应用改写 → resume-mastery）。
-  - 每个 skill 给 1–2 行“触发条件”和“停止条件”（何时该切换 skill 或结束）。
-- 在 `MainAgent` 的 system prompt 里明确“先看 skills index，再决定是否 read_file 加载 SOP”（如果当前已经包含 index，则只补充决策规则）。
-- 在 UI 日志中增加可观测性（不改变协议）：当 Agent 决定使用某个 SOP 时，打印一行“Using skill: <name>”（便于验收与调试）。
+本阶段不再围绕“如何让 Agent 看到/选择 skill”做工程投入，重点转向下面两个能力本身的 SOP 完整度与多轮交互体验。
 
 ### B2. “简历评价 → 改写 → 编译”闭环（必须）
 
 目标：用户说“帮我把简历改到更适配这个岗位”，Agent 能自主把工作拆成两步并拿到可用 PDF。
 
 开发任务：
-- 升级 `workspace/skills/interviewer.md`：
+- 升级 `workspace/skills/interviewer.md`（“评价”）：
   - 明确输入来源优先级：`data/resume.typ`（优先）→ 否则引导先生成简历。
-  - 明确输出必须包含“可直接应用的改写建议”（而不是只点评）。
-  - 明确当用户确认“应用改写”后，交接给 `resume-mastery` 进行落盘与编译。
-- 升级 `workspace/skills/resume-mastery.md`：
-  - 增加“应用改写”步骤：根据 interviewer 的改写建议更新 `data/resume.typ` 并 `typst_compile`。
+  - 明确输出要求：必须给“可直接改写的内容”（例如可粘贴的 bullets / 替换段落），而不是停留在点评层面。
+  - 明确交接条件：当用户表示“按建议改写并生成 PDF”，进入 `resume-mastery`。
+- 升级 `workspace/skills/resume-mastery.md`（“应用改写 + 编译”）：
+  - 增加“应用改写”步骤：把改写落到 `data/resume.typ`，然后 `typst_compile` 产出 PDF。
   - 保持现有的逐步 HITL 收集信息原则（缺关键信息就问，不要一次要一堆）。
 
 ### B3. “模拟面试（多轮追问）”能力（必须）
@@ -47,7 +44,7 @@
 - 新增 `workspace/skills/mock-interview.md`：
   - 明确每轮必须 HITL 收集回答，否则无法追问。
   - 明确“终止条件”：用户说结束/时间到/达到轮次上限。
-  - 明确“质量杠杆”：每轮至少包含一个追问，且追问必须引用用户上一轮回答中的具体点。
+  - 明确“质量杠杆”：每轮至少包含一个追问，且追问必须引用用户上一轮回答中的具体点（避免泛问）。
 - 或者扩展 `workspace/skills/interviewer.md` 增加面试模式（不推荐，易混淆职责）。
 
 ## C. 工程边界（这阶段不做什么）
