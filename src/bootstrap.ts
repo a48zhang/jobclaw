@@ -14,9 +14,11 @@ export function needsBootstrap(workspaceRoot: string): boolean {
   if (!fs.existsSync(configPath)) return true
 
   try {
-    const config = loadConfig(workspaceRoot)
-    // 如果没有配置 API_KEY 或 MODEL_ID，说明只是个初始模板，仍需引导
-    return !config.API_KEY || !config.MODEL_ID
+    // 判定是否需要引导必须基于 config.json 文件本身，而非环境变量兜底值；
+    // 否则用户只要设置了环境变量，就永远不会进入 Bootstrap，导致 data/ 初始化缺失。
+    const raw = fs.readFileSync(configPath, 'utf-8')
+    const fileConfig = JSON.parse(raw) as Partial<{ API_KEY: string; MODEL_ID: string }>
+    return !fileConfig.API_KEY || !fileConfig.MODEL_ID
   } catch {
     return true
   }

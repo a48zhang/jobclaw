@@ -11,20 +11,24 @@ import { EmailChannel } from './channel/email'
 import { validateEnv } from './env'
 import { createMCPClient } from './mcp'
 import { loadConfig } from './config'
+import type { Channel } from './channel/base'
 
 export async function runCron(workspaceRoot: string, mode: 'search' | 'digest' = 'search') {
-  validateEnv(workspaceRoot, ['smtp']);
+  validateEnv(workspaceRoot, mode === 'digest' ? ['smtp'] : []);
 
   const config = loadConfig(workspaceRoot);
 
-  const channel = new EmailChannel({
-    smtpHost: process.env.SMTP_HOST!,
-    smtpPort: parseInt(process.env.SMTP_PORT ?? '587', 10),
-    from: process.env.SMTP_USER!,
-    to: process.env.NOTIFY_EMAIL!,
-    user: process.env.SMTP_USER!,
-    password: process.env.SMTP_PASSWORD!,
-  });
+  const channel: Channel =
+    mode === 'digest'
+      ? new EmailChannel({
+          smtpHost: process.env.SMTP_HOST!,
+          smtpPort: parseInt(process.env.SMTP_PORT ?? '587', 10),
+          from: process.env.SMTP_USER!,
+          to: process.env.NOTIFY_EMAIL!,
+          user: process.env.SMTP_USER!,
+          password: process.env.SMTP_PASSWORD!,
+        })
+      : { send: async () => {} };
 
   const mcpClient = await createMCPClient();
 
@@ -75,4 +79,3 @@ export async function runCron(workspaceRoot: string, mode: 'search' | 'digest' =
     await mcpClient.close();
   }
 }
-

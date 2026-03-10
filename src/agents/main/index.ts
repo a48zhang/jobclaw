@@ -174,10 +174,11 @@ ${RESUME_SYSTEM_PROMPT}
   protected async onToolResult(toolName: string, result: ToolResult): Promise<void> {
     if (toolName === 'typst_compile' && result.success) {
       eventBus.emit('agent:log', {
+        agentName: this.agentName,
+        type: 'info',
         level: 'info',
         message: `简历 PDF 已生成：${result.content}`,
-        agentName: this.agentName,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       })
     }
   }

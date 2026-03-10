@@ -48,6 +48,45 @@ ${skillsIndex}
         return
       }
 
+      if (toolName === 'upsert_job') {
+        try {
+          const payload = JSON.parse(result.content) as {
+            action?: 'added' | 'updated' | 'skipped'
+            company?: string
+            title?: string
+            url?: string
+            status?: string
+          }
+
+          if (!this.channel) return
+          if (payload.action === 'skipped') return
+
+          const status = payload.status ?? ''
+          const typeMap: Record<string, ChannelMessageType> = {
+            applied: 'delivery_success',
+            failed: 'delivery_failed',
+            login_required: 'delivery_blocked',
+          }
+
+          const msgType = typeMap[status]
+          if (!msgType) return
+
+          await this.channel.send({
+            type: msgType,
+            payload: {
+              company: payload.company ?? 'unknown',
+              title: payload.title ?? 'unknown',
+              url: payload.url ?? this.currentJobUrl ?? 'unknown',
+              status,
+            },
+            timestamp: new Date(),
+          })
+        } catch (e) {
+          // 解析失败则忽略
+        }
+        return
+      }
+
       if (toolName !== 'write_file') return
       if (!this.currentJobUrl) return
 

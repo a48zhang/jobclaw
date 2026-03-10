@@ -13,7 +13,8 @@ export interface Config {
 const DEFAULT_CONFIG: Config = {
   API_KEY: '',
   MODEL_ID: '',
-  SUMMARY_MODEL_ID: '',
+  // Summary model is optional at runtime; BaseAgent also defaults to gpt-4o-mini.
+  SUMMARY_MODEL_ID: 'gpt-4o-mini',
   BASE_URL: 'https://api.openai.com/v1',
   SERVER_PORT: 3000,
 }

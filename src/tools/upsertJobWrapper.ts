@@ -26,10 +26,18 @@ export async function executeUpsertJob(
     if (result.success) {
       return {
         success: true,
-        content: JSON.stringify({
-          action: result.action,
-          message: result.message
-        }, null, 2)
+        content: JSON.stringify(
+          {
+            action: result.action,
+            message: result.message,
+            company: upsertArgs.company,
+            title: upsertArgs.title,
+            url: upsertArgs.url,
+            status: upsertArgs.status,
+          },
+          null,
+          2
+        ),
       };
     } else {
       return {

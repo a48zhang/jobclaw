@@ -329,11 +329,12 @@ function appendUserMessage(text) {
   scrollToBottom()
 }
 
-function appendAgentLog({ type, message, timestamp, agentName }) {
+function appendAgentLog({ type, level, message, timestamp, agentName }) {
+  const logType = type ?? level ?? 'info'
   const ts = timestamp ? new Date(timestamp).toLocaleTimeString() : ''
   const agent = agentName ? `[${agentName}]` : ''
   const div = document.createElement('div')
-  div.className = `msg-agent ${type} shadow-sm`
+  div.className = `msg-agent ${logType} shadow-sm`
   div.innerHTML = `<span class="opacity-50 text-[10px] mr-2">${ts} ${agent}</span>\n${escHtml(message)}`
   chatHistory.appendChild(div)
   scrollToBottom()

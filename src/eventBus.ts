@@ -14,6 +14,8 @@ export interface AgentStatePayload {
 export interface AgentLogPayload {
   agentName: string
   type: 'info' | 'warn' | 'error'
+  /** @deprecated Back-compat alias for older emitters/clients */
+  level?: 'info' | 'warn' | 'error'
   message: string
   timestamp: string
 }

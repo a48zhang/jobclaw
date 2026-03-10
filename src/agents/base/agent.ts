@@ -182,6 +182,13 @@ export abstract class BaseAgent extends EventEmitter {
         break
       }
     }
+
+    if (!result && this.iterations >= this.maxIterations) {
+      this.setState('waiting')
+      this.lastAction = 'max_iterations_reached'
+      result = `已达到最大迭代次数 (${this.maxIterations})，任务可能尚未完成，已挂起等待用户指示。`
+    }
+
     return result
   }
 
@@ -198,7 +205,10 @@ export abstract class BaseAgent extends EventEmitter {
       })]) : await runPromise
       return result ?? '任务完成'
     } finally {
-      if (timeoutId) clearTimeout(timeoutId); this.messages = saved.messages; this.state = saved.state; this.runningEphemeral = saved.runningEphemeral
+      if (timeoutId) clearTimeout(timeoutId)
+      this.messages = saved.messages
+      this.runningEphemeral = saved.runningEphemeral
+      this.setState(saved.state)
     }
   }
 
