@@ -22,24 +22,4 @@
 |------|------|
 | [dev/plan.md](dev/plan.md) | 开发计划总览与阶段依赖关系 |
 
-### 开发阶段
-
-| 阶段 | 文件 | 内容 |
-|------|------|------|
-| Phase 0 | [dev/phases/phase0.md](dev/phases/phase0.md) | 项目脚手架 - 环境搭建与目录结构初始化 |
-| Phase 1 | [dev/phases/phase1.md](dev/phases/phase1.md) | 类型定义与工具层 - 核心类型与文件/锁工具实现 |
-| Phase 2 | [dev/phases/phase2.md](dev/phases/phase2.md) | BaseAgent - ReAct 循环与上下文管理 |
-| Phase 3 | [dev/phases/phase3.md](dev/phases/phase3.md) | 具体 Agent 实现 - Main/Search/Delivery Agent |
-| Phase 4 | [dev/phases/phase4.md](dev/phases/phase4.md) | Channel 通知 - 邮件通知模块集成 |
-| Phase 5 | [dev/phases/phase5.md](dev/phases/phase5.md) | Web UI - 可视化看板与实时推送 |
-
-# 开发进度
-
-| 阶段 | 状态 | 说明 |
-|------|------|------|
-| Phase 0 | ✅ 完成 | 项目脚手架 - 环境搭建与目录结构初始化 |
-| Phase 1 | ✅ 完成 | 类型定义与工具层 |
-| Phase 2 | ✅ 完成 | BaseAgent |
-| Phase 3 | ✅ 完成 | 具体 Agent 实现 |
-| Phase 4 | ✅ 完成 | Channel 通知 |
-| Phase 5 | ✅ 完成 | Web UI |
+> 说明：历史 Phase 分拆文档已收敛整合到 `dev/plan.md`，避免多文件重复与失同步。
