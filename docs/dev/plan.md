@@ -1,39 +1,31 @@
-# JobClaw 核心开发路线图 (Master Plan)
+# JobClaw 开发计划 (Master Plan)
 
-> **版本**: 0.3.0  
-> **更新日期**: 2026-03-08  
-> **状态**: Phase 5 已全量集成。
+> **版本**: 0.3.x  
+> **最近更新**: 2026-03-10  
+> **当前状态**: Phase 1–5 已集成；进入 Phase 6（生产化优化）与 Backlog 消化阶段。
 
 ---
 
-## 1. 里程碑阶段执行情况
+## 1. 里程碑与范围
 
-### [Phase 1-2: 基础设施与 Agent 基座 (已完成)](/docs/dev/phase1/readme.md)
-- **核心**: 建立 Workspace，实现文件锁与路径安全，建立 Tool-Driven LLM 循环与 Context 压缩。
-- **交付**: 可扩展的 Agent 运行底座。
+### Phase 1–2（已完成）：基础设施与 Agent 基座
+- Workspace 目录约束、文件锁、基础文件工具
+- Tool-Driven Agent Loop + Context 压缩
 
-### [Phase 3: 核心业务逻辑 (已完成)](/docs/dev/phase3/readme.md)
-- **核心**: 实现 MainAgent (搜索) 与 DeliveryAgent (投递) 的协作流程。引入 `upsert_job` 专用工具。
-- **交付**: 完整的职位发现与投递自动化链路。
+### Phase 3（已完成）：核心业务闭环
+- MainAgent（搜索/调度）+ DeliveryAgent（投递）
+- `upsert_job` 作为唯一 jobs.md 写入口
 
-### [Phase 4: TUI 仪表盘与鲁棒性 (已完成)](/docs/dev/phase4/readme.md)
-- **核心**: 基于 `blessed` 的实时终端监控界面。实现宽容解析与环境预检。
-- **交付**: 可视化的本地交互环境。
+### Phase 4（已完成）：TUI 与鲁棒性
+- Blessed TUI，基础日志与 jobs 监控
 
-### [Phase 5: Web Dashboard 与 Resume Mastery (已完成)](/docs/dev/phase5/readme.md)
-- **核心**: 
-    - 搭建 Hono Web 服务，通过 WebSocket 实时推送 Agent 活动流。
-    - 实现 **HITL (人工干预)** 弹窗，打通 Web 到 Agent 的反馈回路。
-    - 集成 **Typst 简历工具链**，支持智能简历生成与环境自动引导。
-- **交付**: 现代化的 Web 监控看板与生产级简历管理功能。
+### Phase 5（已完成）：Web Dashboard 与 Resume Mastery
+- WebSocket 事件流：`agent:state` / `agent:log`
+- HITL（人工干预）弹窗链路
+- 简历生成：Typst 工具链集成
 
-### [Phase 6: 高级生产特性 (计划中)](/docs/dev/phase6/readme.md)
-- **核心**: 自动化容错、性能优化、深度 Session 管理。
-- **任务**: 
-    - 在 BaseAgent 层面实现工具调用的**指数退避重试**框架。
-    - 实现基于内容哈希的 TUI 渲染优化，减少冗余 IO。
-    - 增加 **Session 智能修剪**，自动清理已完成任务的原始日志。
-    - 引入 Channel 通道限流保护。
+### Phase 6（进行中）：生产特性优化
+- 自动化容错、性能优化、深度 Session 管理
 
 ---
 
@@ -42,59 +34,56 @@
 ```mermaid
 graph TD
     P12[Phase 1-2: 基座] --> P3[Phase 3: 业务闭环]
-    P3 --> P4[Phase 4: TUI 仪表盘]
-    P4 --> P5[Phase 5: Web UI & Typst]
-    P5 --> P6[Phase 6: 生产特性优化]
+    P3 --> P4[Phase 4: TUI]
+    P4 --> P5[Phase 5: Web & Resume]
+    P5 --> P6[Phase 6: 生产化]
 ```
 
 ---
 
-## 3. 关键架构约束
+## 3. 关键架构约束（必须遵守）
 
-1.  **架构扁平化**: 配置系统统一采用 `config.json` 扁平格式，不再使用嵌套对象。
-2.  **文件一致性**: 严禁在代码中直接使用 `fs` 写入 `jobs.md`，必须通过 `upsert_job` 工具进行原子化操作。
-3.  **单文件体积**: 严格遵守单文件不超过 500 行规范，逻辑应拆分至 `utils` 或辅助模块。
-4.  **环境感知**: 所有系统级操作（Shell/编译）必须包含环境检测与自愈引导。
+1. **配置扁平化**：统一使用 `workspace/config.json` 顶层字段，不引入嵌套对象。
+2. **写入一致性**：严禁绕过 `upsert_job` 直接写 `jobs.md`。
+3. **单文件体积**：尽量保持单文件 < 500 行；超过则拆分到 util/模块。
+4. **环境感知**：涉及 Shell/编译/外部依赖时必须先做检测与可恢复引导。
 
 ---
 
-## 4. V0.2.0 发布前 Review（整合）
+## 4. V0.2.0 Review（整合结论）
 
-> 计划与报告原先拆分在 `docs/dev/v0.2.0-review-plan.md` 与 `docs/dev/v0.2.0-review-report.md`，现统一收敛到本节，避免多处维护导致偏差。
->
-> **最新更新**: 2026-03-10
+### 已完成项（摘要）
+- BaseAgent 流式解析与状态转换相关回归用例修复并通过。
+- ContextCompressor 的 system 保留策略验证通过。
+- DeliveryAgent 已增强：支持基于 `upsert_job` 结果发出更准确的投递状态通知。
+- Cron 已增强：`digest` 才强制 SMTP 校验；`search` 可无 SMTP 运行。
 
-### 4.1 已完成项（摘要）
-
-- BaseAgent 流式解析与状态转换相关回归用例已修复并稳定通过。
-- ContextCompressor 保留 `system` + 最近 N 条消息的策略已验证可用。
-- DeliveryAgent 对 `upsert_job` 结果的通知支持已增强（不再只依赖 `write_file` 行匹配）。
-- Cron 鲁棒性已改进：`digest` 才强制 SMTP 校验，`search` 可无 SMTP 运行（但仍会产生日志事件流）。
-
-### 4.2 回归结果
-
-- 单元测试：本仓库当前 `bun test` 全量通过（以 CI/本机执行结果为准）。
-
-### 4.3 剩余待办（发布前）
-
-- [ ] 复核 Cron 两种模式（`search`/`digest`）在无 SMTP 与有 SMTP 环境下行为符合预期。
-- [ ] 复测 Web Dashboard 联动：`agent:state`、`agent:log`、HITL 弹窗、Chat 指令投递。
+### 发布前仍需复核
+- [ ] Cron 两种模式（`search`/`digest`）在无 SMTP 与有 SMTP 环境下行为符合预期。
+- [ ] Web Dashboard 联动：`agent:state`、`agent:log`、HITL、Chat 指令投递。
 - [ ] `workspace/config.json.example` 补齐并同步最新配置项。
-- [ ] `README.md` 与 `SPEC.md` 同步最新行为（尤其是 Summary Model 默认值与 Cron 两种模式差异）。
+- [ ] `README.md` 与 `SPEC.md` 同步最新行为（Summary Model 默认值、Cron 模式差异等）。
 
 ---
 
-## 5. Web Dashboard 重构与 Agent Chat（整合）
+## 5. Backlog（同步自 todo.md）
 
-> 计划原先位于 `docs/dev/dashboard-refactor-plan.md`，现统一收敛到本节。
+> 本节用于承接 `todo.md` 的条目，作为 Phase 6 的实际执行清单。完成后请同时更新本节与 `todo.md`。
 
-### 5.1 已实现
+### P1：性能与稳定性
+- [ ] TUI 渲染性能：引入内容哈希校验，减少 `jobs.md` 无效解析。
+- [ ] 自动化重试框架：在 BaseAgent 层面实现工具调用的指数退避重试。
+- [ ] Session 智能管理：定期清理冗余的消息历史，保持 Session 紧凑。
+- [ ] 通道限流：针对邮件通知增加发送频率保护逻辑。
+- [ ] 异步化消息流：梳理并统一 UI/Channel/EventBus 的“流式输出”与“最终态”处理。
 
-- 多 Tab 导航与模块拆分（智能助理 / 职位看板 / 工作区配置 / 简历工具）。
-- 支持 Agent Chat：`POST /api/chat` 触发 `mainAgent.runEphemeral(...)`。
-- 保留全局 HITL 弹窗、WebSocket 重连与实时事件流（`agent:state` / `agent:log`）。
+### P2：产品能力
+- [ ] 模拟面试：根据目标岗位信息进行模拟面试。
+- [ ] 简历评价 + 修改建议：对生成的简历给出可执行的改进点与迭代流程。
 
-### 5.2 后续可选优化
+---
 
-- [ ] 将前端脚本从 `public/index.html` 拆分为模块化文件，降低单文件复杂度。
-- [ ] 为 WebSocket 事件（尤其 `agent:log`）增加 schema/版本号，避免前后端字段漂移。
+## 6. Web Dashboard（维护要点）
+
+- 保持 `agent:log` 字段协议稳定；如需演进，优先做向后兼容（新增字段而非改名）。
+- 保持 Chat 入口（`POST /api/chat`）为“触发任务”的轻量接口，执行过程统一走 WebSocket 事件流展示。
