@@ -34,6 +34,10 @@ class TestAgent extends BaseAgent {
   public testSetMessages(messages: import('openai/resources/chat/completions').ChatCompletionMessageParam[]): void {
     this.messages = messages
   }
+
+  public async testGetAvailableTools(): Promise<import('openai/resources/chat/completions').ChatCompletionTool[]> {
+    return this.getAvailableTools()
+  }
 }
 
 /**
@@ -1022,5 +1026,124 @@ describe('requestIntervention (HITL)', () => {
 
     // 再次调用 resolveIntervention 不应抛出异常
     expect(() => agent.resolveIntervention('extra')).not.toThrow()
+  })
+
+  test('request 工具被注入可用工具列表', async () => {
+    const tools = await agent.testGetAvailableTools()
+    const requestTool = tools.find((tool) => tool.function.name === 'request')
+
+    expect(requestTool).toBeDefined()
+    expect(requestTool?.function.parameters.required).toContain('prompt')
+  })
+
+  test('request 工具可以触发用户请求并返回结构化结果', async () => {
+    let llmCallCount = 0
+    let emittedPayload: any = null
+    const mockOpenAI = {
+      chat: {
+        completions: {
+          create: mock((params: any) => {
+            llmCallCount++
+            if (llmCallCount === 1) {
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_request_1',
+                  type: 'function',
+                  function: {
+                    name: 'request',
+                    arguments: JSON.stringify({
+                      prompt: '你想投递什么岗位？',
+                      kind: 'single_select',
+                      options: ['前端', '后端'],
+                      allow_empty: false,
+                    }),
+                  },
+                }],
+              })
+            }
+            return formatResponse(params, {
+              content: '收到岗位信息，继续执行',
+            })
+          }),
+        },
+      },
+    } as unknown as OpenAI
+
+    const agent = new TestAgent({
+      openai: mockOpenAI,
+      agentName: 'test',
+      model: 'gpt-4o',
+      workspaceRoot: TEST_WORKSPACE,
+    })
+
+    eventBus.once('intervention:required', (payload) => {
+      emittedPayload = payload
+      agent.resolveIntervention('后端')
+    })
+
+    const result = await agent.run('开始')
+    expect(result).toBe('收到岗位信息，继续执行')
+    expect(emittedPayload.prompt).toBe('你想投递什么岗位？')
+    expect(emittedPayload.kind).toBe('single_select')
+    expect(emittedPayload.options).toEqual(['前端', '后端'])
+    expect(emittedPayload.requestId).toBe('call_request_1')
+
+    const toolMessage = agent.testGetMessages().find((msg) => msg.role === 'tool')
+    expect(toolMessage).toBeDefined()
+    const parsed = JSON.parse((toolMessage as any).content)
+    expect(parsed.request_id).toBe('call_request_1')
+    expect(parsed.input).toBe('后端')
+    expect(parsed.answered).toBe(true)
+    expect(parsed.timed_out).toBe(false)
+  })
+
+  test('request 工具超时后返回未回答状态', async () => {
+    let llmCallCount = 0
+    const mockOpenAI = {
+      chat: {
+        completions: {
+          create: mock((params: any) => {
+            llmCallCount++
+            if (llmCallCount === 1) {
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_request_2',
+                  type: 'function',
+                  function: {
+                    name: 'request',
+                    arguments: JSON.stringify({
+                      prompt: '请补充学校名称',
+                      timeout_ms: 20,
+                      allow_empty: false,
+                    }),
+                  },
+                }],
+              })
+            }
+            return formatResponse(params, {
+              content: '继续执行',
+            })
+          }),
+        },
+      },
+    } as unknown as OpenAI
+
+    const agent = new TestAgent({
+      openai: mockOpenAI,
+      agentName: 'test',
+      model: 'gpt-4o',
+      workspaceRoot: TEST_WORKSPACE,
+    })
+
+    const result = await agent.run('开始')
+    expect(result).toBe('继续执行')
+
+    const toolMessage = agent.testGetMessages().find((msg) => msg.role === 'tool')
+    const parsed = JSON.parse((toolMessage as any).content)
+    expect(parsed.input).toBe('')
+    expect(parsed.answered).toBe(false)
+    expect(parsed.timed_out).toBe(true)
   })
 })

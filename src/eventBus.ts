@@ -26,14 +26,22 @@ export interface JobUpdatedPayload {
   status: string
 }
 
+export type RequestKind = 'text' | 'confirm' | 'single_select'
+
 export interface InterventionRequiredPayload {
   agentName: string
   prompt: string
+  requestId?: string
+  kind?: RequestKind
+  options?: string[]
+  timeoutMs?: number
+  allowEmpty?: boolean
 }
 
 export interface InterventionResolvedPayload {
   agentName: string
   input: string
+  requestId?: string
 }
 
 /** All typed events on the global event bus */

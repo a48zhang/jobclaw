@@ -4,7 +4,6 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
   ChatCompletionMessageToolCall,
-  ChatCompletionChunk,
 } from 'openai/resources/chat/completions'
 import { EventEmitter } from 'node:events'
 import { executeTool, TOOLS, type ToolContext, type ToolResult } from '../../tools/index'
@@ -14,10 +13,45 @@ import { ContextCompressor } from './context-compressor'
 import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types'
 import type { Channel } from '../../channel/base'
 import { eventBus } from '../../eventBus'
-import type { InterventionResolvedPayload } from '../../eventBus'
+import type { InterventionResolvedPayload, RequestKind } from '../../eventBus'
 import * as utils from './agent-utils'
 
 const TOOL_CALL_TIMEOUT_MS = 120_000
+const REQUEST_TOOL_NAME = 'request'
+const REQUEST_TOOL: ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: REQUEST_TOOL_NAME,
+    description: '向用户请求补充输入并暂停执行，直到用户回复或超时。',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: '要展示给用户的问题或提示' },
+        kind: {
+          type: 'string',
+          enum: ['text', 'confirm', 'single_select'],
+          description: '请求的交互类型，默认 text',
+        },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '当 kind=single_select 时可选，用于展示候选项',
+        },
+        timeout_ms: { type: 'number', description: '等待用户输入的超时时间（毫秒）' },
+        allow_empty: { type: 'boolean', description: '是否允许空输入，默认 true' },
+      },
+      required: ['prompt'],
+      additionalProperties: false,
+    },
+  },
+}
+
+interface RequestInterventionOptions {
+  requestId?: string
+  kind?: RequestKind
+  options?: string[]
+  allowEmpty?: boolean
+}
 
 export abstract class BaseAgent extends EventEmitter {
   protected openai: OpenAI
@@ -67,9 +101,12 @@ export abstract class BaseAgent extends EventEmitter {
     eventBus.emit('agent:state', { agentName: this.agentName, state })
   }
 
-  async requestIntervention(prompt: string, timeoutMs?: number): Promise<string> {
+  async requestIntervention(
+    prompt: string,
+    timeoutMs?: number,
+    options: RequestInterventionOptions = {}
+  ): Promise<string> {
     const timeout = timeoutMs ?? (this.runningEphemeral ? 30_000 : 300_000)
-    eventBus.emit('intervention:required', { agentName: this.agentName, prompt })
     let timeoutId: ReturnType<typeof setTimeout> | undefined
     const interventionPromise = new Promise<string>((resolve) => {
       this.interventionResolve = resolve
@@ -80,9 +117,28 @@ export abstract class BaseAgent extends EventEmitter {
     }
     eventBus.on('intervention:resolved', busResolveHandler)
     const timeoutPromise = new Promise<string>((resolve) => {
-      timeoutId = setTimeout(() => { if (this.interventionResolve) this.resolveIntervention(''); resolve('') }, timeout)
+      timeoutId = setTimeout(() => {
+        if (this.interventionResolve) {
+          this.resolveIntervention('')
+          this.emit('intervention_timeout')
+        }
+        resolve('')
+      }, timeout)
     })
-    try { return await Promise.race([interventionPromise, timeoutPromise]) } finally {
+    eventBus.emit('intervention:required', {
+      agentName: this.agentName,
+      prompt,
+      requestId: options.requestId,
+      kind: options.kind,
+      options: options.options,
+      timeoutMs: timeout,
+      allowEmpty: options.allowEmpty,
+    })
+    try {
+      const result = await Promise.race([interventionPromise, timeoutPromise])
+      this.emit('intervention_handled')
+      return result
+    } finally {
       if (timeoutId) clearTimeout(timeoutId)
       eventBus.off('intervention:resolved', busResolveHandler)
     }
@@ -222,7 +278,7 @@ export abstract class BaseAgent extends EventEmitter {
 
   protected async getAvailableTools(): Promise<ChatCompletionTool[]> {
     if (this.availableTools) return this.availableTools
-    const tools: ChatCompletionTool[] = [...TOOLS]
+    const tools: ChatCompletionTool[] = [...TOOLS, REQUEST_TOOL]
     if (this.mcpClient) {
       try {
         const mcpTools = await this.mcpClient.listTools()
@@ -239,6 +295,11 @@ export abstract class BaseAgent extends EventEmitter {
     try { args = JSON.parse(toolCall.function.arguments) } catch {
       return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ error: '无法解析工具参数' }) }
     }
+
+    if (toolName === REQUEST_TOOL_NAME) {
+      return this.executeRequestToolCall(toolCall, args)
+    }
+
     let result: ToolResult
     const localTools = ['read_file', 'write_file', 'append_file', 'list_directory', 'lock_file', 'unlock_file', 'upsert_job', 'typst_compile', 'install_typst', 'run_shell_command', 'read_pdf']
     if (localTools.includes(toolName)) {
@@ -255,6 +316,88 @@ export abstract class BaseAgent extends EventEmitter {
     } else { result = { success: false, content: '', error: `未知工具: ${toolName}` } }
     await this.onToolResult(toolName, result)
     return { role: 'tool', tool_call_id: toolCall.id, content: result.success ? result.content : `错误: ${result.error}` }
+  }
+
+  private async executeRequestToolCall(
+    toolCall: ChatCompletionMessageToolCall,
+    args: Record<string, unknown>
+  ): Promise<ChatCompletionMessageParam> {
+    const {
+      prompt,
+      kind = 'text',
+      options,
+      timeout_ms: timeoutMs,
+      allow_empty: allowEmpty = true,
+    } = args as {
+      prompt?: unknown
+      kind?: unknown
+      options?: unknown
+      timeout_ms?: unknown
+      allow_empty?: unknown
+    }
+
+    if (typeof prompt !== 'string' || prompt.trim() === '') {
+      return {
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({ error: 'prompt 参数必须是非空字符串' }),
+      }
+    }
+    if (!['text', 'confirm', 'single_select'].includes(String(kind))) {
+      return {
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({ error: 'kind 参数不合法' }),
+      }
+    }
+    if (options !== undefined && (!Array.isArray(options) || options.some((item) => typeof item !== 'string'))) {
+      return {
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({ error: 'options 参数必须是字符串数组' }),
+      }
+    }
+    if (timeoutMs !== undefined && (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+      return {
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({ error: 'timeout_ms 参数必须是正数' }),
+      }
+    }
+    if (typeof allowEmpty !== 'boolean') {
+      return {
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({ error: 'allow_empty 参数必须是布尔值' }),
+      }
+    }
+
+    const input = await this.requestIntervention(prompt, timeoutMs, {
+      requestId: toolCall.id,
+      kind: kind as RequestKind,
+      options: options as string[] | undefined,
+      allowEmpty,
+    })
+    const answered = allowEmpty ? true : input.trim().length > 0
+    const timedOut = input === ''
+    const result: ToolResult = {
+      success: true,
+      content: JSON.stringify({
+        request_id: toolCall.id,
+        prompt,
+        kind,
+        options: options ?? [],
+        input,
+        answered,
+        timed_out: timedOut,
+      }),
+    }
+    await this.onToolResult(REQUEST_TOOL_NAME, result)
+    return {
+      role: 'tool',
+      tool_call_id: toolCall.id,
+      content: result.content,
+    }
   }
 
   protected async executeToolCalls(toolCalls: ChatCompletionMessageToolCall[]): Promise<ChatCompletionMessageParam[]> {
@@ -282,7 +425,7 @@ export abstract class BaseAgent extends EventEmitter {
   protected loadSkill(name: string): string { return utils.loadSkill(this.workspaceRoot, name) }
 
   protected initMessages(input: string): void {
-    const systemContent = `${this.systemPrompt}\n\n## 核心行为准则\n1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request_intervention\` 请求介入。绝不能编造虚假信息。\n2. **写入前反思**: 在向 \`data/\` 写入信息前，必须核实数据真实性。\n3. **中文交流**: 始终使用中文与用户交流。`
+    const systemContent = `${this.systemPrompt}\n\n## 核心行为准则\n1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request\` 工具请求用户补充输入。绝不能编造虚假信息。\n2. **写入前反思**: 在向 \`data/\` 写入信息前，必须核实数据真实性。\n3. **中文交流**: 始终使用中文与用户交流。`
     if (this.messages.length === 0) {
       this.messages.push({ role: 'system', content: systemContent }, { role: 'user', content: input })
     } else {
