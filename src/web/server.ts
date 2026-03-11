@@ -113,10 +113,11 @@ export function createApp(workspaceRoot: string): Hono {
   // ── REST: POST /api/intervention ─────────────────────────────────────────
   app.post('/api/intervention', async (c) => {
     try {
-      const body = await c.req.json<{ input?: string; agentName?: string }>()
+      const body = await c.req.json<{ input?: string; agentName?: string; requestId?: string }>()
       const input = typeof body.input === 'string' ? body.input : ''
       const agentName = typeof body.agentName === 'string' ? body.agentName : ([...agentRegistry.keys()][0] ?? 'main')
-      eventBus.emit('intervention:resolved', { agentName, input })
+      const requestId = typeof body.requestId === 'string' ? body.requestId : undefined
+      eventBus.emit('intervention:resolved', { agentName, input, requestId })
       return c.json({ ok: true })
     } catch {
       return c.json({ ok: false, error: 'Invalid request' }, 400)

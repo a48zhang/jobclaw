@@ -220,8 +220,8 @@ export class TUI {
   get tuiChannel(): TUIChannel { return this.channel }
 
   attachAgent(agent: BaseAgent): void {
-    agent.on('intervention_required', ({ prompt, resolve }) => {
-      this.showInterventionModal(prompt, resolve, agent)
+    agent.on('intervention_required', ({ prompt, resolve, kind, options }) => {
+      this.showInterventionModal(prompt, resolve, agent, kind, options)
     })
   }
 
@@ -256,11 +256,23 @@ export class TUI {
     this.screen.render()
   }
 
-  private showInterventionModal(prompt: string, resolve: (v: string) => void, agent: BaseAgent): void {
+  private showInterventionModal(
+    prompt: string,
+    resolve: (v: string) => void,
+    agent: BaseAgent,
+    kind?: string,
+    options?: string[]
+  ): void {
+    const optionsText = Array.isArray(options) && options.length > 0
+      ? `\n\n 可选项：\n ${options.map((value, index) => `${index + 1}. ${value}`).join('\n ')}`
+      : ''
+    const inputHint = kind === 'confirm'
+      ? ' 请在下方输入 yes / no 后按 Enter 继续：'
+      : ' 请在下方输入后按 Enter 继续：'
     const modal = blessed.box({
       top: 'center', left: 'center', width: '60%', height: 10, border: { type: 'line' },
       label: ' ⚠ 人工干预 ', style: { border: { fg: 'yellow' }, fg: 'white' }, tags: true,
-      content: `\n {yellow-fg}${prompt}{/}\n\n 请在下方输入后按 Enter 继续：`, fullUnicode: true,
+      content: `\n {yellow-fg}${prompt}{/}${optionsText}\n\n${inputHint}`, fullUnicode: true,
     })
     const input = blessed.textbox({ parent: modal, top: 7, left: 2, right: 2, height: 1, style: { fg: 'yellow' }, inputOnFocus: true, fullUnicode: true })
     const cleanup = () => {

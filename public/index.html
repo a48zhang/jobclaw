@@ -222,6 +222,7 @@ let sortCol = 'time'
 let sortAsc = false
 let donutChart = null
 let interventionAgentName = 'main'
+let interventionRequestId = null
 let ws = null
 let reconnectTimer = null
 
@@ -649,17 +650,30 @@ document.getElementById('gen-resume').addEventListener('click', async () => {
 })
 
 // ─── Intervention Modal ──────────────────────────────────────────────────────
-function showModal({ agentName, prompt }) {
+function showModal({ agentName, prompt, kind, options, requestId }) {
   interventionAgentName = agentName ?? 'main'
-  document.getElementById('modal-prompt').textContent = prompt ?? ''
+  interventionRequestId = requestId ?? null
+  const normalizedOptions = Array.isArray(options) ? options.filter(v => typeof v === 'string') : []
+  const optionsText = normalizedOptions.length
+    ? `\n\n可选项:\n${normalizedOptions.map((value, index) => `${index + 1}. ${value}`).join('\n')}`
+    : ''
+  document.getElementById('modal-prompt').textContent = (prompt ?? '') + optionsText
+  const input = document.getElementById('modal-input')
+  input.placeholder =
+    kind === 'confirm'
+      ? '请输入 yes / no'
+      : normalizedOptions.length
+        ? '请输入选项文字或编号'
+        : '请输入内容...'
   const overlay = document.getElementById('modal-overlay')
   overlay.classList.add('active')
-  setTimeout(() => document.getElementById('modal-input').focus(), 100)
+  setTimeout(() => input.focus(), 100)
 }
 
 function hideModal() {
   document.getElementById('modal-overlay').classList.remove('active')
   document.getElementById('modal-input').value = ''
+  interventionRequestId = null
 }
 
 async function submitIntervention() {
@@ -669,7 +683,7 @@ async function submitIntervention() {
     await fetch('/api/intervention', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input, agentName: interventionAgentName })
+      body: JSON.stringify({ input, agentName: interventionAgentName, requestId: interventionRequestId })
     })
   } catch { /* ignore */ }
 }
@@ -680,7 +694,7 @@ document.getElementById('modal-cancel').addEventListener('click', () => {
   fetch('/api/intervention', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ input: '', agentName: interventionAgentName })
+    body: JSON.stringify({ input: '', agentName: interventionAgentName, requestId: interventionRequestId })
   }).catch(() => {})
 })
 document.getElementById('modal-input').addEventListener('keydown', (e) => {
