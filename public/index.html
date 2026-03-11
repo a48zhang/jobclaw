@@ -151,6 +151,21 @@
       <p class="text-slate-400 text-sm mb-6">基于工作区中的模板和用户信息，调用 Agent 自动编译生成最新版本的 PDF 简历。</p>
       
       <div class="flex flex-col gap-4">
+        <div class="bg-slate-900 border border-slate-700 p-4 rounded-lg">
+          <p class="text-slate-300 text-sm mb-3">上传现有 PDF 简历，供后续评价或改写使用</p>
+          <div class="flex flex-col md:flex-row gap-3">
+            <input id="resume-upload-file"
+                   type="file"
+                   accept=".pdf,application/pdf"
+                   class="flex-1 bg-slate-950 text-slate-300 text-sm p-3 rounded border border-slate-700" />
+            <button id="upload-resume"
+                    class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-lg font-bold shadow">
+              上传 PDF
+            </button>
+          </div>
+          <p id="resume-upload-status" class="text-xs text-slate-400 mt-3"></p>
+        </div>
+
         <button id="gen-resume"
                 class="w-full text-base font-bold bg-purple-600 hover:bg-purple-500 text-white py-4 rounded-lg shadow-md transition-colors flex justify-center items-center gap-2">
           <span>⚙️</span> 生成简历 PDF
@@ -557,6 +572,53 @@ document.getElementById('save-md').addEventListener('click', async () => {
 })
 
 // ─── Resume Action (Tab 4) ──────────────────────────────────────────────────
+document.getElementById('upload-resume').addEventListener('click', async () => {
+  const fileInput = document.getElementById('resume-upload-file')
+  const status = document.getElementById('resume-upload-status')
+  const btn = document.getElementById('upload-resume')
+  const file = fileInput.files && fileInput.files[0]
+
+  if (!file) {
+    status.textContent = '请先选择一个 PDF 文件'
+    status.className = 'text-xs text-red-400 mt-3'
+    return
+  }
+
+  const form = new FormData()
+  form.set('file', file)
+
+  btn.disabled = true
+  btn.classList.add('opacity-70', 'cursor-not-allowed')
+  status.textContent = '正在上传 PDF...'
+  status.className = 'text-xs text-yellow-400 mt-3'
+
+  try {
+    const res = await fetch('/api/resume/upload', {
+      method: 'POST',
+      body: form,
+    })
+    const json = await res.json()
+    if (json.ok) {
+      status.textContent = '上传成功。现在可以在聊天区输入“评价刚上传的简历”'
+      status.className = 'text-xs text-green-400 mt-3'
+      appendAgentLog({
+        type: 'info',
+        message: `已上传 PDF 简历：${json.name} (${json.path})`,
+        agentName: 'System'
+      })
+    } else {
+      status.textContent = `上传失败: ${json.error || '未知错误'}`
+      status.className = 'text-xs text-red-400 mt-3'
+    }
+  } catch (e) {
+    status.textContent = `上传异常: ${e.message}`
+    status.className = 'text-xs text-red-400 mt-3'
+  } finally {
+    btn.disabled = false
+    btn.classList.remove('opacity-70', 'cursor-not-allowed')
+  }
+})
+
 document.getElementById('gen-resume').addEventListener('click', async () => {
   const btn = document.getElementById('gen-resume')
   
