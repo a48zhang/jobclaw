@@ -105,7 +105,7 @@ jobclaw/
 
 ### 5.1 Web 看板 (Phase 5)
 - **实时流**: 基于 WebSocket 推送 Agent 的 `Think` 和 `Tool` 详细日志。
-- **人工干预 (HITL)**: 当 Agent 调用 `requestIntervention` 时，网页弹出实时弹窗供用户输入。
+- **人工干预 (HITL)**: 当 Agent 调用 `request` 工具时，网页弹出实时弹窗供用户输入。
 - **配置编辑**: 支持直接在线编辑 Markdown 配置并保存。
 
 ### 5.2 TUI 仪表盘
