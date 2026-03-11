@@ -65,6 +65,15 @@ const RESUME_SYSTEM_PROMPT = `
 // MainAgent 实现
 // ============================================================================
 
+const INTERVIEW_AND_RESUME_PROMPT = [
+  '## Resume Review And Mock Interview Rules',
+  '- For resume review or rewrite requests, follow `skills/resume-clinic.md`.',
+  '- If `data/uploads/resume-upload.pdf` exists, check it first and use `read_pdf` before making claims about the uploaded resume.',
+  '- For mock interview requests, follow `skills/mock-interview.md`.',
+  '- If a target role or JD would materially improve quality, use the `request` tool to ask for it. This information is optional, so do not block without reason.',
+  '- Do not score the mock interview mid-session. Only output the final score, section scores, analysis, recommended answers, and improvement advice when the interview ends.',
+].join('\n')
+
 export class MainAgent extends BaseAgent {
   private deliveryAgent: IDeliveryAgent
   private lastCronAt: string | null = null
@@ -104,6 +113,7 @@ ${mcpWarning}
 ## 可用技能索引 (Skill Index)
 ${skills}
 ${RESUME_SYSTEM_PROMPT}
+${INTERVIEW_AND_RESUME_PROMPT}
 ## 可用工具概览
 - **upsert_job**: 更新或插入职位信息（推荐方式，内置文件锁与查重）。
 - **run_delivery_agent**: 启动 DeliveryAgent 执行投递。

@@ -27,6 +27,10 @@ export function registerAgent(agent: BaseAgent): void {
   agentRegistry.set(agent.agentName, agent)
 }
 
+export function clearAgentRegistryForTests(): void {
+  agentRegistry.clear()
+}
+
 // ─── WebSocket client registry ───────────────────────────────────────────────
 
 /** WebSocket OPEN ready state */
@@ -65,6 +69,8 @@ for (const event of BUS_EVENTS) {
 
 export function createApp(workspaceRoot: string): Hono {
   const app = new Hono()
+  const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
+  const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
 
   // ── WebSocket endpoint (/ws) ──────────────────────────────────────────────
   app.get(
@@ -151,8 +157,21 @@ export function createApp(workspaceRoot: string): Hono {
   })
 
   // ── REST: GET /api/config/:name ───────────────────────────────────────────
+  app.post('/api/resume/review', async (c) => {
+    const mainAgent = agentRegistry.get('main')
+    if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+    if (!fs.existsSync(uploadedResumeAbsPath)) {
+      return c.json({ ok: false, error: 'Uploaded resume not found' }, 400)
+    }
+
+    mainAgent.runEphemeral(
+      '评价刚上传的简历。若 data/uploads/resume-upload.pdf 存在，请优先使用 read_pdf 读取内容，并严格按 resume-clinic skill 输出评价、问题分析、改写建议和可直接替换的表达。'
+    ).catch(err => console.error('[Server] Resume review failed:', err))
+
+    return c.json({ ok: true, path: uploadedResumeRelPath })
+  })
+
   app.post('/api/resume/upload', async (c) => {
-    const relPath = 'data/uploads/resume-upload.pdf'
     try {
       const formData = await c.req.formData()
       const file = formData.get('file')
@@ -173,22 +192,21 @@ export function createApp(workspaceRoot: string): Hono {
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true })
       }
-      const uploadPath = path.resolve(workspaceRoot, relPath)
-      if (!fs.existsSync(uploadPath)) {
-        fs.writeFileSync(uploadPath, new Uint8Array())
+      if (!fs.existsSync(uploadedResumeAbsPath)) {
+        fs.writeFileSync(uploadedResumeAbsPath, new Uint8Array())
       }
 
-      await lockFile(relPath, 'web-server', workspaceRoot)
+      await lockFile(uploadedResumeRelPath, 'web-server', workspaceRoot)
       try {
         const bytes = new Uint8Array(await file.arrayBuffer())
-        fs.writeFileSync(uploadPath, bytes)
+        fs.writeFileSync(uploadedResumeAbsPath, bytes)
       } finally {
-        await unlockFile(relPath, 'web-server', workspaceRoot)
+        await unlockFile(uploadedResumeRelPath, 'web-server', workspaceRoot)
       }
 
       return c.json({
         ok: true,
-        path: relPath,
+        path: uploadedResumeRelPath,
         name: file.name,
         size: file.size,
         type: file.type || 'application/pdf',

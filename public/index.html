@@ -163,6 +163,10 @@
               上传 PDF
             </button>
           </div>
+          <button id="review-uploaded-resume"
+                  class="mt-3 w-full bg-amber-600 hover:bg-amber-500 text-white px-5 py-3 rounded-lg font-bold shadow">
+            璇勪环宸蹭笂浼犵畝鍘?
+          </button>
           <p id="resume-upload-status" class="text-xs text-slate-400 mt-3"></p>
         </div>
 
@@ -613,6 +617,43 @@ document.getElementById('upload-resume').addEventListener('click', async () => {
     }
   } catch (e) {
     status.textContent = `上传异常: ${e.message}`
+    status.className = 'text-xs text-red-400 mt-3'
+  } finally {
+    btn.disabled = false
+    btn.classList.remove('opacity-70', 'cursor-not-allowed')
+  }
+})
+
+document.getElementById('review-uploaded-resume').addEventListener('click', async () => {
+  const status = document.getElementById('resume-upload-status')
+  const btn = document.getElementById('review-uploaded-resume')
+
+  btn.disabled = true
+  btn.classList.add('opacity-70', 'cursor-not-allowed')
+  status.textContent = '姝ｅ湪鍙戣捣绠€鍘嗚瘎浠?..'
+  status.className = 'text-xs text-yellow-400 mt-3'
+
+  try {
+    const res = await fetch('/api/resume/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const json = await res.json()
+    if (json.ok) {
+      document.querySelector('[data-target="tab-chat"]').click()
+      status.textContent = '宸叉彁浜ょ畝鍘嗚瘎浠讳换鍔★紝璇峰湪瀵硅瘽鍖烘煡鐪嬬粨鏋溿€?'
+      status.className = 'text-xs text-green-400 mt-3'
+      appendAgentLog({
+        type: 'info',
+        message: `宸叉彁浜や笂浼?PDF 绠€鍘嗚瘎浠讳换鍔★細${json.path || 'data/uploads/resume-upload.pdf'}`,
+        agentName: 'System'
+      })
+    } else {
+      status.textContent = `绠€鍘嗚瘎浠峰彂璧峰け璐? ${json.error || '鏈煡閿欒'}`
+      status.className = 'text-xs text-red-400 mt-3'
+    }
+  } catch (e) {
+    status.textContent = `绠€鍘嗚瘎浠峰彂璧峰紓甯? ${e.message}`
     status.className = 'text-xs text-red-400 mt-3'
   } finally {
     btn.disabled = false

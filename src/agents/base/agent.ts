@@ -108,12 +108,15 @@ export abstract class BaseAgent extends EventEmitter {
   ): Promise<string> {
     const timeout = timeoutMs ?? (this.runningEphemeral ? 30_000 : 300_000)
     let timeoutId: ReturnType<typeof setTimeout> | undefined
+    const expectedRequestId = options.requestId
     const interventionPromise = new Promise<string>((resolve) => {
       this.interventionResolve = resolve
       this.emit('intervention_required', { prompt, resolve: (i: string) => this.resolveIntervention(i) })
     })
     const busResolveHandler = (p: InterventionResolvedPayload): void => {
-      if (p.agentName === this.agentName) this.resolveIntervention(p.input)
+      if (p.agentName !== this.agentName) return
+      if (expectedRequestId && p.requestId !== expectedRequestId) return
+      this.resolveIntervention(p.input)
     }
     eventBus.on('intervention:resolved', busResolveHandler)
     const timeoutPromise = new Promise<string>((resolve) => {

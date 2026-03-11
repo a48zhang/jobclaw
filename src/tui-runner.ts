@@ -9,7 +9,7 @@ import { validateEnv } from './env'
 import { createMCPClient } from './mcp'
 import { TUI } from './web/tui'
 import { TUIChannel } from './channel/tui'
-import { startServer } from './web/server'
+import { registerAgent, startServer } from './web/server'
 import { loadConfig } from './config'
 
 export async function runTUI(workspaceRoot: string) {
@@ -123,6 +123,9 @@ export async function runTUI(workspaceRoot: string) {
       }
     }
     tui.render()
+
+    registerAgent(mainAgent)
+    registerAgent(deliveryAgent)
 
     // Start server with config
     startServer(workspaceRoot, config.SERVER_PORT)
