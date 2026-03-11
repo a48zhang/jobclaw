@@ -150,6 +150,53 @@ export function createApp(workspaceRoot: string): Hono {
   })
 
   // ── REST: GET /api/config/:name ───────────────────────────────────────────
+  app.post('/api/resume/upload', async (c) => {
+    const relPath = 'data/uploads/resume-upload.pdf'
+    try {
+      const formData = await c.req.formData()
+      const file = formData.get('file')
+      if (!(file instanceof File)) {
+        return c.json({ ok: false, error: 'Missing file' }, 400)
+      }
+      if (file.size <= 0) {
+        return c.json({ ok: false, error: 'Empty file' }, 400)
+      }
+
+      const fileName = file.name.toLowerCase()
+      const isPdf = file.type === 'application/pdf' || fileName.endsWith('.pdf')
+      if (!isPdf) {
+        return c.json({ ok: false, error: 'Only PDF files are supported' }, 400)
+      }
+
+      const uploadDir = path.resolve(workspaceRoot, 'data/uploads')
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true })
+      }
+      const uploadPath = path.resolve(workspaceRoot, relPath)
+      if (!fs.existsSync(uploadPath)) {
+        fs.writeFileSync(uploadPath, new Uint8Array())
+      }
+
+      await lockFile(relPath, 'web-server', workspaceRoot)
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer())
+        fs.writeFileSync(uploadPath, bytes)
+      } finally {
+        await unlockFile(relPath, 'web-server', workspaceRoot)
+      }
+
+      return c.json({
+        ok: true,
+        path: relPath,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/pdf',
+      })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
   app.get('/api/config/:name', (c) => {
     let name = c.req.param('name')
     if (!name.endsWith('.md')) name += '.md'
