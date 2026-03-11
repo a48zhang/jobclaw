@@ -240,7 +240,7 @@ export abstract class BaseAgent extends EventEmitter {
       return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ error: '无法解析工具参数' }) }
     }
     let result: ToolResult
-    const localTools = ['read_file', 'write_file', 'append_file', 'list_directory', 'lock_file', 'unlock_file', 'upsert_job', 'typst_compile', 'install_typst', 'run_shell_command']
+    const localTools = ['read_file', 'write_file', 'append_file', 'list_directory', 'lock_file', 'unlock_file', 'upsert_job', 'typst_compile', 'install_typst', 'run_shell_command', 'read_pdf']
     if (localTools.includes(toolName)) {
       const ctx: ToolContext = {
         workspaceRoot: this.workspaceRoot, agentName: this.agentName,

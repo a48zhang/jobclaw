@@ -6,6 +6,7 @@ import { executeLockFile, executeUnlockFile } from './lockFile'
 import { executeUpsertJob } from './upsertJobWrapper'
 import { executeTypstCompile, executeInstallTypst } from './typstCompile'
 import { executeShellCommand, detectShell, detectOS } from './shell'
+import { executeReadPdf } from './readPdf'
 import { getLockFilePath } from './utils'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
 
@@ -34,6 +35,7 @@ export const TOOL_NAMES = {
   TYPST_COMPILE: 'typst_compile',
   INSTALL_TYPST: 'install_typst',
   RUN_SHELL_COMMAND: 'run_shell_command',
+  READ_PDF: 'read_pdf',
 } as const
 
 // 动态检测系统与 Shell 环境
@@ -176,6 +178,28 @@ export const TOOLS: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: TOOL_NAMES.READ_PDF,
+      description: '读取 PDF 文件并提取文本内容。适用于用户上传的 PDF 简历或 PDF JD。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '相对于 workspace 的 PDF 文件路径' },
+          pages: {
+            type: 'array',
+            description: '可选，指定要读取的页码列表（从 1 开始）',
+            items: { type: 'number' },
+          },
+          max_chars: { type: 'number', description: '返回文本的最大字符数，默认 12000' },
+          include_meta: { type: 'boolean', description: '是否返回 PDF 元数据' },
+        },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: TOOL_NAMES.RUN_SHELL_COMMAND,
       description: `在系统终端中运行 shell 命令。当前环境: 操作系统=${CURRENT_OS}, Shell=${CURRENT_SHELL}。`,
       parameters: {
@@ -217,6 +241,8 @@ export async function executeTool(
       return executeInstallTypst(args, context)
     case TOOL_NAMES.RUN_SHELL_COMMAND:
       return executeShellCommand(args, context)
+    case TOOL_NAMES.READ_PDF:
+      return executeReadPdf(args, context)
     default:
       return { success: false, content: '', error: `未知工具: ${name}` }
   }

@@ -14,12 +14,13 @@ describe('TOOL_NAMES 常量', () => {
     expect(TOOL_NAMES.TYPST_COMPILE).toBe('typst_compile')
     expect(TOOL_NAMES.INSTALL_TYPST).toBe('install_typst')
     expect(TOOL_NAMES.RUN_SHELL_COMMAND).toBe('run_shell_command')
+    expect(TOOL_NAMES.READ_PDF).toBe('read_pdf')
   })
 })
 
 describe('TOOLS 数组', () => {
-  test('包含 10 个工具', () => {
-    expect(TOOLS).toHaveLength(10)
+  test('包含 11 个工具', () => {
+    expect(TOOLS).toHaveLength(11)
   })
 
   test('每个工具都有正确的类型', () => {
@@ -63,6 +64,7 @@ describe('TOOLS 数组', () => {
     expect(names).toContain('upsert_job')
     expect(names).toContain('typst_compile')
     expect(names).toContain('install_typst')
+    expect(names).toContain('read_pdf')
     expect(names).toContain('run_shell_command')
   })
 })
@@ -149,7 +151,7 @@ describe('JSON 序列化', () => {
     const json = JSON.stringify(TOOLS)
     const parsed = JSON.parse(json) as ChatCompletionTool[]
 
-    expect(parsed).toHaveLength(10)
+    expect(parsed).toHaveLength(11)
     parsed.forEach((tool, index) => {
       expect(tool.type).toBe('function')
       expect(tool.function.name).toBe(TOOLS[index].function.name)
@@ -170,5 +172,22 @@ describe('JSON 序列化', () => {
       expect(tool.function.parameters).toHaveProperty('type')
       expect(tool.function.parameters).toHaveProperty('properties')
     })
+  })
+})
+
+describe('read_pdf 工具', () => {
+  const tool = TOOLS.find((t) => t.function.name === 'read_pdf')!
+
+  test('path 参数是必填的', () => {
+    expect(tool.function.parameters.required).toContain('path')
+  })
+
+  test('pages 参数是可选的数组', () => {
+    expect(tool.function.parameters.properties.pages.type).toBe('array')
+    expect(tool.function.parameters.properties.pages.items.type).toBe('number')
+  })
+
+  test('additionalProperties 为 false', () => {
+    expect(tool.function.parameters.additionalProperties).toBe(false)
   })
 })
