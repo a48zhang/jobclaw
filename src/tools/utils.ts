@@ -49,7 +49,10 @@ export function normalizeAndValidatePath(inputPath: string, workspaceRoot: strin
   const absoluteWorkspace = path.resolve(workspaceRoot)
 
   // 确保路径在工作区内
-  if (!absolutePath.startsWith(absoluteWorkspace + path.sep) && absolutePath !== absoluteWorkspace) {
+  const normalizedAbsoluteWorkspace = absoluteWorkspace.endsWith(path.sep) ? absoluteWorkspace : absoluteWorkspace + path.sep
+  const normalizedAbsolutePath = absolutePath.endsWith(path.sep) ? absolutePath : absolutePath + path.sep
+
+  if (!normalizedAbsolutePath.startsWith(normalizedAbsoluteWorkspace) && absolutePath !== absoluteWorkspace) {
     return null
   }
 

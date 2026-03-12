@@ -185,11 +185,9 @@ export const TOOLS: ChatCompletionTool[] = [
         properties: {
           path: { type: 'string', description: '相对于 workspace 的 PDF 文件路径' },
           pages: {
-            description: '可选，指定要读取的页码列表（从 1 开始）或 "all" 读取全部页',
-            anyOf: [
-              { type: 'array', items: { type: 'number' } },
-              { type: 'string', enum: ['all'] },
-            ],
+            type: 'array',
+            items: { type: 'number' },
+            description: '可选，指定要读取的页码列表（从 1 开始）。如果不提供则读取全部页。',
           },
           max_chars: { type: 'number', description: '返回文本的最大字符数，默认 12000' },
           include_meta: { type: 'boolean', description: '是否返回 PDF 元数据' },

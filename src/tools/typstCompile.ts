@@ -139,7 +139,7 @@ export async function executeTypstCompile(
     return {
       success: false,
       content: '',
-      error: 'typst 未安装。如果用户要求安装，请调用 install_typst 工具。',
+      error: '编译失败: typst 未安装。如果用户要求安装，请调用 install_typst 工具。',
     }
   }
 

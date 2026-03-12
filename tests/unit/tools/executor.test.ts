@@ -40,6 +40,21 @@ describe('测试环境', () => {
 // ============================================================================
 
 describe('路径穿越防护', () => {
+  beforeEach(() => {
+    const dataDir = path.join(TEST_WORKSPACE, 'data')
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true })
+    }
+    const jobsFile = path.join(dataDir, 'jobs.md')
+    if (!fs.existsSync(jobsFile)) {
+      fs.writeFileSync(jobsFile, '# Jobs', 'utf-8')
+    }
+    const agentsDir = path.join(TEST_WORKSPACE, 'agents/main')
+    if (!fs.existsSync(agentsDir)) {
+      fs.mkdirSync(agentsDir, { recursive: true })
+    }
+  })
+
   test('拒绝 ../ 路径穿越', async () => {
     const result = await runTool(TOOL_NAMES.READ_FILE, { path: '../outside.txt' })
     expect(result.success).toBe(false)
@@ -230,6 +245,14 @@ describe('lock_file 工具', () => {
   beforeEach(() => {
     if (!fs.existsSync(locksDir)) {
       fs.mkdirSync(locksDir, { recursive: true })
+    }
+    const dataDir = path.join(TEST_WORKSPACE, 'data')
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true })
+    }
+    const jobsFile = path.join(dataDir, 'jobs.md')
+    if (!fs.existsSync(jobsFile)) {
+      fs.writeFileSync(jobsFile, '# Jobs', 'utf-8')
     }
   })
 

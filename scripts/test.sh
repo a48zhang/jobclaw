@@ -6,6 +6,7 @@ npx tsc --noEmit
 
 echo ""
 echo "=== Running Tests with Coverage ==="
+export VITEST_CACHE=/tmp/vitest_cache
 npx vitest run --coverage
 
 echo ""

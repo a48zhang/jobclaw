@@ -7,8 +7,8 @@
  */
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
-import { serveStatic } from 'hono/serve-static'
-import { WebSocketServer } from 'ws'
+import { serveStatic } from '@hono/node-server/serve-static'
+import { WebSocketServer, WebSocket } from 'ws'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { eventBus } from '../eventBus'
@@ -39,14 +39,14 @@ export function clearAgentRegistryForTests(): void {
 const WS_OPEN = 1
 
 /** Active WebSocket connections */
-const wsClients = new Set<any>()
+const wsClients = new Set<WebSocket>()
 
 /** Broadcast a JSON message to all connected WebSocket clients */
 function broadcast(type: string, data: unknown): void {
   const msg = JSON.stringify({ event: type, data })
   for (const ws of wsClients) {
     try {
-      if (ws.readyState === WS_OPEN) {
+      if (ws.readyState === 1) { // 1 is WebSocket.OPEN
         ws.send(msg)
       }
     } catch {
@@ -247,7 +247,7 @@ export function createApp(workspaceRoot: string): Hono {
   // ── Serve workspace/output/ for resume PDFs ─────────────────────────────
   app.use('/workspace/output/*', serveStatic({
     root: './',
-    rewriteRequestPath: (path) => path.replace(/^\/workspace/, '/workspace')
+    rewriteRequestPath: (p: string) => p.replace(/^\/workspace/, '/workspace')
   }))
 
   return app
@@ -266,7 +266,7 @@ export function startServer(workspaceRoot: string, port?: number): void {
   })
 
   const wss = new WebSocketServer({ noServer: true })
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws: WebSocket) => {
     wsClients.add(ws)
     // Send a snapshot of all registered agents immediately on connect
     const snapshots = [...agentRegistry.values()].map((a) => a.getState())
@@ -281,7 +281,7 @@ export function startServer(workspaceRoot: string, port?: number): void {
       socket.destroy()
       return
     }
-    wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
       wss.emit('connection', ws, req)
     })
   })
