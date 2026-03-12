@@ -1,7 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-import { loadConfig } from './config'
+import { loadConfig } from './config.js'
 
 /**
  * 检查是否需要执行 Bootstrap 引导流程。

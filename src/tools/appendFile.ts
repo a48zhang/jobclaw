@@ -1,8 +1,8 @@
 // append_file 工具实现
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { ToolContext, ToolResult } from './index'
-import { normalizeAndValidatePath, checkPathPermission } from './utils'
+import type { ToolContext, ToolResult } from './index.js'
+import { normalizeAndValidatePath, checkPathPermission } from './utils.js'
 
 /**
  * 追加文件工具实现

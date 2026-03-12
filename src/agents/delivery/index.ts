@@ -1,9 +1,9 @@
 // src/agents/delivery/index.ts
 
-import { BaseAgent } from '../base'
-import type { BaseAgentConfig } from '../base/types'
-import type { ToolResult } from '../../tools/index'
-import type { Channel, ChannelMessageType } from '../../channel/base'
+import { BaseAgent } from '../base/index.js'
+import type { BaseAgentConfig } from '../base/types.js'
+import type { ToolResult } from '../../tools/index.js'
+import type { Channel, ChannelMessageType } from '../../channel/base.js'
 
 export interface DeliveryAgentConfig extends BaseAgentConfig {
   channel: Channel

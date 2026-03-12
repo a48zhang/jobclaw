@@ -25,9 +25,10 @@ export interface LockFileContent {
 /**
  * 权限检查结果
  */
-export type PermissionResult =
-  | { allowed: true }
-  | { allowed: false; reason: string }
+export interface PermissionResult {
+  allowed: boolean
+  reason: string
+}
 
 /**
  * 规范化并验证路径安全性
@@ -147,7 +148,7 @@ export function checkPathPermission(
       return { allowed: false, reason: `私有路径禁止访问：agents/${ownerAgent}/` }
     }
     // 私有路径的读写都允许
-    return { allowed: true }
+    return { allowed: true, reason: '' }
   }
 
   // 检查共享路径 data/
@@ -158,9 +159,9 @@ export function checkPathPermission(
         return { allowed: false, reason: '共享路径写入需要文件锁' }
       }
     }
-    return { allowed: true }
+    return { allowed: true, reason: '' }
   }
 
   // 其他路径允许访问
-  return { allowed: true }
+  return { allowed: true, reason: '' }
 }

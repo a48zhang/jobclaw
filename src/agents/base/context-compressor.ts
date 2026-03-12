@@ -2,8 +2,8 @@
 import type OpenAI from 'openai'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 import { encode } from 'gpt-tokenizer'
-import { COMPRESS_THRESHOLD, DEFAULT_KEEP_RECENT_MESSAGES } from './constants'
-import type { ContextCompressorConfig } from './types'
+import { COMPRESS_THRESHOLD, DEFAULT_KEEP_RECENT_MESSAGES } from './constants.js'
+import type { ContextCompressorConfig } from './types.js'
 
 /** 上下文压缩器 - 计算 token 数并在超过阈值时压缩消息历史 */
 export class ContextCompressor {

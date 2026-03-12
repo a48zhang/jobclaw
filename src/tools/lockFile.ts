@@ -1,8 +1,8 @@
 // lock_file / unlock_file 工具实现
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { ToolContext, ToolResult } from './index'
-import { normalizeAndValidatePath, getLocksDir, ensureLocksDirExists, getLockFilePath, LOCK_TIMEOUT_MS, type LockFileContent } from './utils'
+import type { ToolContext, ToolResult } from './index.js'
+import { normalizeAndValidatePath, getLocksDir, ensureLocksDirExists, getLockFilePath, LOCK_TIMEOUT_MS, type LockFileContent } from './utils.js'
 
 /**
  * 底层加锁函数 (Core)

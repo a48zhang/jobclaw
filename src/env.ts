@@ -11,7 +11,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
-import { loadConfig } from './config'
+import { loadConfig } from './config.js'
 
 /** 必須環境変数の定義 */
 const REQUIRED_BASE: Array<{ key: string; description: string }> = [

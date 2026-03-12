@@ -18,6 +18,6 @@ process.on('unhandledRejection', (reason) => {
   fs.appendFileSync(logFile, message)
 })
 
-import { bootstrapCLI } from './cli'
+import { bootstrapCLI } from './cli/index.js'
 
 bootstrapCLI()

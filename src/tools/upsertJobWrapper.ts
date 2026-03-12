@@ -1,5 +1,5 @@
-import { upsertJob, type UpsertJobArgs } from './upsertJob';
-import type { ToolContext, ToolResult } from './index';
+import { upsertJob, type UpsertJobArgs } from './upsertJob.js';
+import type { ToolContext, ToolResult } from './index.js';
 
 /**
  * upsert_job 工具执行器包装函数

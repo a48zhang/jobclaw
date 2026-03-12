@@ -7,7 +7,7 @@
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import type { MCPClient } from './agents/base/types'
+import type { MCPClient } from './agents/base/types.js'
 
 /**
  * Playwright MCP クライアントを生成して接続する。

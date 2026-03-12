@@ -1,7 +1,7 @@
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import * as os from 'node:os'
-import type { ToolContext, ToolResult } from './index'
+import type { ToolContext, ToolResult } from './index.js'
 
 const execAsync = promisify(exec)
 

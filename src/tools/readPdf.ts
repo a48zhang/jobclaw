@@ -1,7 +1,7 @@
 import * as fs from 'node:fs'
 import { extractText, getDocumentProxy, getMeta } from 'unpdf'
-import type { ToolContext, ToolResult } from './index'
-import { checkPathPermission, normalizeAndValidatePath } from './utils'
+import type { ToolContext, ToolResult } from './index.js'
+import { checkPathPermission, normalizeAndValidatePath } from './utils.js'
 
 const DEFAULT_MAX_CHARS = 12000
 

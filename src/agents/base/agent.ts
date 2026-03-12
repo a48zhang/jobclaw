@@ -6,15 +6,15 @@ import type {
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions'
 import { EventEmitter } from 'node:events'
-import { executeTool, TOOLS, type ToolContext, type ToolResult } from '../../tools/index'
-import type { AgentState, Session, Task } from '../../types'
-import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants'
-import { ContextCompressor } from './context-compressor'
-import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types'
-import type { Channel } from '../../channel/base'
-import { eventBus } from '../../eventBus'
-import type { InterventionResolvedPayload, RequestKind } from '../../eventBus'
-import * as utils from './agent-utils'
+import { executeTool, TOOLS, type ToolContext, type ToolResult } from '../../tools/index.js'
+import type { AgentState, Session, Task } from '../../types.js'
+import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants.js'
+import { ContextCompressor } from './context-compressor.js'
+import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types.js'
+import type { Channel } from '../../channel/base.js'
+import { eventBus } from '../../eventBus.js'
+import type { InterventionResolvedPayload, RequestKind } from '../../eventBus.js'
+import * as utils from './agent-utils.js'
 
 const TOOL_CALL_TIMEOUT_MS = 120_000
 const REQUEST_TOOL_NAME = 'request'
@@ -375,7 +375,7 @@ export abstract class BaseAgent extends EventEmitter {
       }
     }
 
-    const input = await this.requestIntervention(prompt, timeoutMs, {
+    const input = await this.requestIntervention(prompt, timeoutMs as number, {
       requestId: toolCall.id,
       kind: kind as RequestKind,
       options: options as string[] | undefined,

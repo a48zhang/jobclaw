@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer'
-import type { Channel, ChannelMessage, ChannelMessageType } from './base'
+import type { Channel, ChannelMessage, ChannelMessageType } from './base.js'
 
 export interface EmailChannelConfig {
   /** SMTP 主机 */

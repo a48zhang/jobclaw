@@ -11,11 +11,11 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { WebSocketServer, WebSocket } from 'ws'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { eventBus } from '../eventBus'
-import type { EventBusMap } from '../eventBus'
-import { parseJobsMd } from './tui'
-import { lockFile, unlockFile } from '../tools/lockFile'
-import type { BaseAgent } from '../agents/base/agent'
+import { eventBus } from '../eventBus.js'
+import type { EventBusMap } from '../eventBus.js'
+import { parseJobsMd } from './tui.js'
+import { lockFile, unlockFile } from '../tools/lockFile.js'
+import type { BaseAgent } from '../agents/base/agent.js'
 
 // ─── Agent registry ───────────────────────────────────────────────────────────
 

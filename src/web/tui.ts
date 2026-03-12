@@ -2,12 +2,14 @@
  * TUI Dashboard - Phase 4 Team A
  * Full-screen interactive terminal dashboard using blessed & blessed-contrib
  */
-import * as blessed from 'blessed'
-import * as contrib from 'blessed-contrib'
+import { createRequire } from 'node:module'
+const require = createRequire(import.meta.url)
+const blessed = require('blessed')
+const contrib = require('blessed-contrib')
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { TUIChannel } from '../channel/tui'
-import type { BaseAgent } from '../agents/base/agent'
+import { TUIChannel } from '../channel/tui.js'
+import type { BaseAgent } from '../agents/base/agent.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,10 +51,10 @@ const MIN_LOG_HEIGHT = 5 // 日志框最小高度
 const MIN_JOB_HEIGHT = 5 // 职位表最小高度
 
 export class TUI {
-  private screen: blessed.Widgets.Screen
-  private jobTable: contrib.Widgets.TableElement
-  private activityLog: blessed.Widgets.Log
-  private inputBox: blessed.Widgets.TextboxElement
+  private screen: any
+  private jobTable: any
+  private activityLog: any
+  private inputBox: any
   private channel: TUIChannel
 
   private workspaceRoot: string
@@ -80,7 +82,7 @@ export class TUI {
       keys: true, vi: true, label: ' Job Monitor ', border: { type: 'line' },
       style: { header: { fg: 'cyan', bold: true }, cell: { fg: 'white', selected: { bg: 'blue' } } },
       columnWidth: [16, 20, 48, 12, 12],
-    } as contrib.Widgets.TableOptions)
+    } as any)
 
     this.activityLog = blessed.log({
       label: ' Agent Activity ', border: { type: 'line' },
@@ -104,7 +106,7 @@ export class TUI {
     this.screen.append(this.inputBox)
 
     this.channel = new TUIChannel(
-      (line, type) => {
+      (line: string, type?: string) => {
         const color = type === 'error' ? '{red-fg}' : type === 'warn' ? '{yellow-fg}' : '{green-fg}'
         this.activityLog.log(`${color}${line}{/}`)
         this.activityLog.setScrollPerc(100)
@@ -119,7 +121,7 @@ export class TUI {
       this.screen.render()
     })
 
-    this.screen.program.on('keypress', (_ch, key) => {
+    this.screen.program.on('keypress', (_ch: string, key: any) => {
       if (key && key.ctrl && key.name === 'c') {
         const now = Date.now()
         if (now - this.lastCtrlC < 100) return
@@ -220,7 +222,7 @@ export class TUI {
   get tuiChannel(): TUIChannel { return this.channel }
 
   attachAgent(agent: BaseAgent): void {
-    agent.on('intervention_required', ({ prompt, resolve, kind, options }) => {
+    agent.on('intervention_required', ({ prompt, resolve, kind, options }: { prompt: string, resolve: (v: string) => void, kind?: string, options?: string[] }) => {
       this.showInterventionModal(prompt, resolve, agent, kind, options)
     })
   }

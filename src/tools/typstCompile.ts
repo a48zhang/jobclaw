@@ -3,8 +3,8 @@ import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { ToolContext, ToolResult } from './index'
-import { normalizeAndValidatePath } from './utils'
+import type { ToolContext, ToolResult } from './index.js'
+import { normalizeAndValidatePath } from './utils.js'
 
 const execFileAsync = promisify(execFile)
 

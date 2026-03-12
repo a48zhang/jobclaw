@@ -1,8 +1,8 @@
 // read_file 工具实现
 import * as fs from 'node:fs'
 import { encode } from 'gpt-tokenizer'
-import type { ToolContext, ToolResult } from './index'
-import { normalizeAndValidatePath, checkPathPermission, MAX_TOKENS } from './utils'
+import type { ToolContext, ToolResult } from './index.js'
+import { normalizeAndValidatePath, checkPathPermission, MAX_TOKENS } from './utils.js'
 
 /**
  * 读取文件工具实现

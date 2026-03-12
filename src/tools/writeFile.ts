@@ -1,7 +1,7 @@
 // write_file 工具实现
 import * as fs from 'node:fs'
-import type { ToolContext, ToolResult } from './index'
-import { normalizeAndValidatePath, checkPathPermission } from './utils'
+import type { ToolContext, ToolResult } from './index.js'
+import { normalizeAndValidatePath, checkPathPermission } from './utils.js'
 
 /**
  * 写入文件工具实现

@@ -2,9 +2,9 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
-import type { Session } from '../../types'
-import type { Channel, ChannelMessage } from '../../channel/base'
-import { eventBus } from '../../eventBus'
+import type { Session } from '../../types.js'
+import type { Channel, ChannelMessage } from '../../channel/base.js'
+import { eventBus } from '../../eventBus.js'
 
 /** Channel 消息类型 → 日志级别映射 */
 export const CHANNEL_LOG_TYPE_MAP: Record<string, 'info' | 'warn' | 'error'> = {

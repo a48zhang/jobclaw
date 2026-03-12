@@ -1,10 +1,10 @@
 // MainAgent - Phase 3 实现
 import type { ChatCompletionTool, ChatCompletionMessageParam } from 'openai/resources/chat/completions'
-import { BaseAgent } from '../base'
-import type { BaseAgentConfig, AgentSnapshot } from '../base/types'
-import type { ToolResult } from '../../tools/index'
-import type { Channel } from '../../channel/base'
-import { eventBus } from '../../eventBus'
+import { BaseAgent } from '../base/index.js'
+import type { BaseAgentConfig, AgentSnapshot } from '../base/types.js'
+import type { ToolResult } from '../../tools/index.js'
+import type { Channel } from '../../channel/base.js'
+import { eventBus } from '../../eventBus.js'
 
 // ============================================================================
 // 接口定义
@@ -204,5 +204,5 @@ ${INTERVIEW_AND_RESUME_PROMPT}
   }
 }
 
-export { BaseAgent } from '../base'
-export type { BaseAgentConfig } from '../base/types'
+export { BaseAgent } from '../base/index.js'
+export type { BaseAgentConfig } from '../base/types.js'

@@ -1,8 +1,8 @@
-import fs from 'fs/promises';
+import * as fs from 'fs/promises';
 import * as fsSync from 'node:fs';
-import path from 'path';
-import { lockFile, unlockFile } from './lockFile';
-import type { ToolContext } from './index';
+import * as path from 'path';
+import { lockFile, unlockFile } from './lockFile.js';
+import type { ToolContext } from './index.js';
 
 export interface UpsertJobArgs {
   company: string;

@@ -2,7 +2,7 @@
  * 单例模式：全应用共享同一个 EventEmitter 实例，用于 Agent / Server / UI 之间的解耦通信。
  */
 import { EventEmitter } from 'node:events'
-import type { AgentState } from './types'
+import type { AgentState } from './types.js'
 
 // ─── Typed Event Payloads ──────────────────────────────────────────────────────
 

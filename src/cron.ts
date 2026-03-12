@@ -5,13 +5,13 @@
  * 2. digest: 发送日报汇总
  */
 import OpenAI from 'openai'
-import { MainAgent } from './agents/main'
-import { DeliveryAgent } from './agents/delivery'
-import { EmailChannel } from './channel/email'
-import { validateEnv } from './env'
-import { createMCPClient } from './mcp'
-import { loadConfig } from './config'
-import type { Channel } from './channel/base'
+import { MainAgent } from './agents/main/index.js'
+import { DeliveryAgent } from './agents/delivery/index.js'
+import { EmailChannel } from './channel/email.js'
+import { validateEnv } from './env.js'
+import { createMCPClient } from './mcp.js'
+import { loadConfig } from './config.js'
+import type { Channel } from './channel/base.js'
 
 export async function runCron(workspaceRoot: string, mode: 'search' | 'digest' = 'search') {
   validateEnv(workspaceRoot, mode === 'digest' ? ['smtp'] : []);

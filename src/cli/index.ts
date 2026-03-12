@@ -1,7 +1,7 @@
 import { cac } from 'cac'
 import * as path from 'node:path'
-import { runTUI } from '../tui-runner'
-import { runCron } from '../cron'
+import { runTUI } from '../tui-runner.js'
+import { runCron } from '../cron.js'
 
 export function bootstrapCLI() {
   const cli = cac('jobclaw')

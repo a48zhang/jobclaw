@@ -1,4 +1,4 @@
-import type { Channel, ChannelMessage } from './base'
+import type { Channel, ChannelMessage } from './base.js'
 
 export class TUIChannel implements Channel {
   private streamingContent: string = ''

@@ -1,7 +1,7 @@
 /** BaseAgent 类型定义 */
 import type OpenAI from 'openai'
-import type { Task } from '../../types'
-import type { Channel } from '../../channel/base'
+import type { Task } from '../../types.js'
+import type { Channel } from '../../channel/base.js'
 
 /** MCP Client 接口 */
 export interface MCPClient {
