@@ -62,7 +62,7 @@ export abstract class BaseAgent extends EventEmitter {
   protected workspaceRoot: string
   protected maxIterations: number
   protected keepRecentMessages: number
-  protected summaryModel: string
+  protected lightModel: string
 
   protected state: AgentState = 'idle'
   protected iterations: number = 0
@@ -85,11 +85,11 @@ export abstract class BaseAgent extends EventEmitter {
     this.channel = config.channel ? utils.wrapChannel(config.channel, this.agentName) : config.channel
     this.maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS
     this.keepRecentMessages = config.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
-    this.summaryModel = config.summaryModel ?? 'gpt-4o-mini'
+    this.lightModel = config.lightModel || config.model
 
     this.compressor = new ContextCompressor({
       openai: this.openai,
-      summaryModel: this.summaryModel,
+      lightModel: this.lightModel,
       keepRecentMessages: this.keepRecentMessages,
     })
   }

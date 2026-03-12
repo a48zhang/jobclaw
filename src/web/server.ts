@@ -1,12 +1,14 @@
 /**
  * Web Server - Phase 5 Integration
- * Hono HTTP server + Bun WebSocket at /ws + REST APIs
+ * Hono HTTP server + Node WebSocket at /ws + REST APIs
  *
  * Combines Team A's logic (Typed EventBus, Agent Registry)
  * with Team C's architecture (Hono Middleware, Static Files).
  */
 import { Hono } from 'hono'
-import { upgradeWebSocket, websocket, serveStatic } from 'hono/bun'
+import { serve } from '@hono/node-server'
+import { serveStatic } from 'hono/serve-static'
+import { WebSocketServer } from 'ws'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { eventBus } from '../eventBus'
@@ -71,22 +73,6 @@ export function createApp(workspaceRoot: string): Hono {
   const app = new Hono()
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
   const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
-
-  // ── WebSocket endpoint (/ws) ──────────────────────────────────────────────
-  app.get(
-    '/ws',
-    upgradeWebSocket((_c) => ({
-      onOpen: (_event, ws) => {
-        wsClients.add(ws)
-        // Send a snapshot of all registered agents immediately on connect
-        const snapshots = [...agentRegistry.values()].map((a) => a.getState())
-        ws.send(JSON.stringify({ event: 'snapshot', data: snapshots }))
-      },
-      onClose: (_event, ws) => {
-        wsClients.delete(ws)
-      },
-    }))
-  )
 
   // ── REST: GET /api/jobs ───────────────────────────────────────────────────
   app.get('/api/jobs', (c) => {
@@ -274,11 +260,30 @@ const DEFAULT_PORT = 3000
 export function startServer(workspaceRoot: string, port?: number): void {
   const listenPort = port ?? parseInt(process.env['SERVER_PORT'] ?? String(DEFAULT_PORT), 10)
   const app = createApp(workspaceRoot)
-
-  Bun.serve({
-    port: listenPort,
+  const server = serve({
     fetch: app.fetch,
-    websocket,
+    port: listenPort,
+  })
+
+  const wss = new WebSocketServer({ noServer: true })
+  wss.on('connection', (ws) => {
+    wsClients.add(ws)
+    // Send a snapshot of all registered agents immediately on connect
+    const snapshots = [...agentRegistry.values()].map((a) => a.getState())
+    ws.send(JSON.stringify({ event: 'snapshot', data: snapshots }))
+    ws.on('close', () => {
+      wsClients.delete(ws)
+    })
+  })
+
+  server.on('upgrade', (req, socket, head) => {
+    if (req.url !== '/ws') {
+      socket.destroy()
+      return
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req)
+    })
   })
 
   console.log(`[JobClaw] API server listening on port ${listenPort}`)

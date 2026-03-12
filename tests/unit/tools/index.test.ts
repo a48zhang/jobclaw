@@ -1,5 +1,5 @@
 // 工具 Schema 单元测试 - Phase 1a
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect } from 'vitest'
 import { TOOLS, TOOL_NAMES } from '../../../src/tools/index'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
 

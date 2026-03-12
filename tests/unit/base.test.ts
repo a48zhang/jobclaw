@@ -1,11 +1,13 @@
 // BaseAgent 单元测试
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest'
 import { BaseAgent, type BaseAgentConfig, type MCPClient } from '../../src/agents/base'
 import OpenAI from 'openai'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { eventBus } from '../../src/eventBus'
+import { fileURLToPath } from 'node:url'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // 测试用的具体 Agent 实现
 class TestAgent extends BaseAgent {
   protected get systemPrompt(): string {
@@ -75,7 +77,7 @@ const createMockOpenAI = () => {
   return {
     chat: {
       completions: {
-        create: mock((params: any) => formatResponse(params, { content: '测试响应' })),
+        create: vi.fn((params: any) => formatResponse(params, { content: '测试响应' })),
       },
     },
   } as unknown as OpenAI
@@ -83,7 +85,7 @@ const createMockOpenAI = () => {
 
 // 测试工作区
 // NOTE: test file lives in tests/unit/, so ../../workspace points to repo-local workspace/
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../workspace')
+const TEST_WORKSPACE = path.resolve(__dirname, '../../workspace')
 const TEST_AGENT_DIR = path.join(TEST_WORKSPACE, 'agents', 'test')
 
 describe('BaseAgent', () => {
@@ -95,7 +97,7 @@ describe('BaseAgent', () => {
     agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
   })
@@ -124,7 +126,7 @@ describe('BaseAgent', () => {
       const customAgent = new TestAgent({
         openai: mockOpenAI,
         agentName: 'test',
-        model: 'gpt-4o',
+        model: 'test-model',
         workspaceRoot: TEST_WORKSPACE,
         maxIterations: 100,
         keepRecentMessages: 30,
@@ -265,17 +267,17 @@ describe('BaseAgent', () => {
 describe('MCP Client 集成', () => {
   test('MCP 工具列表合并', async () => {
     const mockMCPClient: MCPClient = {
-      listTools: mock(() => Promise.resolve([
+      listTools: vi.fn(() => Promise.resolve([
         { name: 'mcp_tool_1', description: 'MCP Tool 1', inputSchema: { type: 'object' } },
         { name: 'mcp_tool_2', description: 'MCP Tool 2', inputSchema: { type: 'object' } },
       ])),
-      callTool: mock(() => Promise.resolve('MCP result')),
+      callTool: vi.fn(() => Promise.resolve('MCP result')),
     }
 
     const agentWithMCP = new TestAgent({
       openai: createMockOpenAI(),
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
       mcpClient: mockMCPClient,
     })
@@ -295,7 +297,7 @@ describe('run() 主循环', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => formatResponse(params, {
+          create: vi.fn((params: any) => formatResponse(params, {
             content: '这是最终的回答',
           })),
         },
@@ -305,7 +307,7 @@ describe('run() 主循环', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -322,7 +324,7 @@ describe('run() 主循环', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             callCount++
             if (callCount === 1) {
               // 第一次返回工具调用
@@ -351,7 +353,7 @@ describe('run() 主循环', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -365,7 +367,7 @@ describe('run() 主循环', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => formatResponse(params, {
+          create: vi.fn((params: any) => formatResponse(params, {
             content: null,
             tool_calls: [{
               id: 'call_1',
@@ -383,7 +385,7 @@ describe('run() 主循环', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
       maxIterations: 3,
     })
@@ -399,7 +401,7 @@ describe('run() 主循环', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => Promise.reject(new Error('API 错误'))),
+          create: vi.fn(() => Promise.reject(new Error('API 错误'))),
         },
       },
     } as unknown as OpenAI
@@ -407,7 +409,7 @@ describe('run() 主循环', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -454,7 +456,7 @@ describe('executeToolCall()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             callCount++
             if (callCount === 1) {
               // 第一次返回工具调用 - 使用存在的目录
@@ -482,7 +484,7 @@ describe('executeToolCall()', () => {
     const agent = new HookTestAgent({
       openai: mockOpenAI,
       agentName: 'test_exec',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -495,10 +497,10 @@ describe('executeToolCall()', () => {
 
   test('MCP 工具调用', async () => {
     const mockMCPClient: MCPClient = {
-      listTools: mock(() => Promise.resolve([
+      listTools: vi.fn(() => Promise.resolve([
         { name: 'custom_tool', description: 'Custom Tool', inputSchema: { type: 'object' } },
       ])),
-      callTool: mock(() => Promise.resolve('MCP tool result')),
+      callTool: vi.fn(() => Promise.resolve('MCP tool result')),
     }
 
     let mcpCallCount = 0
@@ -506,7 +508,7 @@ describe('executeToolCall()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             mcpCallCount++
             if (mcpCallCount === 1) {
               return formatResponse(params, {
@@ -532,7 +534,7 @@ describe('executeToolCall()', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
       mcpClient: mockMCPClient,
     })
@@ -547,7 +549,7 @@ describe('executeToolCall()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             callCount++
             if (callCount === 1) {
               return formatResponse(params, {
@@ -573,7 +575,7 @@ describe('executeToolCall()', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -606,7 +608,7 @@ describe('并行工具调用', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             llmCallCount++
             if (llmCallCount === 1) {
               // 返回多个并行工具调用
@@ -643,7 +645,7 @@ describe('并行工具调用', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test_parallel',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -665,7 +667,7 @@ describe('并行工具调用', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             llmCallCount++
             if (llmCallCount === 1) {
               return formatResponse(params, {
@@ -701,7 +703,7 @@ describe('并行工具调用', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test_order',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -740,7 +742,7 @@ describe('checkAndCompress()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => formatResponse(params, {
+          create: vi.fn((params: any) => formatResponse(params, {
             content: '正常响应',
           })),
         },
@@ -750,7 +752,7 @@ describe('checkAndCompress()', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test_compress',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -767,7 +769,7 @@ describe('checkAndCompress()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             summaryCallCount++
             return formatResponse(params, {
               content: '这是一个摘要内容',
@@ -780,7 +782,7 @@ describe('checkAndCompress()', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
       keepRecentMessages: 5,
     })
@@ -809,7 +811,7 @@ describe('checkAndCompress()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => formatResponse(params, {
+          create: vi.fn((params: any) => formatResponse(params, {
             content: '摘要：用户进行了多次对话',
           })),
         },
@@ -819,7 +821,7 @@ describe('checkAndCompress()', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
       keepRecentMessages: 5,
     })
@@ -848,7 +850,7 @@ describe('checkAndCompress()', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => formatResponse(params, {
+          create: vi.fn((params: any) => formatResponse(params, {
             content: '这是对话摘要',
           })),
         },
@@ -858,7 +860,7 @@ describe('checkAndCompress()', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -880,7 +882,7 @@ describe('状态转换', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             stateHistory.push('llm_called')
             return formatResponse(params, {
               content: '完成',
@@ -893,7 +895,7 @@ describe('状态转换', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -908,7 +910,7 @@ describe('状态转换', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => formatResponse(params, {
+          create: vi.fn((params: any) => formatResponse(params, {
             content: null,
             tool_calls: [{
               id: 'call_1',
@@ -926,7 +928,7 @@ describe('状态转换', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
       maxIterations: 2,
     })
@@ -940,7 +942,7 @@ describe('状态转换', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock(() => Promise.reject(new Error('Network error'))),
+          create: vi.fn(() => Promise.reject(new Error('Network error'))),
         },
       },
     } as unknown as OpenAI
@@ -948,7 +950,7 @@ describe('状态转换', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -970,7 +972,7 @@ describe('requestIntervention (HITL)', () => {
     agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
   })
@@ -1042,7 +1044,7 @@ describe('requestIntervention (HITL)', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             llmCallCount++
             if (llmCallCount === 1) {
               return formatResponse(params, {
@@ -1073,7 +1075,7 @@ describe('requestIntervention (HITL)', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 
@@ -1103,7 +1105,7 @@ describe('requestIntervention (HITL)', () => {
     const mockOpenAI = {
       chat: {
         completions: {
-          create: mock((params: any) => {
+          create: vi.fn((params: any) => {
             llmCallCount++
             if (llmCallCount === 1) {
               return formatResponse(params, {
@@ -1133,7 +1135,7 @@ describe('requestIntervention (HITL)', () => {
     const agent = new TestAgent({
       openai: mockOpenAI,
       agentName: 'test',
-      model: 'gpt-4o',
+      model: 'test-model',
       workspaceRoot: TEST_WORKSPACE,
     })
 

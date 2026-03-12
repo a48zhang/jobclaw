@@ -1,5 +1,5 @@
 // Channel 单元测试 — Team B
-import { describe, test, expect, mock, beforeEach } from 'bun:test'
+import { describe, test, expect, beforeEach, vi } from 'vitest'
 import type { Channel, ChannelMessage } from '../../../src/channel/base'
 import { EmailChannel } from '../../../src/channel/email'
 import type { EmailChannelConfig } from '../../../src/channel/email'
@@ -54,11 +54,11 @@ describe('EmailChannel 构造', () => {
 
 // ─── TC-B-03 / TC-B-04: send() 调用 SMTP，失败时不抛出 ────────────────────
 describe('EmailChannel.send', () => {
-  let sendMailMock: ReturnType<typeof mock>
+  let sendMailMock: ReturnType<typeof vi.fn>
   let channel: EmailChannel
 
   beforeEach(() => {
-    sendMailMock = mock(() => Promise.resolve({ messageId: 'test-id' }))
+    sendMailMock = vi.fn(() => Promise.resolve({ messageId: 'test-id' }))
 
     channel = new EmailChannel(makeConfig())
     // 替换内部 transporter 的 sendMail
@@ -81,7 +81,7 @@ describe('EmailChannel.send', () => {
   })
 
   test('TC-B-04: SMTP 抛出 ECONNREFUSED 时 send() 不抛出异常', async () => {
-    sendMailMock = mock(() => {
+    sendMailMock = vi.fn(() => {
       const err = new Error('connect ECONNREFUSED')
       ;(err as NodeJS.ErrnoException).code = 'ECONNREFUSED'
       return Promise.reject(err)
@@ -103,7 +103,7 @@ describe('EmailChannel.send', () => {
 // ─── TC-B-05: buildBody HTML escape ────────────────────────────────────────
 describe('EmailChannel buildBody HTML escape', () => {
   test('TC-B-05: payload 中的 XSS 字符串被正确 escape', async () => {
-    const sendMailMock = mock(() => Promise.resolve({ messageId: 'test-id' }))
+    const sendMailMock = vi.fn(() => Promise.resolve({ messageId: 'test-id' }))
     const channel = new EmailChannel(makeConfig())
     ;(channel as unknown as { transporter: { sendMail: unknown } }).transporter.sendMail =
       sendMailMock

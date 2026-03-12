@@ -1,5 +1,5 @@
 // TUI utility tests — Phase 4 Team A
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect } from 'vitest'
 import { parseJobsMd } from '../../../src/web/tui'
 
 describe('parseJobsMd', () => {

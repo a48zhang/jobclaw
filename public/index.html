@@ -199,7 +199,8 @@
     <div class="bg-slate-900 p-3 rounded border border-slate-700 mb-4">
       <p id="modal-prompt" class="text-slate-300 text-sm whitespace-pre-wrap font-mono"></p>
     </div>
-    <label class="text-xs text-slate-400 block mb-2">请输入响应内容（按 Enter 提交）：</label>
+    <label id="modal-label" class="text-xs text-slate-400 block mb-2">请输入响应内容（按 Enter 提交）：</label>
+    <div id="modal-options" class="flex flex-wrap gap-2 mb-4 hidden"></div>
     <input id="modal-input" type="text"
            class="w-full bg-slate-900 border border-slate-600 text-white text-base px-4 py-3 rounded-lg outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 shadow-inner"
            placeholder="输入内容..." />
@@ -227,6 +228,8 @@ let sortAsc = false
 let donutChart = null
 let interventionAgentName = 'main'
 let interventionRequestId = null
+let interventionKind = 'text'
+let interventionOptions = []
 let ws = null
 let reconnectTimer = null
 
@@ -694,14 +697,54 @@ document.getElementById('gen-resume').addEventListener('click', async () => {
 function showModal({ agentName, prompt, kind, options, requestId }) {
   interventionAgentName = agentName ?? 'main'
   interventionRequestId = requestId ?? null
+  interventionKind = kind ?? 'text'
   const normalizedOptions = Array.isArray(options) ? options.filter(v => typeof v === 'string') : []
-  const optionsText = normalizedOptions.length
+  interventionOptions = normalizedOptions
+
+  const optionsText = normalizedOptions.length && interventionKind !== 'confirm'
     ? `\n\n可选项:\n${normalizedOptions.map((value, index) => `${index + 1}. ${value}`).join('\n')}`
     : ''
   document.getElementById('modal-prompt').textContent = (prompt ?? '') + optionsText
+
+  const label = document.getElementById('modal-label')
+  if (interventionKind === 'confirm') {
+    label.textContent = '请选择确认结果（也可手动输入 yes / no）：'
+  } else if (interventionKind === 'single_select' && normalizedOptions.length) {
+    label.textContent = '请选择一个选项（可输入文字或编号）：'
+  } else {
+    label.textContent = '请输入响应内容（按 Enter 提交）：'
+  }
+
+  const optionsContainer = document.getElementById('modal-options')
+  optionsContainer.innerHTML = ''
+  optionsContainer.classList.add('hidden')
+
+  const createOptionButton = (labelText, value, styleClass) => {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = styleClass
+    btn.textContent = labelText
+    btn.addEventListener('click', () => {
+      document.getElementById('modal-input').value = value
+      submitIntervention()
+    })
+    optionsContainer.appendChild(btn)
+  }
+
+  if (interventionKind === 'confirm') {
+    optionsContainer.classList.remove('hidden')
+    createOptionButton('是', 'yes', 'px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold')
+    createOptionButton('否', 'no', 'px-4 py-2 rounded bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold')
+  } else if (interventionKind === 'single_select' && normalizedOptions.length) {
+    optionsContainer.classList.remove('hidden')
+    normalizedOptions.forEach((value, index) => {
+      createOptionButton(`${index + 1}. ${value}`, value, 'px-3 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium')
+    })
+  }
+
   const input = document.getElementById('modal-input')
   input.placeholder =
-    kind === 'confirm'
+    interventionKind === 'confirm'
       ? '请输入 yes / no'
       : normalizedOptions.length
         ? '请输入选项文字或编号'
@@ -714,11 +757,27 @@ function showModal({ agentName, prompt, kind, options, requestId }) {
 function hideModal() {
   document.getElementById('modal-overlay').classList.remove('active')
   document.getElementById('modal-input').value = ''
+  const optionsContainer = document.getElementById('modal-options')
+  optionsContainer.innerHTML = ''
+  optionsContainer.classList.add('hidden')
   interventionRequestId = null
+  interventionKind = 'text'
+  interventionOptions = []
 }
 
 async function submitIntervention() {
-  const input = document.getElementById('modal-input').value
+  let input = document.getElementById('modal-input').value.trim()
+  if (interventionKind === 'single_select' && interventionOptions.length) {
+    const numeric = Number.parseInt(input, 10)
+    if (!Number.isNaN(numeric) && numeric >= 1 && numeric <= interventionOptions.length) {
+      input = interventionOptions[numeric - 1]
+    }
+  }
+  if (interventionKind === 'confirm') {
+    const normalized = input.toLowerCase()
+    if (['y', 'yes', '是', '确认', '同意'].includes(normalized)) input = 'yes'
+    if (['n', 'no', '否', '取消', '不同意'].includes(normalized)) input = 'no'
+  }
   hideModal()
   try {
     await fetch('/api/intervention', {

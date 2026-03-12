@@ -2,7 +2,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
-import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Channel, ChannelMessage } from '../../src/channel/base'
 import { validateEnv } from '../../src/env'
 import { needsBootstrap } from '../../src/bootstrap'
@@ -11,7 +11,7 @@ import { needsBootstrap } from '../../src/bootstrap'
 function makeMockChannel() {
   const sent: ChannelMessage[] = []
   const channel: Channel = {
-    send: mock(async (msg: ChannelMessage) => {
+    send: vi.fn(async (msg: ChannelMessage) => {
       sent.push(msg)
     }),
   }
@@ -21,7 +21,7 @@ function makeMockChannel() {
 // ─── 辅助：创建 mock MainAgent ────────────────────────────────────────────
 function makeMockMainAgent(runEphemeralResult: string) {
   return {
-    runEphemeral: mock(async (_input: string) => runEphemeralResult),
+    runEphemeral: vi.fn(async (_input: string) => runEphemeralResult),
   }
 }
 
@@ -73,7 +73,7 @@ describe('cron main()', () => {
   test('TC-B-08: runEphemeral 抛出异常时 cronMain 也抛出', async () => {
     const { channel } = makeMockChannel()
     const mainAgent = {
-      runEphemeral: mock(async (_input: string) => {
+      runEphemeral: vi.fn(async (_input: string) => {
         throw new Error('MCP 连接失败')
       }),
     }
@@ -101,18 +101,21 @@ describe('validateEnv', () => {
   test('所有必须变量都存在时不抛出异常', () => {
     process.env.OPENAI_API_KEY = 'sk-test'
     process.env.MODEL = 'o3-mini'
+    process.env.OPENAI_BASE_URL = 'https://example.com/v1'
     expect(() => validateEnv(tmpDir)).not.toThrow()
   })
 
   test('缺少 API_KEY 时抛出友好错误', () => {
     delete process.env.OPENAI_API_KEY
     process.env.MODEL_ID = 'o3-mini'
+    process.env.BASE_URL = 'https://example.com/v1'
     expect(() => validateEnv(tmpDir)).toThrow(/API_KEY/)
   })
 
   test('smtp 模式下缺少 SMTP_HOST 时抛出友好错误', () => {
     process.env.OPENAI_API_KEY = 'sk-test'
     process.env.MODEL_ID = 'o3-mini'
+    process.env.BASE_URL = 'https://example.com/v1'
     delete process.env.SMTP_HOST
     expect(() => validateEnv(tmpDir, ['smtp'])).toThrow(/SMTP_HOST/)
   })
@@ -120,6 +123,7 @@ describe('validateEnv', () => {
   test('smtp 模式下所有变量都存在时不抛出异常', () => {
     process.env.OPENAI_API_KEY = 'sk-test'
     process.env.MODEL_ID = 'o3-mini'
+    process.env.BASE_URL = 'https://example.com/v1'
     process.env.SMTP_HOST = 'smtp.example.com'
     process.env.SMTP_USER = 'noreply@example.com'
     process.env.SMTP_PASSWORD = 'secret'
@@ -130,8 +134,9 @@ describe('validateEnv', () => {
   test('可以使用 config.json 代替环境变量', () => {
     delete process.env.OPENAI_API_KEY
     fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
-      API_KEY: 'sk-from-file', 
+      API_KEY: 'sk-from-file',
       MODEL_ID: 'gpt-4',
+      BASE_URL: 'https://example.com/v1',
     }))
     expect(() => validateEnv(tmpDir)).not.toThrow()
   })
@@ -154,7 +159,8 @@ describe('needsBootstrap', () => {
   test('TC-B-09: config.json 存在时且配置完整返回 false', () => {
     fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
       API_KEY: 'test',
-      MODEL_ID: 'test'
+      MODEL_ID: 'test',
+      BASE_URL: 'https://example.com/v1',
     }))
     expect(needsBootstrap(tmpDir)).toBe(false)
   })
@@ -165,11 +171,11 @@ describe('needsBootstrap', () => {
 
   test('TC-B-11: env 提供 API_KEY/MODEL 时仍应进入 bootstrap（文件为空）', () => {
     process.env.OPENAI_API_KEY = 'sk-env'
-    process.env.MODEL = 'gpt-4o'
+    process.env.MODEL = 'o3-mini'
     fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
       API_KEY: '',
       MODEL_ID: '',
-      SUMMARY_MODEL_ID: '',
+      LIGHT_MODEL_ID: '',
     }))
     expect(needsBootstrap(tmpDir)).toBe(true)
   })

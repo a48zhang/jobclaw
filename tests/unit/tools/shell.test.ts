@@ -1,4 +1,4 @@
-import { describe, test, expect, mock } from 'bun:test'
+import { describe, test, expect, vi } from 'vitest'
 import { executeShellCommand, detectShell, detectOS } from '../../../src/tools/shell'
 import type { ToolContext } from '../../../src/tools/index'
 
@@ -6,7 +6,7 @@ describe('Shell Tool', () => {
   const mockContext: ToolContext = {
     workspaceRoot: '/mock',
     agentName: 'test-agent',
-    logger: mock(() => {}),
+    logger: vi.fn(() => {}),
   }
 
   test('detectOS should return a valid OS name', () => {

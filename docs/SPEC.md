@@ -1,7 +1,7 @@
 # JobClaw 技术规格说明书
 
 > 版本: 0.2.0  
-> 更新日期: 2026-03-08
+> 更新日期: 2026-03-12
 
 ---
 
@@ -84,7 +84,7 @@ jobclaw/
 | :--- | :--- | :--- |
 | `API_KEY` | `OPENAI_API_KEY` | LLM 鉴权密钥 |
 | `MODEL_ID` | `MODEL` | 主任务模型 ID |
-| `SUMMARY_MODEL_ID` | `SUMMARY_MODEL` | 上下文压缩模型 ID |
+| `LIGHT_MODEL_ID` | `LIGHT_MODEL` | 轻量模型 ID（可选） |
 | `BASE_URL` | `OPENAI_BASE_URL` | API Endpoint (Base URL) |
 | `SERVER_PORT` | `SERVER_PORT` | Web 看板端口 (默认 3000) |
 
@@ -118,6 +118,7 @@ jobclaw/
 - **`run_shell_command`**: 环境感知工具，自动探测 OS (Windows/Linux/macOS) 和 Shell (Bash/Pwsh)。
 - **`typst_compile`**: 智能简历编译，支持环境自愈引导。
 - **`upsert_job`**: 原子化职位数据维护，自动触发通知。
+- **`read_pdf`**: 读取 PDF 并提取文本（简历/JD），失败时返回明确错误。
 
 ---
 

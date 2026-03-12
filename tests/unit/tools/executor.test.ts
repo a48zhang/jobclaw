@@ -1,11 +1,16 @@
 // Phase 1b 工具执行器全面测试
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach } from 'vitest'
 import { executeTool, TOOL_NAMES, type ToolContext, type ToolResult, getLockFilePath } from '../../../src/tools/index'
+import { upsertJob } from '../../../src/tools/upsertJob'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // 测试用临时目录
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../../workspace')
+const TEST_WORKSPACE = path.resolve(__dirname, '../../../workspace')
 const TEMP_DIR = path.resolve(TEST_WORKSPACE, '.test_temp')
 
 // 测试上下文
@@ -398,10 +403,6 @@ describe('锁文件路径唯一性', () => {
 // ============================================================================
 // upsertJob 宽容行解析测试
 // ============================================================================
-
-import { upsertJob } from '../../../src/tools/upsertJob'
-import * as os from 'node:os'
-
 describe('upsertJob 宽容行解析', () => {
   let tmpWorkspace: string
 

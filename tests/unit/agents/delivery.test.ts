@@ -1,24 +1,25 @@
 // src/agents/delivery/delivery.test.ts
 
-import { describe, test, expect, beforeEach, mock } from 'bun:test'
-
-// Mock gpt-tokenizer before any imports that depend on it
-mock.module('gpt-tokenizer', () => ({
-  encode: (text: string) => new Array(Math.ceil(text.length / 4)).fill(0),
-}))
-
+import { describe, test, expect, beforeEach, vi } from 'vitest'
 import { DeliveryAgent } from '../../../src/agents/delivery/index'
 import type { DeliveryAgentConfig } from '../../../src/agents/delivery/index'
 import type { Channel, ChannelMessage } from '../../../src/channel/base'
 import OpenAI from 'openai'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
+// Mock gpt-tokenizer before any imports that depend on it
+vi.mock('gpt-tokenizer', () => ({
+  encode: (text: string) => new Array(Math.ceil(text.length / 4)).fill(0),
+}))
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // Mock OpenAI
 const createMockOpenAI = () => {
   return {
     chat: {
       completions: {
-        create: mock(() =>
+        create: vi.fn(() =>
           Promise.resolve({
             choices: [
               {
@@ -40,18 +41,18 @@ const createMockChannel = (): Channel & { sentMessages: ChannelMessage[] } => {
   const sentMessages: ChannelMessage[] = []
   return {
     sentMessages,
-    send: mock(async (message: ChannelMessage) => {
+    send: vi.fn(async (message: ChannelMessage) => {
       sentMessages.push(message)
     }),
   }
 }
 
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../../workspace')
+const TEST_WORKSPACE = path.resolve(__dirname, '../../../workspace')
 
 const createConfig = (channel: Channel): DeliveryAgentConfig => ({
   openai: createMockOpenAI(),
   agentName: 'delivery',
-  model: 'gpt-4o',
+  model: 'test-model',
   workspaceRoot: TEST_WORKSPACE,
   channel,
 })
@@ -81,7 +82,7 @@ describe('DeliveryAgent', () => {
       content: '已导航至 https://acme.com/j/1',
     })
     mockChannel.sentMessages.length = 0
-    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+    ;(mockChannel.send as ReturnType<typeof vi.fn>).mockClear()
 
     await agentInternal.onToolResult('write_file', {
       success: true,
@@ -104,7 +105,7 @@ describe('DeliveryAgent', () => {
       content: '已导航至 https://foo.com/j/2',
     })
     mockChannel.sentMessages.length = 0
-    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+    ;(mockChannel.send as ReturnType<typeof vi.fn>).mockClear()
 
     await agentInternal.onToolResult('write_file', {
       success: true,
@@ -124,7 +125,7 @@ describe('DeliveryAgent', () => {
       content: '已导航至 https://bar.com/j/3',
     })
     mockChannel.sentMessages.length = 0
-    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+    ;(mockChannel.send as ReturnType<typeof vi.fn>).mockClear()
 
     await agentInternal.onToolResult('write_file', {
       success: true,
@@ -170,7 +171,7 @@ describe('DeliveryAgent', () => {
   // TC-C-08: channel.send 抛出异常时不影响后续执行
   test('TC-C-08: channel.send 抛出异常时不影响执行', async () => {
     const throwingChannel: Channel = {
-      send: mock(async () => {
+      send: vi.fn(async () => {
         throw new Error('邮件发送失败')
       }),
     }
@@ -226,7 +227,7 @@ describe('DeliveryAgent', () => {
   test('TC-C-12: upsert_job updated+applied → channel.send delivery_success', async () => {
     const agentInternal = agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }
     mockChannel.sentMessages.length = 0
-    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+    ;(mockChannel.send as ReturnType<typeof vi.fn>).mockClear()
 
     await agentInternal.onToolResult('upsert_job', {
       success: true,
@@ -247,7 +248,7 @@ describe('DeliveryAgent', () => {
   test('TC-C-13: upsert_job skipped → 不发送通知', async () => {
     const agentInternal = agent as unknown as { onToolResult(t: string, r: unknown): Promise<void> }
     mockChannel.sentMessages.length = 0
-    ;(mockChannel.send as ReturnType<typeof mock>).mockClear()
+    ;(mockChannel.send as ReturnType<typeof vi.fn>).mockClear()
 
     await agentInternal.onToolResult('upsert_job', {
       success: true,

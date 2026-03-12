@@ -2,11 +2,11 @@
 set -e
 
 echo "=== Running TypeScript Compilation Check ==="
-bunx tsc --noEmit
+npx tsc --noEmit
 
 echo ""
 echo "=== Running Tests with Coverage ==="
-bun test --coverage
+npx vitest run --coverage
 
 echo ""
 echo "=== Cleaning up build artifacts ==="

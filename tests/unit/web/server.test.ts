@@ -1,14 +1,13 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { eventBus } from '../../../src/eventBus'
-import {
-  clearAgentRegistryForTests,
-  createApp,
-  registerAgent,
-} from '../../../src/web/server'
+import { clearAgentRegistryForTests, createApp, registerAgent } from '../../../src/web/server'
 
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../../workspace')
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+const TEST_WORKSPACE = path.resolve(__dirname, '../../../workspace')
 const UPLOAD_PATH = path.resolve(TEST_WORKSPACE, 'data/uploads/resume-upload.pdf')
 
 afterEach(() => {
@@ -86,7 +85,7 @@ describe('/api/resume/upload', () => {
 
 describe('/api/resume/review', () => {
   test('returns 400 when no uploaded resume exists', async () => {
-    const runEphemeral = mock(() => Promise.resolve('unused'))
+    const runEphemeral = vi.fn(() => Promise.resolve('unused'))
     registerAgent({
       agentName: 'main',
       getState: () => ({
@@ -114,7 +113,7 @@ describe('/api/resume/review', () => {
     fs.mkdirSync(path.dirname(UPLOAD_PATH), { recursive: true })
     fs.writeFileSync(UPLOAD_PATH, 'dummy pdf bytes')
 
-    const runEphemeral = mock(() => Promise.resolve('review started'))
+    const runEphemeral = vi.fn(() => Promise.resolve('review started'))
     registerAgent({
       agentName: 'main',
       getState: () => ({

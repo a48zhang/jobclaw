@@ -42,8 +42,13 @@ export async function executeReadPdf(
   if (typeof inputPath !== 'string') {
     return { success: false, content: '', error: 'path 参数必须是字符串' }
   }
-  if (pages !== undefined && !isValidPages(pages)) {
-    return { success: false, content: '', error: 'pages 参数必须是整数数组' }
+  let normalizedPages: number[] | undefined
+  if (pages === 'all' || pages === undefined) {
+    normalizedPages = undefined
+  } else if (isValidPages(pages)) {
+    normalizedPages = pages
+  } else {
+    return { success: false, content: '', error: 'pages 参数必须是整数数组或 "all"' }
   }
   if (typeof maxChars !== 'number' || !Number.isFinite(maxChars) || maxChars <= 0) {
     return { success: false, content: '', error: 'max_chars 参数必须是正数' }
@@ -78,7 +83,7 @@ export async function executeReadPdf(
     const buffer = fs.readFileSync(normalizedPath)
     const pdf = await getDocumentProxy(new Uint8Array(buffer))
     const { totalPages, text: pageTexts } = await extractText(pdf)
-    const selectedPages = normalizeSelectedPages(pages, totalPages)
+    const selectedPages = normalizeSelectedPages(normalizedPages, totalPages)
 
     if (selectedPages.length === 0) {
       return { success: false, content: '', error: 'pages 参数未命中任何有效页码' }
@@ -96,6 +101,7 @@ export async function executeReadPdf(
     const text = truncated ? `${mergedText.slice(0, maxChars)}...` : mergedText
     const payload: Record<string, unknown> = {
       path: inputPath,
+      page_count: totalPages,
       total_pages: totalPages,
       selected_pages: selectedPages,
       text,

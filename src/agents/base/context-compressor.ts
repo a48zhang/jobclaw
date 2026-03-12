@@ -8,12 +8,12 @@ import type { ContextCompressorConfig } from './types'
 /** 上下文压缩器 - 计算 token 数并在超过阈值时压缩消息历史 */
 export class ContextCompressor {
   protected openai: OpenAI
-  protected summaryModel: string
+  protected lightModel: string
   protected keepRecentMessages: number
 
   constructor(config: ContextCompressorConfig) {
     this.openai = config.openai
-    this.summaryModel = config.summaryModel
+    this.lightModel = config.lightModel
     this.keepRecentMessages = config.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
   }
 
@@ -110,7 +110,7 @@ ${this.formatMessagesForSummary(messages)}
 
     try {
       const response = await this.openai.chat.completions.create({
-        model: this.summaryModel,
+        model: this.lightModel,
         messages: [{ role: 'user', content: summaryPrompt }],
         temperature: 0.3,
         max_tokens: 1000,

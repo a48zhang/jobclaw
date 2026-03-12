@@ -43,6 +43,7 @@
 - `lock_file` / `unlock_file`: 共享资源锁，支持 30s 自动释放。
 - **`upsert_job`**: 专用职位管理工具，封装了 Markdown 解析、去重、状态更新及 Channel 通知触发。
 - **`typst_compile`**: 简历编译工具，支持自动检测环境并引导 `install_typst`。
+- **`read_pdf`**: 提取 PDF 文本（用于上传简历或 JD），失败时返回明确原因。
 - **`run_shell_command`**: 环境感知工具，自动注入当前 OS 和 Shell 信息。
 
 ---
@@ -91,7 +92,7 @@
 不再区分 `llm` 子对象，所有配置项在顶层定义：
 - `API_KEY`: 密钥。
 - `MODEL_ID`: 模型。
-- `SUMMARY_MODEL_ID`: 摘要模型。
+- `LIGHT_MODEL_ID`: 轻量模型（可选，不填则与主模型一致）。
 - `BASE_URL`: API 端点。
 
 ### 5.2 目录结构规范

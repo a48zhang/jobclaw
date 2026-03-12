@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { executeTool, TOOL_NAMES, type ToolContext } from '../../../src/tools/index'
+import { fileURLToPath } from 'node:url'
 
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../../workspace')
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const TEST_WORKSPACE = path.resolve(__dirname, '../../../workspace')
 const TEMP_DIR = path.resolve(TEST_WORKSPACE, '.test_pdf_temp')
 
 function createContext(): ToolContext {

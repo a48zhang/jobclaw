@@ -5,7 +5,7 @@ import { loadConfig } from './config'
 
 /**
  * 检查是否需要执行 Bootstrap 引导流程。
- * 判定标准：config.json 不存在，或者其中的关键配置 (API_KEY/MODEL_ID) 为空。
+ * 判定标准：config.json 不存在，或者其中的关键配置 (API_KEY/MODEL_ID/BASE_URL) 为空。
  *
  * @param workspaceRoot workspace 根目录路径
  */
@@ -17,8 +17,8 @@ export function needsBootstrap(workspaceRoot: string): boolean {
     // 判定是否需要引导必须基于 config.json 文件本身，而非环境变量兜底值；
     // 否则用户只要设置了环境变量，就永远不会进入 Bootstrap，导致 data/ 初始化缺失。
     const raw = fs.readFileSync(configPath, 'utf-8')
-    const fileConfig = JSON.parse(raw) as Partial<{ API_KEY: string; MODEL_ID: string }>
-    return !fileConfig.API_KEY || !fileConfig.MODEL_ID
+    const fileConfig = JSON.parse(raw) as Partial<{ API_KEY: string; MODEL_ID: string; BASE_URL: string }>
+    return !fileConfig.API_KEY || !fileConfig.MODEL_ID || !fileConfig.BASE_URL
   } catch {
     return true
   }
@@ -36,10 +36,10 @@ export const BOOTSTRAP_PROMPT = `【系统初始化引导】
 2. 请告诉我你想监测的目标公司及其招聘页 URL（至少一个），我会帮你填写 workspace/data/targets.md。
 3. 请提供你的 LLM 配置信息：
    - API_KEY (如果你已经在环境变量中设置了，可以跳过)
-   - MODEL_ID (必须指定，例如 o3-mini)
-   - SUMMARY_MODEL_ID (必须指定，用于上下文压缩)
-   - BASE_URL (可选，默认为 OpenAI 官方地址)
-4. 配置完成后，我会说明如何通过系统 cron 或 PM2 定期运行 "bun src/cron.ts" 实现自动化搜索。
+   - MODEL_ID (必须指定)
+   - LIGHT_MODEL_ID (可选，不填则与 MODEL_ID 相同)
+   - BASE_URL (必须指定)
+4. 配置完成后，我会说明如何通过系统 cron 或 PM2 定期运行 "npm run cron" 实现自动化搜索。
 5. 最后我会写入 workspace/config.json 标记初始化已完成。
 
 请开始：你叫什么名字？`

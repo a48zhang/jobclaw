@@ -6,11 +6,13 @@
     "jobclaw": "./src/index.ts"
   },
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun --watch run src/index.ts",
-    "test": "bash scripts/test.sh"
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "cron": "tsx src/cron.ts",
+    "test": "sh scripts/test.sh"
   },
   "dependencies": {
+    "@hono/node-server": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@playwright/test": "^1.58.2",
     "blessed": "^0.1.81",
@@ -20,12 +22,16 @@
     "hono": "^4.0.0",
     "nodemailer": "^6.9.0",
     "openai": "^4.0.0",
-    "unpdf": "^1.4.0"
+    "unpdf": "^1.4.0",
+    "ws": "^8.0.0"
   },
   "devDependencies": {
     "@types/blessed": "^0.1.27",
     "@types/node": "^20.0.0",
     "@types/nodemailer": "^6.4.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "tsx": "^4.0.0",
+    "vitest": "^2.0.0",
+    "@vitest/coverage-v8": "^2.0.0"
   }
 }

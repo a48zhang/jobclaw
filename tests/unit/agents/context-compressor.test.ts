@@ -1,4 +1,4 @@
-import { describe, expect, it, mock, spyOn } from 'bun:test'
+import { describe, expect, it, vi } from 'vitest'
 import type OpenAI from 'openai'
 import { ContextCompressor } from '../../../src/agents/base/context-compressor'
 import { COMPRESS_THRESHOLD } from '../../../src/agents/base/constants'
@@ -7,7 +7,7 @@ describe('ContextCompressor', () => {
   const mockOpenAI = {
     chat: {
       completions: {
-        create: mock(async () => ({
+        create: vi.fn(async () => ({
           choices: [{ message: { content: 'Test summary' } }],
         })),
       },
@@ -16,7 +16,7 @@ describe('ContextCompressor', () => {
 
   const config = {
     openai: mockOpenAI,
-    summaryModel: 'gpt-3.5-turbo',
+    lightModel: 'gpt-3.5-turbo',
     keepRecentMessages: 2,
   }
 
@@ -74,7 +74,7 @@ describe('ContextCompressor', () => {
       ]
 
       // Mock calculateTokens to return a value above threshold
-      spyOn(compressor, 'calculateTokens').mockReturnValue(COMPRESS_THRESHOLD + 100)
+      vi.spyOn(compressor, 'calculateTokens').mockReturnValue(COMPRESS_THRESHOLD + 100)
 
       const result = await compressor.checkAndCompress(messages as any)
       

@@ -1,5 +1,5 @@
 // MainAgent 单元测试
-import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest'
 import { MainAgent, type MainAgentConfig, type IDeliveryAgent } from '../../../src/agents/main/index'
 import type { AgentSnapshot } from '../base/types'
 import type { Channel, ChannelMessage } from '../../channel/base'
@@ -7,12 +7,14 @@ import OpenAI from 'openai'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { eventBus } from '../../../src/eventBus'
+import { fileURLToPath } from 'node:url'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // ============================================================================
 // Helpers / Mocks
 // ============================================================================
 
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../../workspace')
+const TEST_WORKSPACE = path.resolve(__dirname, '../../../workspace')
 
 /** 创建 Mock OpenAI，支持多轮响应数组并兼容流式 */
 const createMockOpenAI = (responses: (string | { content: string | null; tool_calls?: any[] })[] | string = '任务完成') => {
@@ -22,7 +24,7 @@ const createMockOpenAI = (responses: (string | { content: string | null; tool_ca
   return {
     chat: {
       completions: {
-        create: mock((params: any) => {
+        create: vi.fn((params: any) => {
           const rawResp = respArray[callCount] || respArray[respArray.length - 1]
           callCount++
           const resp = typeof rawResp === 'string' ? { content: rawResp, tool_calls: null } : rawResp
@@ -57,10 +59,10 @@ const createMockOpenAI = (responses: (string | { content: string | null; tool_ca
 /** 创建 Mock DeliveryAgent */
 const createMockDeliveryAgent = (
   runFn?: () => Promise<string>
-): IDeliveryAgent & { runEphemeral: ReturnType<typeof mock> } => {
+): IDeliveryAgent & { runEphemeral: ReturnType<typeof vi.fn> } => {
   return {
-    run: mock(runFn ?? (() => Promise.resolve('已投递 2 个职位'))),
-    getState: mock(
+    run: vi.fn(runFn ?? (() => Promise.resolve('已投递 2 个职位'))),
+    getState: vi.fn(
       (): AgentSnapshot => ({
         agentName: 'delivery',
         state: 'idle',
@@ -70,14 +72,14 @@ const createMockDeliveryAgent = (
         currentTask: null,
       })
     ),
-    runEphemeral: mock(runFn ?? (() => Promise.resolve('已投递 2 个职位'))),
+    runEphemeral: vi.fn(runFn ?? (() => Promise.resolve('已投递 2 个职位'))),
   }
 }
 
 /** 创建 Mock Channel */
-const createMockChannel = (): Channel & { send: ReturnType<typeof mock> } => {
+const createMockChannel = (): Channel & { send: ReturnType<typeof vi.fn> } => {
   return {
-    send: mock((_msg: ChannelMessage) => Promise.resolve()),
+    send: vi.fn((_msg: ChannelMessage) => Promise.resolve()),
   }
 }
 
@@ -85,7 +87,7 @@ const createMockChannel = (): Channel & { send: ReturnType<typeof mock> } => {
 const createConfig = (overrides: Partial<MainAgentConfig> = {}): MainAgentConfig => ({
   openai: createMockOpenAI(),
   agentName: 'main-test',
-  model: 'gpt-4o',
+  model: 'test-model',
   workspaceRoot: TEST_WORKSPACE,
   deliveryAgent: createMockDeliveryAgent(),
   ...overrides,

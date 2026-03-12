@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 export interface Config {
   API_KEY: string
   MODEL_ID: string
-  SUMMARY_MODEL_ID: string
+  LIGHT_MODEL_ID: string
   BASE_URL: string
   SERVER_PORT: number
 }
@@ -13,9 +13,8 @@ export interface Config {
 const DEFAULT_CONFIG: Config = {
   API_KEY: '',
   MODEL_ID: '',
-  // Summary model is optional at runtime; BaseAgent also defaults to gpt-4o-mini.
-  SUMMARY_MODEL_ID: 'gpt-4o-mini',
-  BASE_URL: 'https://api.openai.com/v1',
+  LIGHT_MODEL_ID: '',
+  BASE_URL: '',
   SERVER_PORT: 3000,
 }
 
@@ -74,10 +73,15 @@ export function loadConfig(workspaceRoot: string): Config {
     }
   }
 
+  const resolvedModel =
+    fileConfig.MODEL_ID || process.env['MODEL_ID'] || process.env['MODEL'] || DEFAULT_CONFIG.MODEL_ID
+  const resolvedLightModel =
+    fileConfig.LIGHT_MODEL_ID || process.env['LIGHT_MODEL_ID'] || process.env['LIGHT_MODEL'] || ''
+
   return {
     API_KEY: fileConfig.API_KEY || process.env['API_KEY'] || process.env['OPENAI_API_KEY'] || DEFAULT_CONFIG.API_KEY,
-    MODEL_ID: fileConfig.MODEL_ID || process.env['MODEL_ID'] || process.env['MODEL'] || DEFAULT_CONFIG.MODEL_ID,
-    SUMMARY_MODEL_ID: fileConfig.SUMMARY_MODEL_ID || process.env['SUMMARY_MODEL_ID'] || process.env['SUMMARY_MODEL'] || DEFAULT_CONFIG.SUMMARY_MODEL_ID,
+    MODEL_ID: resolvedModel,
+    LIGHT_MODEL_ID: resolvedLightModel || resolvedModel,
     BASE_URL: fileConfig.BASE_URL || process.env['BASE_URL'] || process.env['OPENAI_BASE_URL'] || DEFAULT_CONFIG.BASE_URL,
     SERVER_PORT: fileConfig.SERVER_PORT || parseInt(process.env['SERVER_PORT'] || '', 10) || DEFAULT_CONFIG.SERVER_PORT,
   }

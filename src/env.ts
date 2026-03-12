@@ -43,6 +43,10 @@ export function validateEnv(workspaceRoot: string, features: Array<'smtp'> = [])
     errors.push('  - MODEL_ID：未在 config.json 或环境变量中配置')
   }
 
+  if (!config.BASE_URL) {
+    errors.push('  - BASE_URL：未在 config.json 或环境变量中配置')
+  }
+
   if (features.includes('smtp')) {
     for (const { key, description } of REQUIRED_SMTP) {
       if (!process.env[key]) {

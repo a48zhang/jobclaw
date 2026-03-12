@@ -29,12 +29,12 @@ export interface BaseAgentConfig {
   channel?: Channel
   maxIterations?: number
   keepRecentMessages?: number
-  summaryModel?: string
+  lightModel?: string
 }
 
 /** ContextCompressor 配置 */
 export interface ContextCompressorConfig {
   openai: OpenAI
-  summaryModel: string
+  lightModel: string
   keepRecentMessages: number
 }

@@ -1,11 +1,13 @@
 // typstCompile 工具单元测试
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
+import { describe, test, expect, beforeEach, afterEach } from 'vitest'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { executeTool, TOOL_NAMES, type ToolContext } from '../../../src/tools/index'
 import { FONT_PATHS, findTypstBinary, buildTypstArgs } from '../../../src/tools/typstCompile'
+import { fileURLToPath } from 'node:url'
 
-const TEST_WORKSPACE = path.resolve(import.meta.dir, '../../../workspace')
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const TEST_WORKSPACE = path.resolve(__dirname, '../../../workspace')
 const TEMP_DIR = path.resolve(TEST_WORKSPACE, '.test_typst_temp')
 
 const createContext = (): ToolContext => ({

@@ -26,18 +26,18 @@ JobClaw 采用双 Agent 协作模式：
 
 ```bash
 # 安装依赖
-bun install
+npm install
 
 # 建立全局链接
-bun link
+npm link
 
 # 启动助手
-jobclaw
+npm run dev
 ```
 
 ## 📋 运行环境
 
-- 运行环境: [Bun](https://bun.sh/)
+- 运行环境: Node.js 20+
 - LLM: 兼容 OpenAI 协议的 API
 - 可选依赖: [Typst](https://typst.app/) (用于编译 PDF 简历)
 
