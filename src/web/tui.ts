@@ -10,6 +10,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { TUIChannel } from '../channel/tui.js'
 import type { BaseAgent } from '../agents/base/agent.js'
+import { CONTEXT_WINDOW } from '../agents/base/constants.js'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ export class TUI {
   private jobTable: any
   private activityLog: any
   private inputBox: any
+  private statusBar: any
   private channel: TUIChannel
 
   private workspaceRoot: string
@@ -64,6 +66,7 @@ export class TUI {
   private refreshTimer: ReturnType<typeof setTimeout> | null = null
   private showingJobs: boolean = false
   private lastCtrlC: number = 0
+  private contextUsagePercent: number = 0
 
   constructor(options: TUIOptions) {
     this.workspaceRoot = options.workspaceRoot
@@ -99,10 +102,18 @@ export class TUI {
       height: 3, // 稍微增加输入框高度，防止小屏幕下边框遮挡文字
     })
 
+    this.statusBar = blessed.box({
+      height: 1,
+      style: { fg: 'white', bg: 'blue' },
+      tags: true,
+      content: ' Context: 0.0% ',
+    })
+
     // 执行初始布局计算
     this.applyLayout()
 
     this.screen.append(this.activityLog)
+    this.screen.append(this.statusBar)
     this.screen.append(this.inputBox)
 
     this.channel = new TUIChannel(
@@ -171,20 +182,30 @@ export class TUI {
   private applyLayout(): void {
     const totalH = this.screen.height as number
     const inputH = 3
-    
+    const statusH = 1
+    const bottomReserved = inputH + statusH
+
+    // 状态栏始终在底部，输入框上方
+    this.statusBar.top = totalH - statusH - inputH
+    this.statusBar.height = statusH
+    this.statusBar.width = '100%'
+
+    this.inputBox.top = totalH - inputH
+    this.inputBox.width = '100%'
+
     if (this.showingJobs) {
       // 开启职位监控时的布局
-      let jobH = Math.floor((totalH - inputH) * 0.5)
-      let logH = totalH - inputH - jobH
+      let jobH = Math.floor((totalH - bottomReserved) * 0.5)
+      let logH = totalH - bottomReserved - jobH
 
       // 强制最小高度约束
       if (logH < MIN_LOG_HEIGHT) {
         logH = MIN_LOG_HEIGHT
-        jobH = totalH - inputH - logH
+        jobH = totalH - bottomReserved - logH
       }
       if (jobH < MIN_JOB_HEIGHT) {
         jobH = MIN_JOB_HEIGHT
-        logH = totalH - inputH - jobH
+        logH = totalH - bottomReserved - jobH
       }
 
       this.jobTable.top = 0
@@ -197,12 +218,9 @@ export class TUI {
     } else {
       // 纯日志对话模式
       this.activityLog.top = 0
-      this.activityLog.height = totalH - inputH
+      this.activityLog.height = totalH - bottomReserved
       this.activityLog.width = '100%'
     }
-
-    this.inputBox.top = totalH - inputH
-    this.inputBox.width = '100%'
   }
 
   toggleJobs(): void {
@@ -220,6 +238,15 @@ export class TUI {
   }
 
   get tuiChannel(): TUIChannel { return this.channel }
+
+  /** 更新上下文使用百分比显示 */
+  updateContextUsage(tokenCount: number): void {
+    this.contextUsagePercent = (tokenCount / CONTEXT_WINDOW) * 100
+    const percent = this.contextUsagePercent.toFixed(1)
+    const color = this.contextUsagePercent >= 75 ? '{red-fg}' : this.contextUsagePercent >= 50 ? '{yellow-fg}' : '{green-fg}'
+    this.statusBar.setContent(` Context: ${color}${percent}%{/} (${tokenCount.toLocaleString()}/${CONTEXT_WINDOW.toLocaleString()} tokens) `)
+    this.screen.render()
+  }
 
   attachAgent(agent: BaseAgent): void {
     agent.on('intervention_required', ({ prompt, resolve, kind, options }: { prompt: string, resolve: (v: string) => void, kind?: string, options?: string[] }) => {

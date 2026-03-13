@@ -44,6 +44,11 @@ export interface InterventionResolvedPayload {
   requestId?: string
 }
 
+export interface ContextUsagePayload {
+  agentName: string
+  tokenCount: number
+}
+
 /** All typed events on the global event bus */
 export interface EventBusMap {
   'agent:state': AgentStatePayload
@@ -51,6 +56,7 @@ export interface EventBusMap {
   'job:updated': JobUpdatedPayload
   'intervention:required': InterventionRequiredPayload
   'intervention:resolved': InterventionResolvedPayload
+  'context:usage': ContextUsagePayload
 }
 
 // ─── TypedEventBus ─────────────────────────────────────────────────────────────

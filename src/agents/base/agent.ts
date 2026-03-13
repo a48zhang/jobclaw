@@ -173,9 +173,10 @@ export abstract class BaseAgent extends EventEmitter {
     let result: string | null = null
     while (this.iterations < this.maxIterations) {
       this.iterations++; this.lastAction = 'llm_call'
+
       let fullContent = ''; let toolCalls: any[] = []; let isFirstChunk = true
       let chunkCount = 0
-      
+
       const validMessages = this.messages.filter((m) => {
         if (m.role === 'assistant') {
           const hasContent = typeof m.content === 'string' && m.content.trim().length > 0
@@ -184,12 +185,12 @@ export abstract class BaseAgent extends EventEmitter {
         }
         return true
       })
-      
+
       if (validMessages.length !== this.messages.length) {
         console.log(`[${this.agentName}] Filtered ${this.messages.length - validMessages.length} empty assistant messages`)
         this.messages = validMessages
       }
-      
+
       // 在消息列表最前面添加当前时间的system消息
       const now = new Date()
       const timeInfo = `当前时间: ${now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'long' })}`
@@ -197,6 +198,10 @@ export abstract class BaseAgent extends EventEmitter {
         { role: 'system', content: timeInfo },
         ...this.messages
       ]
+
+      // 发送上下文使用量更新事件（包含时间消息）
+      const tokenCount = this.compressor.calculateTokens(messagesWithTime)
+      eventBus.emit('context:usage', { agentName: this.agentName, tokenCount })
       
       try {
         const stream = await this.openai.chat.completions.create({
@@ -257,12 +262,16 @@ export abstract class BaseAgent extends EventEmitter {
             streaming: { isFirst: false, isFinal: true, chunk: '' }
           })
         }
+
+        // LLM 请求结束后发送上下文使用量更新
+        const tokensAfterResponse = this.compressor.calculateTokens(this.messages)
+        eventBus.emit('context:usage', { agentName: this.agentName, tokenCount: tokensAfterResponse })
       } catch (e: any) {
         throw new Error(`LLM API 请求失败 [Status: ${e.status}, Code: ${e.code}]: ${e.message}`)
       }
 
       const finalToolCalls = toolCalls.filter(Boolean)
-      
+
       // 不添加空的assistant消息
       if (!fullContent && finalToolCalls.length === 0) {
         console.error(`[${this.agentName}] LLM returned empty response after ${chunkCount} chunks`)
@@ -271,7 +280,7 @@ export abstract class BaseAgent extends EventEmitter {
         result = 'LLM返回空响应，请检查API配置或稍后重试。'
         break
       }
-      
+
       this.messages.push({ role: 'assistant', content: fullContent || null, tool_calls: finalToolCalls.length > 0 ? finalToolCalls : undefined })
 
       if (finalToolCalls.length > 0) {
@@ -281,6 +290,9 @@ export abstract class BaseAgent extends EventEmitter {
         }
         const toolResults = await this.executeToolCalls(finalToolCalls)
         for (const tr of toolResults) this.messages.push(tr)
+        // 工具调用结果添加后发送上下文使用量更新
+        const tokensAfterTools = this.compressor.calculateTokens(this.messages)
+        eventBus.emit('context:usage', { agentName: this.agentName, tokenCount: tokensAfterTools })
         if (!this.runningEphemeral) await this.saveSession()
         continue
       }

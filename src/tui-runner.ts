@@ -11,6 +11,7 @@ import { TUI } from './web/tui.js'
 import { TUIChannel } from './channel/tui.js'
 import { registerAgent, startServer } from './web/server.js'
 import { loadConfig } from './config.js'
+import { eventBus } from './eventBus.js'
 
 export async function runTUI(workspaceRoot: string) {
   // Ensure workspace directory exists
@@ -123,6 +124,15 @@ export async function runTUI(workspaceRoot: string) {
       }
     }
     tui.render()
+
+    // 更新初始上下文使用量
+    const initialState = mainAgent.getState()
+    tui.updateContextUsage(initialState.tokenCount)
+
+    // 监听上下文使用量更新事件
+    eventBus.on('context:usage', ({ tokenCount }) => {
+      tui.updateContextUsage(tokenCount)
+    })
 
     registerAgent(mainAgent)
     registerAgent(deliveryAgent)
