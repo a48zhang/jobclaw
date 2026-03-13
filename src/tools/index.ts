@@ -8,6 +8,8 @@ import { executeTypstCompile, executeInstallTypst } from './typstCompile.js'
 import { executeShellCommand, detectShell, detectOS } from './shell.js'
 import { executeReadPdf } from './readPdf.js'
 import { executeRespond, RESPOND_TOOL } from './thinkRespond.js'
+import { executeGrep } from './grep.js'
+import { executeGetTime, GET_TIME_TOOL } from './getTime.js'
 import { getLockFilePath } from './utils.js'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
 
@@ -38,6 +40,8 @@ export const TOOL_NAMES = {
   RUN_SHELL_COMMAND: 'run_shell_command',
   READ_PDF: 'read_pdf',
   RESPOND: 'respond',
+  GREP: 'grep',
+  GET_TIME: 'get_time',
 } as const
 
 // 动态检测系统与 Shell 环境
@@ -215,6 +219,27 @@ export const TOOLS: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_NAMES.GREP,
+      description: '在文件中搜索正则表达式模式。支持递归目录搜索和文件过滤。',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: '正则表达式模式' },
+          path: { type: 'string', description: '搜索路径（相对于 workspace），默认为整个 workspace' },
+          include: { type: 'string', description: '文件名 glob 过滤模式（如 "*.ts", "*.{js,ts}"）' },
+          case_sensitive: { type: 'boolean', description: '是否区分大小写，默认 false' },
+          context: { type: 'number', description: '显示匹配行前后多少行上下文，默认 0' },
+          max_results: { type: 'number', description: '最大返回结果数，默认 100' },
+        },
+        required: ['pattern'],
+        additionalProperties: false,
+      },
+    },
+  },
+  GET_TIME_TOOL,
   RESPOND_TOOL,
 ]
 
@@ -248,6 +273,10 @@ export async function executeTool(
       return executeReadPdf(args, context)
     case TOOL_NAMES.RESPOND:
       return executeRespond(args, context)
+    case TOOL_NAMES.GREP:
+      return executeGrep(args, context)
+    case TOOL_NAMES.GET_TIME:
+      return executeGetTime(args, context)
     default:
       return { success: false, content: '', error: `未知工具: ${name}` }
   }
