@@ -339,10 +339,23 @@ describe('run() 主循环', () => {
                   },
                 }],
               })
-            } else {
-              // 第二次返回最终结果
+            } else if (callCount === 2) {
+              // 第二次返回 respond 工具调用
               return formatResponse(params, {
-                content: '目录内容已列出',
+                content: null,
+                tool_calls: [{
+                  id: 'call_2',
+                  type: 'function',
+                  function: {
+                    name: 'respond',
+                    arguments: '{"message": "目录内容已列出"}',
+                  },
+                }],
+              })
+            } else {
+              // 第三次返回纯文本结束
+              return formatResponse(params, {
+                content: '任务完成',
               })
             }
           }),
@@ -359,8 +372,8 @@ describe('run() 主循环', () => {
 
     const result = await agent.run('列出 data 目录')
 
-    expect(callCount).toBe(2)
-    expect(result).toBe('目录内容已列出')
+    expect(callCount).toBe(3)
+    expect(result).toBe('任务完成')
   })
 
   test('达到 maxIterations 时状态变为 waiting', async () => {
@@ -633,10 +646,25 @@ describe('并行工具调用', () => {
                   },
                 ],
               })
+            } else if (llmCallCount === 2) {
+              // 第二次返回 respond
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_3',
+                  type: 'function',
+                  function: {
+                    name: 'respond',
+                    arguments: '{"message": "两个目录已列出"}',
+                  },
+                }],
+              })
+            } else {
+              // 第三次返回纯文本结束
+              return formatResponse(params, {
+                content: '任务完成',
+              })
             }
-            return formatResponse(params, {
-              content: '两个目录已列出',
-            })
           }),
         },
       },
@@ -651,14 +679,14 @@ describe('并行工具调用', () => {
 
     const result = await agent.run('列出两个目录')
 
-    // 验证 LLM 被调用两次（第一次工具调用，第二次最终响应）
-    expect(llmCallCount).toBe(2)
-    expect(result).toBe('两个目录已列出')
+    // 验证 LLM 被调用三次
+    expect(llmCallCount).toBe(3)
+    expect(result).toBe('任务完成')
 
-    // 验证消息历史中包含两个工具结果
+    // 验证消息历史中包含三个工具结果（两个 list_directory + 一个 respond）
     const messages = agent.testGetMessages()
     const toolMessages = messages.filter(m => m.role === 'tool')
-    expect(toolMessages).toHaveLength(2)
+    expect(toolMessages).toHaveLength(3)
   })
 
   test('工具结果按正确顺序加入历史', async () => {
@@ -739,12 +767,31 @@ describe('checkAndCompress()', () => {
   })
 
   test('未达阈值不触发压缩', async () => {
+    let callCount = 0
     const mockOpenAI = {
       chat: {
         completions: {
-          create: vi.fn((params: any) => formatResponse(params, {
-            content: '正常响应',
-          })),
+          create: vi.fn((params: any) => {
+            callCount++
+            if (callCount === 1) {
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'respond',
+                    arguments: '{"message": "正常响应"}',
+                  },
+                }],
+              })
+            } else {
+              // 第二次返回纯文本结束
+              return formatResponse(params, {
+                content: '完成',
+              })
+            }
+          }),
         },
       },
     } as unknown as OpenAI
@@ -758,9 +805,9 @@ describe('checkAndCompress()', () => {
 
     await agent.run('测试')
 
-    // 消息数应该很少（system + user + assistant）
+    // 消息数应该很少（system + user + assistant + tool + assistant）
     const messages = agent.testGetMessages()
-    expect(messages.length).toBeLessThanOrEqual(3)
+    expect(messages.length).toBeLessThanOrEqual(5)
   })
 
   test('超过阈值触发压缩', async () => {

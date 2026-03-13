@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { randomUUID } from 'node:crypto'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 import type { Session } from '../../types.js'
 import type { Channel, ChannelMessage } from '../../channel/base.js'
@@ -73,6 +74,26 @@ export function saveSession(sessionPath: string, session: Session): void {
     fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2), 'utf-8')
   } catch (error) {
     console.error(`[Critical Error] Failed to save session to ${sessionPath}:`, (error as Error).message)
+  }
+}
+
+/**
+ * 归档会话：将 session.json 移动到 ${uuid}.json
+ * @returns 归档后的文件路径，如果不存在则返回 null
+ */
+export function archiveSession(sessionPath: string): string | null {
+  if (!fs.existsSync(sessionPath)) {
+    return null
+  }
+  const dir = path.dirname(sessionPath)
+  const archiveId = randomUUID()
+  const archivePath = path.join(dir, `${archiveId}.json`)
+  try {
+    fs.renameSync(sessionPath, archivePath)
+    return archivePath
+  } catch (error) {
+    console.error(`[Error] Failed to archive session:`, (error as Error).message)
+    return null
   }
 }
 

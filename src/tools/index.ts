@@ -7,6 +7,7 @@ import { executeUpsertJob } from './upsertJobWrapper.js'
 import { executeTypstCompile, executeInstallTypst } from './typstCompile.js'
 import { executeShellCommand, detectShell, detectOS } from './shell.js'
 import { executeReadPdf } from './readPdf.js'
+import { executeRespond, RESPOND_TOOL } from './thinkRespond.js'
 import { getLockFilePath } from './utils.js'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
 
@@ -36,6 +37,7 @@ export const TOOL_NAMES = {
   INSTALL_TYPST: 'install_typst',
   RUN_SHELL_COMMAND: 'run_shell_command',
   READ_PDF: 'read_pdf',
+  RESPOND: 'respond',
 } as const
 
 // 动态检测系统与 Shell 环境
@@ -213,6 +215,7 @@ export const TOOLS: ChatCompletionTool[] = [
       },
     },
   },
+  RESPOND_TOOL,
 ]
 
 export async function executeTool(
@@ -243,6 +246,8 @@ export async function executeTool(
       return executeShellCommand(args, context)
     case TOOL_NAMES.READ_PDF:
       return executeReadPdf(args, context)
+    case TOOL_NAMES.RESPOND:
+      return executeRespond(args, context)
     default:
       return { success: false, content: '', error: `未知工具: ${name}` }
   }

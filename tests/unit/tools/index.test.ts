@@ -19,8 +19,8 @@ describe('TOOL_NAMES 常量', () => {
 })
 
 describe('TOOLS 数组', () => {
-  test('包含 11 个工具', () => {
-    expect(TOOLS).toHaveLength(11)
+  test('包含 12 个工具', () => {
+    expect(TOOLS).toHaveLength(12)
   })
 
   test('每个工具都有正确的类型', () => {
@@ -151,7 +151,7 @@ describe('JSON 序列化', () => {
     const json = JSON.stringify(TOOLS)
     const parsed = JSON.parse(json) as ChatCompletionTool[]
 
-    expect(parsed).toHaveLength(11)
+    expect(parsed).toHaveLength(12)
     parsed.forEach((tool, index) => {
       expect(tool.type).toBe('function')
       expect(tool.function.name).toBe(TOOLS[index].function.name)

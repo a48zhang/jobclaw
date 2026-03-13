@@ -72,6 +72,26 @@ export async function runTUI(workspaceRoot: string) {
             tui.toggleJobs()
             return
           }
+          if (cmd === 'new') {
+            // 归档当前会话并重置
+            const archivePath = mainAgent.resetSession()
+            tui.clearLog()
+            tui.updateContextUsage(0)
+            if (archivePath) {
+              tui.tuiChannel.send({
+                type: 'system' as any,
+                payload: { message: `{yellow-fg}(System) 会话已归档到 ${path.basename(archivePath)}{/}` },
+                timestamp: new Date(),
+              })
+            } else {
+              tui.tuiChannel.send({
+                type: 'system' as any,
+                payload: { message: '{yellow-fg}(System) 已开始新会话{/}' },
+                timestamp: new Date(),
+              })
+            }
+            return
+          }
         }
 
         // ── Default: Send to Agent ──────────────────────────────────────────

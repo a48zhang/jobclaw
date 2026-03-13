@@ -96,7 +96,7 @@ export class TUI {
     })
 
     this.inputBox = blessed.textbox({
-      label: ' Command (Type /jobs to toggle) > ', border: { type: 'line' },
+      label: ' Command (/jobs /new /quit) > ', border: { type: 'line' },
       style: { fg: 'yellow', focus: { border: { fg: 'yellow' } } },
       inputOnFocus: true, fullUnicode: true, tags: true,
       height: 3, // 稍微增加输入框高度，防止小屏幕下边框遮挡文字
@@ -238,6 +238,15 @@ export class TUI {
   }
 
   get tuiChannel(): TUIChannel { return this.channel }
+
+  /** 清空日志并刷新界面 */
+  clearLog(): void {
+    // blessed.log 没有 clear 方法，需要重建内容
+    // 用 setContent 清空，但会丢失样式，所以直接循环删除
+    // 最简单的方式是重新设置 log 的 _logLines 和 content
+    this.activityLog.setContent('')
+    this.screen.render()
+  }
 
   /** 更新上下文使用百分比显示 */
   updateContextUsage(tokenCount: number): void {

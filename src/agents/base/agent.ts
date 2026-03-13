@@ -72,6 +72,7 @@ export abstract class BaseAgent extends EventEmitter {
   protected compressor: ContextCompressor
   protected availableTools: ChatCompletionTool[] | null = null
   protected runningEphemeral: boolean = false
+  protected lastFinishReason?: string
 
   private interventionResolve?: (value: string) => void
 
@@ -164,18 +165,21 @@ export abstract class BaseAgent extends EventEmitter {
       return result ?? '任务完成，但没有生成响应。'
     } catch (error) {
       this.setState('error'); this.lastAction = `error: ${(error as Error).message}`
-      if (!this.runningEphemeral) await this.saveSession().catch(() => {})
+      if (!this.runningEphemeral) await this.saveSession().catch(() => { })
       throw error
     }
   }
 
   protected async runMainLoop(tools: ChatCompletionTool[]): Promise<string | null> {
     let result: string | null = null
+    let hasPromptedRespond = false  // 是否已经提示过使用 respond
+
     while (this.iterations < this.maxIterations) {
       this.iterations++; this.lastAction = 'llm_call'
 
-      let fullContent = ''; let toolCalls: any[] = []; let isFirstChunk = true
+      let fullContent = ''; let toolCalls: any[] = []
       let chunkCount = 0
+      let finishReason: string | null = null
 
       const validMessages = this.messages.filter((m) => {
         if (m.role === 'assistant') {
@@ -187,30 +191,33 @@ export abstract class BaseAgent extends EventEmitter {
       })
 
       if (validMessages.length !== this.messages.length) {
-        console.log(`[${this.agentName}] Filtered ${this.messages.length - validMessages.length} empty assistant messages`)
         this.messages = validMessages
       }
 
-      // 在消息列表最前面添加当前时间的system消息
+      // 在系统提示词中添加当前时间
       const now = new Date()
-      const timeInfo = `当前时间: ${now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'long' })}`
-      const messagesWithTime: any[] = [
-        { role: 'system', content: timeInfo },
-        ...this.messages
-      ]
+      const timeInfo = now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'long' })
 
-      // 发送上下文使用量更新事件（包含时间消息）
+      // 将时间信息注入到第一条 system 消息中
+      const messagesWithTime: ChatCompletionMessageParam[] = this.messages.map((m, i) => {
+        if (i === 0 && m.role === 'system') {
+          return { role: 'system', content: `当前时间: ${timeInfo}\n\n${m.content}` }
+        }
+        return m
+      })
+
+      // 发送上下文使用量更新事件
       const tokenCount = this.compressor.calculateTokens(messagesWithTime)
       eventBus.emit('context:usage', { agentName: this.agentName, tokenCount })
-      
+
       try {
         const stream = await this.openai.chat.completions.create({
           model: this.model, messages: messagesWithTime, tools, tool_choice: 'auto', stream: true
         })
-        
+
         const iterator = stream[Symbol.asyncIterator]()
         let iterResult = await iterator.next()
-        
+
         while (!iterResult.done) {
           const chunk = iterResult.value
           chunkCount++
@@ -219,26 +226,26 @@ export abstract class BaseAgent extends EventEmitter {
             iterResult = await iterator.next()
             continue
           }
-          
+
+          // 捕获 finish_reason
+          if ((choice as any).finish_reason) {
+            finishReason = (choice as any).finish_reason
+          }
+
           // 支持两种格式：
           // 1. 标准流式: delta.content, delta.tool_calls
           // 2. 非标准/单chunk: message.content, message.tool_calls
           const delta = choice.delta
           const message = (choice as any).message
-          
+
           const content = delta?.content ?? message?.content
           const tc = delta?.tool_calls ?? message?.tool_calls
 
-          // 1. 处理内容流
+          // 1. 处理内容流（思考内容，不显示给用户）
           if (content) {
             fullContent += content
-            if (this.channel) {
-              await this.channel.send({
-                type: 'agent_response', timestamp: new Date(), payload: {},
-                streaming: { isFirst: isFirstChunk, isFinal: false, chunk: content }
-              })
-              isFirstChunk = false
-            }
+            // LLM 输出的文本是内部思考，不再流式显示给用户
+            // 只有 respond 工具才能向用户输出
           }
 
           // 2. 处理工具调用流
@@ -251,16 +258,8 @@ export abstract class BaseAgent extends EventEmitter {
               if (t.function?.arguments) toolCalls[index].function.arguments += t.function.arguments
             }
           }
-          
-          iterResult = await iterator.next()
-        }
 
-        // 流结束：只要流启动过，就必须发送 Final 标识以重置 TUI 状态
-        if (!isFirstChunk && this.channel) {
-          await this.channel.send({
-            type: 'agent_response', timestamp: new Date(), payload: {},
-            streaming: { isFirst: false, isFinal: true, chunk: '' }
-          })
+          iterResult = await iterator.next()
         }
 
         // LLM 请求结束后发送上下文使用量更新
@@ -275,13 +274,21 @@ export abstract class BaseAgent extends EventEmitter {
       // 不添加空的assistant消息
       if (!fullContent && finalToolCalls.length === 0) {
         console.error(`[${this.agentName}] LLM returned empty response after ${chunkCount} chunks`)
+        console.error(`${this.messages.map(m => JSON.stringify(m)).join('\n')}`)
         this.setState('error')
         this.lastAction = 'empty_response'
         result = 'LLM返回空响应，请检查API配置或稍后重试。'
         break
       }
 
-      this.messages.push({ role: 'assistant', content: fullContent || null, tool_calls: finalToolCalls.length > 0 ? finalToolCalls : undefined })
+      // 保存 finish_reason 到实例和 message 中
+      this.lastFinishReason = finishReason || undefined
+      this.messages.push({
+        role: 'assistant',
+        content: fullContent || null,
+        tool_calls: finalToolCalls.length > 0 ? finalToolCalls : undefined,
+        finish_reason: finishReason || undefined,
+      } as any)
 
       if (finalToolCalls.length > 0) {
         this.lastAction = 'tool_call'
@@ -294,17 +301,35 @@ export abstract class BaseAgent extends EventEmitter {
         const tokensAfterTools = this.compressor.calculateTokens(this.messages)
         eventBus.emit('context:usage', { agentName: this.agentName, tokenCount: tokensAfterTools })
         if (!this.runningEphemeral) await this.saveSession()
+
+        // 如果调用了 respond，标记已经输出过，下次纯文本直接结束
+        if (finalToolCalls.some(tc => tc?.function?.name === 'respond')) {
+          hasPromptedRespond = true
+        }
         continue
       }
 
       if (fullContent) {
-        result = fullContent; this.setState('idle'); this.lastAction = 'completed'
-        // 确保非流式模式下也能看到回复，或者作为流式结束的兜底
-        if (this.channel && isFirstChunk) {
-          await this.channel.send({ type: 'agent_response', payload: { message: fullContent }, timestamp: new Date() })
+        // LLM 返回纯文本（无工具调用）
+        if (!hasPromptedRespond) {
+          // 第一次：提示 LLM 使用 respond 工具
+          this.messages.push({ role: 'user', content: '[系统提示] 你正在尝试结束对话,你必须使用 respond 工具向用户输出最终结果。' })
+          hasPromptedRespond = true
+          if (!this.runningEphemeral) await this.saveSession()
+          continue
+        } else {
+          // 第二次：已经提示过，直接输出作为兜底
+          if (this.channel) {
+            await this.channel.send({
+              type: 'agent_response',
+              payload: { message: fullContent },
+              timestamp: new Date()
+            })
+          }
+          result = fullContent; this.setState('idle'); this.lastAction = 'completed'
+          if (!this.runningEphemeral) await this.saveSession()
+          break
         }
-        if (!this.runningEphemeral) await this.saveSession()
-        break
       }
     }
 
@@ -367,6 +392,19 @@ export abstract class BaseAgent extends EventEmitter {
 
     if (toolName === REQUEST_TOOL_NAME) {
       return this.executeRequestToolCall(toolCall, args)
+    }
+
+    // respond 工具特殊处理：直接通过 channel 发送给用户
+    if (toolName === 'respond') {
+      const message = args['message'] as string || ''
+      if (this.channel) {
+        await this.channel.send({
+          type: 'agent_response',
+          payload: { message },
+          timestamp: new Date()
+        })
+      }
+      return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ success: true, length: message.length }) }
     }
 
     let result: ToolResult
@@ -476,17 +514,43 @@ export abstract class BaseAgent extends EventEmitter {
     ])))
   }
 
-  protected async onToolResult(_name: string, _res: ToolResult): Promise<void> {}
+  protected async onToolResult(_name: string, _res: ToolResult): Promise<void> { }
 
   public async loadSession(): Promise<void> {
     const s = utils.loadSession(this.getSessionPath())
-    if (s) { this.currentTask = s.currentTask; this.messages = s.messages || []; if (s.context) this.restoreContext(s.context) }
+    if (s) {
+      this.currentTask = s.currentTask
+      this.messages = s.messages || []
+      if (s.context) this.restoreContext(s.context)
+      if (s.finishReason) this.lastFinishReason = s.finishReason
+    }
   }
 
   public getMessages(): ChatCompletionMessageParam[] { return this.messages }
 
+  /**
+   * 重置会话：归档当前 session.json，清空消息历史和状态
+   * @returns 归档后的文件路径
+   */
+  public resetSession(): string | null {
+    const archivePath = utils.archiveSession(this.getSessionPath())
+    this.messages = []
+    this.currentTask = null
+    this.lastFinishReason = undefined
+    this.iterations = 0
+    this.state = 'idle'
+    this.lastAction = ''
+    return archivePath
+  }
+
   protected async saveSession(): Promise<void> {
-    const session: Session = { currentTask: this.currentTask, context: this.extractContext(), messages: this.messages.filter((m) => m.role !== 'system'), todos: [] }
+    const session: Session = {
+      currentTask: this.currentTask,
+      context: this.extractContext(),
+      messages: this.messages.filter((m) => m.role !== 'system'),
+      todos: [],
+      finishReason: this.lastFinishReason,
+    }
     utils.saveSession(this.getSessionPath(), session)
   }
 
@@ -494,7 +558,7 @@ export abstract class BaseAgent extends EventEmitter {
   protected loadSkill(name: string): string { return utils.loadSkill(this.workspaceRoot, name) }
 
   protected initMessages(input: string): void {
-    const systemContent = `${this.systemPrompt}\n\n## 核心行为准则\n1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request\` 工具请求用户补充输入。绝不能编造虚假信息。\n2. **写入前反思**: 在向 \`data/\` 写入信息前，必须核实数据真实性。\n3. **中文交流**: 始终使用中文与用户交流。`
+    const systemContent = `${this.systemPrompt}\n\n## 核心行为准则\n1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request\` 工具请求用户补充输入。绝不能编造虚假信息。\n2. **写入前反思**: 在向 \`data/\` 写入信息前，必须核实数据真实性。\n3. **中文交流**: 始终使用中文与用户交流。\n4. **必须响应**: 你的文本输出是内部思考，用户看不到。完成任务后，必须调用 \`respond\` 工具向用户输出结果。`
     if (this.messages.length === 0) {
       this.messages.push({ role: 'system', content: systemContent }, { role: 'user', content: input })
     } else {
@@ -507,7 +571,7 @@ export abstract class BaseAgent extends EventEmitter {
 
   protected calculateTokens(): number { return this.compressor.calculateTokens(this.messages) }
   protected extractContext(): Record<string, unknown> { return {} }
-  protected restoreContext(_c: Record<string, unknown>): void {}
+  protected restoreContext(_c: Record<string, unknown>): void { }
 
   protected async callLLM(tools: ChatCompletionTool[]): Promise<OpenAI.Chat.Completions.ChatCompletion> {
     // 基础方法仍保留，但在 runMainLoop 中现在优先使用流式逻辑

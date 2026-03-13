@@ -53,4 +53,6 @@ export interface Session {
   messages: ChatCompletionMessageParam[]
   /** 待办事项列表 */
   todos: string[]
+  /** 最后一次 LLM 响应的结束原因 */
+  finishReason?: string
 }

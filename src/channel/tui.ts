@@ -107,6 +107,19 @@ export class TUIChannel implements Channel {
         const toolName = message.payload['toolName']
         label = `tool:${toolName}`
         let argsRaw = String(message.payload['args'] || '')
+
+        // respond 工具显示用户消息
+        if (toolName === 'respond') {
+          try {
+            const argsObj = JSON.parse(argsRaw)
+            content = `${argsObj['message'] || ''}`
+          } catch {
+            content = `(输出消息)`
+          }
+          break
+        }
+
+        // 其他工具正常处理
         if (toolName === 'write_file' || toolName === 'append_file') {
           try {
             const argsObj = JSON.parse(argsRaw)
