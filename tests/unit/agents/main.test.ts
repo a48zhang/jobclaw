@@ -183,7 +183,15 @@ describe('MainAgent', () => {
             function: { name: 'run_delivery_agent', arguments: JSON.stringify({ instruction: '投递' }) }
           }]
         },
-        '投递失败，已记录'
+        {
+          content: null,
+          tool_calls: [{
+            id: 'call_003',
+            type: 'function',
+            function: { name: 'respond', arguments: JSON.stringify({ message: '投递失败，已记录' }) }
+          }]
+        },
+        { content: null, tool_calls: null }
       ])
 
       const a = new MainAgent(createConfig({ openai: mockOpenAI, deliveryAgent: mockDelivery }))

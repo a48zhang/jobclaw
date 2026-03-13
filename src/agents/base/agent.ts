@@ -172,7 +172,6 @@ export abstract class BaseAgent extends EventEmitter {
 
   protected async runMainLoop(tools: ChatCompletionTool[]): Promise<string | null> {
     let result: string | null = null
-    let hasPromptedRespond = false  // 是否已经提示过使用 respond
 
     while (this.iterations < this.maxIterations) {
       this.iterations++; this.lastAction = 'llm_call'
@@ -273,6 +272,17 @@ export abstract class BaseAgent extends EventEmitter {
 
       // 不添加空的assistant消息
       if (!fullContent && finalToolCalls.length === 0) {
+        // 如果之前已经调用过 respond，空响应视为正常结束
+        const hasResponded = this.messages.some((m: any) =>
+          m.role === 'assistant' && m.tool_calls?.some((tc: any) => tc.function?.name === 'respond')
+        )
+        if (hasResponded) {
+          // respond 已调用，空响应视为正常结束
+          result = null
+          this.setState('idle')
+          this.lastAction = 'completed'
+          break
+        }
         console.error(`[${this.agentName}] LLM returned empty response after ${chunkCount} chunks`)
         console.error(`${this.messages.map(m => JSON.stringify(m)).join('\n')}`)
         this.setState('error')
@@ -301,38 +311,16 @@ export abstract class BaseAgent extends EventEmitter {
         const tokensAfterTools = this.compressor.calculateTokens(this.messages)
         eventBus.emit('context:usage', { agentName: this.agentName, tokenCount: tokensAfterTools })
         if (!this.runningEphemeral) await this.saveSession()
-
-        // 如果调用了 respond，标记已经输出过，下次纯文本直接结束
-        if (finalToolCalls.some(tc => tc?.function?.name === 'respond')) {
-          hasPromptedRespond = true
-        }
         continue
       }
 
       if (fullContent) {
-        // LLM 返回纯文本（无工具调用）
-        if (!hasPromptedRespond) {
-          // 第一次：提示 LLM 使用 respond 工具
-          this.messages.push({ role: 'user', content: '[系统提示] 你正在尝试结束对话,你必须使用 respond 工具向用户输出最终结果。' })
-          hasPromptedRespond = true
-          if (!this.runningEphemeral) await this.saveSession()
-          continue
-        } else {
-          // 第二次：已经提示过，直接输出作为兜底
-          if (this.channel) {
-            await this.channel.send({
-              type: 'agent_response',
-              payload: { message: fullContent },
-              timestamp: new Date()
-            })
-          }
-          result = fullContent; this.setState('idle'); this.lastAction = 'completed'
-          if (!this.runningEphemeral) await this.saveSession()
-          break
-        }
+        // LLM 返回纯文本（无工具调用），提示使用 respond 工具
+        this.messages.push({ role: 'user', content: '[系统提示] 你正在尝试结束对话,你必须使用 respond 工具向用户输出最终结果。' })
+        if (!this.runningEphemeral) await this.saveSession()
+        continue
       }
     }
-
     if (!result && this.iterations >= this.maxIterations) {
       this.setState('waiting')
       this.lastAction = 'max_iterations_reached'

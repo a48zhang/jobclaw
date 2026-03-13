@@ -15,12 +15,14 @@ describe('TOOL_NAMES 常量', () => {
     expect(TOOL_NAMES.INSTALL_TYPST).toBe('install_typst')
     expect(TOOL_NAMES.RUN_SHELL_COMMAND).toBe('run_shell_command')
     expect(TOOL_NAMES.READ_PDF).toBe('read_pdf')
+    expect(TOOL_NAMES.GREP).toBe('grep')
+    expect(TOOL_NAMES.GET_TIME).toBe('get_time')
   })
 })
 
 describe('TOOLS 数组', () => {
-  test('包含 12 个工具', () => {
-    expect(TOOLS).toHaveLength(12)
+  test('包含 14 个工具', () => {
+    expect(TOOLS).toHaveLength(14)
   })
 
   test('每个工具都有正确的类型', () => {
@@ -151,7 +153,7 @@ describe('JSON 序列化', () => {
     const json = JSON.stringify(TOOLS)
     const parsed = JSON.parse(json) as ChatCompletionTool[]
 
-    expect(parsed).toHaveLength(12)
+    expect(parsed).toHaveLength(14)
     parsed.forEach((tool, index) => {
       expect(tool.type).toBe('function')
       expect(tool.function.name).toBe(TOOLS[index].function.name)

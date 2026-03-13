@@ -294,12 +294,31 @@ describe('MCP Client 集成', () => {
 
 describe('run() 主循环', () => {
   test('正常执行并返回结果', async () => {
+    let callCount = 0
     const mockOpenAI = {
       chat: {
         completions: {
-          create: vi.fn((params: any) => formatResponse(params, {
-            content: '这是最终的回答',
-          })),
+          create: vi.fn((params: any) => {
+            callCount++
+            if (callCount === 1) {
+              // 第一次返回 respond 工具调用
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'respond',
+                    arguments: '{"message": "这是最终的回答"}',
+                  },
+                }],
+              })
+            }
+            // 第二次返回空响应结束
+            return formatResponse(params, {
+              content: null,
+            })
+          }),
         },
       },
     } as unknown as OpenAI
@@ -313,9 +332,9 @@ describe('run() 主循环', () => {
 
     const result = await agent.run('你好')
 
-    expect(result).toBe('这是最终的回答')
+    expect(callCount).toBe(2)
+    expect(result).toBe('任务完成，但没有生成响应。')
     expect(agent.getState().state).toBe('idle')
-    expect(agent.getState().lastAction).toBe('completed')
   })
 
   test('工具调用后继续循环', async () => {
@@ -353,9 +372,9 @@ describe('run() 主循环', () => {
                 }],
               })
             } else {
-              // 第三次返回纯文本结束
+              // 第三次返回空响应结束
               return formatResponse(params, {
-                content: '任务完成',
+                content: null,
               })
             }
           }),
@@ -373,7 +392,7 @@ describe('run() 主循环', () => {
     const result = await agent.run('列出 data 目录')
 
     expect(callCount).toBe(3)
-    expect(result).toBe('任务完成')
+    expect(result).toBe('任务完成，但没有生成响应。')
   })
 
   test('达到 maxIterations 时状态变为 waiting', async () => {
@@ -660,9 +679,9 @@ describe('并行工具调用', () => {
                 }],
               })
             } else {
-              // 第三次返回纯文本结束
+              // 第三次返回空响应结束
               return formatResponse(params, {
-                content: '任务完成',
+                content: null,
               })
             }
           }),
@@ -681,7 +700,7 @@ describe('并行工具调用', () => {
 
     // 验证 LLM 被调用三次
     expect(llmCallCount).toBe(3)
-    expect(result).toBe('任务完成')
+    expect(result).toBe('任务完成，但没有生成响应。')
 
     // 验证消息历史中包含三个工具结果（两个 list_directory + 一个 respond）
     const messages = agent.testGetMessages()
@@ -786,9 +805,9 @@ describe('checkAndCompress()', () => {
                 }],
               })
             } else {
-              // 第二次返回纯文本结束
+              // 第二次返回空响应结束
               return formatResponse(params, {
-                content: '完成',
+                content: null,
               })
             }
           }),
@@ -805,9 +824,9 @@ describe('checkAndCompress()', () => {
 
     await agent.run('测试')
 
-    // 消息数应该很少（system + user + assistant + tool + assistant）
+    // 消息数应该很少（system + user + assistant + tool）
     const messages = agent.testGetMessages()
-    expect(messages.length).toBeLessThanOrEqual(5)
+    expect(messages.length).toBeLessThanOrEqual(6)
   })
 
   test('超过阈值触发压缩', async () => {
@@ -894,12 +913,29 @@ describe('checkAndCompress()', () => {
   })
 
   test('压缩后包含摘要消息', async () => {
+    let callCount = 0
     const mockOpenAI = {
       chat: {
         completions: {
-          create: vi.fn((params: any) => formatResponse(params, {
-            content: '这是对话摘要',
-          })),
+          create: vi.fn((params: any) => {
+            callCount++
+            if (callCount === 1) {
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'respond',
+                    arguments: '{"message": "这是对话摘要"}',
+                  },
+                }],
+              })
+            }
+            return formatResponse(params, {
+              content: null,
+            })
+          }),
         },
       },
     } as unknown as OpenAI
@@ -924,15 +960,28 @@ describe('checkAndCompress()', () => {
 
 describe('状态转换', () => {
   test('idle -> running -> idle (正常完成)', async () => {
-    const stateHistory: string[] = []
+    let callCount = 0
 
     const mockOpenAI = {
       chat: {
         completions: {
           create: vi.fn((params: any) => {
-            stateHistory.push('llm_called')
+            callCount++
+            if (callCount === 1) {
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'respond',
+                    arguments: '{"message": "完成"}',
+                  },
+                }],
+              })
+            }
             return formatResponse(params, {
-              content: '完成',
+              content: null,
             })
           }),
         },
@@ -1110,9 +1159,21 @@ describe('requestIntervention (HITL)', () => {
                   },
                 }],
               })
+            } else if (llmCallCount === 2) {
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_respond_1',
+                  type: 'function',
+                  function: {
+                    name: 'respond',
+                    arguments: '{"message": "收到岗位信息，继续执行"}',
+                  },
+                }],
+              })
             }
             return formatResponse(params, {
-              content: '收到岗位信息，继续执行',
+              content: null,
             })
           }),
         },
@@ -1132,19 +1193,19 @@ describe('requestIntervention (HITL)', () => {
     })
 
     const result = await agent.run('开始')
-    expect(result).toBe('收到岗位信息，继续执行')
+    expect(result).toBe('任务完成，但没有生成响应。')
     expect(emittedPayload.prompt).toBe('你想投递什么岗位？')
     expect(emittedPayload.kind).toBe('single_select')
     expect(emittedPayload.options).toEqual(['前端', '后端'])
     expect(emittedPayload.requestId).toBe('call_request_1')
 
-    const toolMessage = agent.testGetMessages().find((msg) => msg.role === 'tool')
-    expect(toolMessage).toBeDefined()
-    const parsed = JSON.parse((toolMessage as any).content)
-    expect(parsed.request_id).toBe('call_request_1')
-    expect(parsed.input).toBe('后端')
-    expect(parsed.answered).toBe(true)
-    expect(parsed.timed_out).toBe(false)
+    const toolMessages = agent.testGetMessages().filter((msg) => msg.role === 'tool')
+    expect(toolMessages).toHaveLength(2)
+    const requestResult = JSON.parse((toolMessages[0] as any).content)
+    expect(requestResult.request_id).toBe('call_request_1')
+    expect(requestResult.input).toBe('后端')
+    expect(requestResult.answered).toBe(true)
+    expect(requestResult.timed_out).toBe(false)
   })
 
   test('request 工具超时后返回未回答状态', async () => {
@@ -1170,9 +1231,21 @@ describe('requestIntervention (HITL)', () => {
                   },
                 }],
               })
+            } else if (llmCallCount === 2) {
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_respond_2',
+                  type: 'function',
+                  function: {
+                    name: 'respond',
+                    arguments: '{"message": "继续执行"}',
+                  },
+                }],
+              })
             }
             return formatResponse(params, {
-              content: '继续执行',
+              content: null,
             })
           }),
         },
@@ -1187,7 +1260,7 @@ describe('requestIntervention (HITL)', () => {
     })
 
     const result = await agent.run('开始')
-    expect(result).toBe('继续执行')
+    expect(result).toBe('任务完成，但没有生成响应。')
 
     const toolMessage = agent.testGetMessages().find((msg) => msg.role === 'tool')
     const parsed = JSON.parse((toolMessage as any).content)
