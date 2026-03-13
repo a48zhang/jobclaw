@@ -7,7 +7,6 @@
   },
   "scripts": {
     "start": "tsx src/index.ts",
-    "dev": "tsx watch --ignore workspace --ignore docs --ignore tests --ignore coverage --ignore \"**/*.log\" src/index.ts",
     "cron": "tsx src/cron.ts",
     "test": "sh scripts/test.sh"
   },

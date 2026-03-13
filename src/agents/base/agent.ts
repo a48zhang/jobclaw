@@ -174,36 +174,72 @@ export abstract class BaseAgent extends EventEmitter {
     while (this.iterations < this.maxIterations) {
       this.iterations++; this.lastAction = 'llm_call'
       let fullContent = ''; let toolCalls: any[] = []; let isFirstChunk = true
+      let chunkCount = 0
+      
+      const validMessages = this.messages.filter((m) => {
+        if (m.role === 'assistant') {
+          const hasContent = typeof m.content === 'string' && m.content.trim().length > 0
+          const hasToolCalls = Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0
+          return hasContent || hasToolCalls
+        }
+        return true
+      })
+      
+      if (validMessages.length !== this.messages.length) {
+        console.log(`[${this.agentName}] Filtered ${this.messages.length - validMessages.length} empty assistant messages`)
+        this.messages = validMessages
+      }
+      
       try {
         const stream = await this.openai.chat.completions.create({
           model: this.model, messages: this.messages, tools, tool_choice: 'auto', stream: true
         })
-
-        for await (const chunk of stream) {
-          const delta = chunk.choices[0]?.delta
-          if (!delta) continue
+        
+        const iterator = stream[Symbol.asyncIterator]()
+        let iterResult = await iterator.next()
+        
+        while (!iterResult.done) {
+          const chunk = iterResult.value
+          chunkCount++
+          const choice = chunk.choices?.[0]
+          if (!choice) {
+            iterResult = await iterator.next()
+            continue
+          }
+          
+          // 支持两种格式：
+          // 1. 标准流式: delta.content, delta.tool_calls
+          // 2. 非标准/单chunk: message.content, message.tool_calls
+          const delta = choice.delta
+          const message = (choice as any).message
+          
+          const content = delta?.content ?? message?.content
+          const tc = delta?.tool_calls ?? message?.tool_calls
 
           // 1. 处理内容流
-          if (delta.content) {
-            fullContent += delta.content
+          if (content) {
+            fullContent += content
             if (this.channel) {
               await this.channel.send({
                 type: 'agent_response', timestamp: new Date(), payload: {},
-                streaming: { isFirst: isFirstChunk, isFinal: false, chunk: delta.content }
+                streaming: { isFirst: isFirstChunk, isFinal: false, chunk: content }
               })
               isFirstChunk = false
             }
           }
 
           // 2. 处理工具调用流
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              if (!toolCalls[tc.index]) toolCalls[tc.index] = { id: tc.id, function: { name: '', arguments: '' }, type: 'function' }
-              if (tc.id) toolCalls[tc.index].id = tc.id
-              if (tc.function?.name) toolCalls[tc.index].function.name += tc.function.name
-              if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments
+          if (tc) {
+            for (const t of tc) {
+              const index = t.index ?? 0
+              if (!toolCalls[index]) toolCalls[index] = { id: t.id, function: { name: '', arguments: '' }, type: 'function' }
+              if (t.id) toolCalls[index].id = t.id
+              if (t.function?.name) toolCalls[index].function.name += t.function.name
+              if (t.function?.arguments) toolCalls[index].function.arguments += t.function.arguments
             }
           }
+          
+          iterResult = await iterator.next()
         }
 
         // 流结束：只要流启动过，就必须发送 Final 标识以重置 TUI 状态
@@ -218,6 +254,16 @@ export abstract class BaseAgent extends EventEmitter {
       }
 
       const finalToolCalls = toolCalls.filter(Boolean)
+      
+      // 不添加空的assistant消息
+      if (!fullContent && finalToolCalls.length === 0) {
+        console.error(`[${this.agentName}] LLM returned empty response after ${chunkCount} chunks`)
+        this.setState('error')
+        this.lastAction = 'empty_response'
+        result = 'LLM返回空响应，请检查API配置或稍后重试。'
+        break
+      }
+      
       this.messages.push({ role: 'assistant', content: fullContent || null, tool_calls: finalToolCalls.length > 0 ? finalToolCalls : undefined })
 
       if (finalToolCalls.length > 0) {
