@@ -190,9 +190,17 @@ export abstract class BaseAgent extends EventEmitter {
         this.messages = validMessages
       }
       
+      // 在消息列表最前面添加当前时间的system消息
+      const now = new Date()
+      const timeInfo = `当前时间: ${now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'long' })}`
+      const messagesWithTime: any[] = [
+        { role: 'system', content: timeInfo },
+        ...this.messages
+      ]
+      
       try {
         const stream = await this.openai.chat.completions.create({
-          model: this.model, messages: this.messages, tools, tool_choice: 'auto', stream: true
+          model: this.model, messages: messagesWithTime, tools, tool_choice: 'auto', stream: true
         })
         
         const iterator = stream[Symbol.asyncIterator]()
