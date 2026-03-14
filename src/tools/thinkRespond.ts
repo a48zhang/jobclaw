@@ -8,7 +8,7 @@ export const RESPOND_TOOL: ChatCompletionTool = {
     name: 'respond',
     description: `向用户输出内容。用于需要用户看到的回复、结果、询问等。
 - 内容会直接显示在对话界面
-- LLM 的普通文本输出是内部思考，不会显示给用户
+- 你输出的文本是内部思考，不会显示给用户
 - 只有通过此工具才能将内容输出给用户`,
     parameters: {
       type: 'object',

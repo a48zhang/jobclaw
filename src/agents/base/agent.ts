@@ -315,8 +315,25 @@ export abstract class BaseAgent extends EventEmitter {
       }
 
       if (fullContent) {
+        // 检查过去5个消息中是否已经使用过 respond 工具
+        const recentMessages = this.messages.slice(-5)
+        const hasRespondedInRecent = recentMessages.some((m: any) =>
+          m.role === 'assistant' && m.tool_calls?.some((tc: any) => tc.function?.name === 'respond')
+        )
+
+        if (hasRespondedInRecent) {
+          // 已经使用过 respond，正常结束
+          result = null
+          this.setState('idle')
+          this.lastAction = 'completed'
+          break
+        }
+
         // LLM 返回纯文本（无工具调用），提示使用 respond 工具
-        this.messages.push({ role: 'user', content: '[系统提示] 你正在尝试结束对话,你必须使用 respond 工具向用户输出最终结果。' })
+        this.messages.push({
+          role: 'user', content: `[系统错误] 你正在尝试结束对话。你必须使用 respond 工具向用户输出最终结果。 
+          [System Error] You are trying to end the conversation. **You MUST use the respond tool to output the final result to the user.**
+          ` })
         if (!this.runningEphemeral) await this.saveSession()
         continue
       }
