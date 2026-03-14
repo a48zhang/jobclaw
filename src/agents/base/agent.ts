@@ -240,11 +240,22 @@ export abstract class BaseAgent extends EventEmitter {
           const content = delta?.content ?? message?.content
           const tc = delta?.tool_calls ?? message?.tool_calls
 
-          // 1. 处理内容流（思考内容，不显示给用户）
+          // 1. 处理内容流
           if (content) {
             fullContent += content
-            // LLM 输出的文本是内部思考，不再流式显示给用户
-            // 只有 respond 工具才能向用户输出
+            // 流式输出 agent 思考内容给用户
+            if (this.channel) {
+              this.channel.send({
+                type: 'agent_response',
+                payload: { message: content },
+                streaming: {
+                  isFirst: chunkCount === 1,
+                  chunk: content,
+                  isFinal: false
+                },
+                timestamp: new Date()
+              })
+            }
           }
 
           // 2. 处理工具调用流
@@ -261,6 +272,16 @@ export abstract class BaseAgent extends EventEmitter {
           iterResult = await iterator.next()
         }
 
+        // 流结束，发送 isFinal 消息清理状态
+        if (this.channel && fullContent) {
+          this.channel.send({
+            type: 'agent_response',
+            payload: { message: '' },
+            streaming: { isFirst: false, chunk: '', isFinal: true },
+            timestamp: new Date()
+          })
+        }
+
         // LLM 请求结束后发送上下文使用量更新
         const tokensAfterResponse = this.compressor.calculateTokens(this.messages)
         eventBus.emit('context:usage', { agentName: this.agentName, tokenCount: tokensAfterResponse })
@@ -272,17 +293,6 @@ export abstract class BaseAgent extends EventEmitter {
 
       // 不添加空的assistant消息
       if (!fullContent && finalToolCalls.length === 0) {
-        // 如果之前已经调用过 respond，空响应视为正常结束
-        const hasResponded = this.messages.some((m: any) =>
-          m.role === 'assistant' && m.tool_calls?.some((tc: any) => tc.function?.name === 'respond')
-        )
-        if (hasResponded) {
-          // respond 已调用，空响应视为正常结束
-          result = null
-          this.setState('idle')
-          this.lastAction = 'completed'
-          break
-        }
         console.error(`[${this.agentName}] LLM returned empty response after ${chunkCount} chunks`)
         console.error(`${this.messages.map(m => JSON.stringify(m)).join('\n')}`)
         this.setState('error')
@@ -315,27 +325,11 @@ export abstract class BaseAgent extends EventEmitter {
       }
 
       if (fullContent) {
-        // 检查过去5个消息中是否已经使用过 respond 工具
-        const recentMessages = this.messages.slice(-5)
-        const hasRespondedInRecent = recentMessages.some((m: any) =>
-          m.role === 'assistant' && m.tool_calls?.some((tc: any) => tc.function?.name === 'respond')
-        )
-
-        if (hasRespondedInRecent) {
-          // 已经使用过 respond，正常结束
-          result = null
-          this.setState('idle')
-          this.lastAction = 'completed'
-          break
-        }
-
-        // LLM 返回纯文本（无工具调用），提示使用 respond 工具
-        this.messages.push({
-          role: 'user', content: `[系统错误] 你正在尝试结束对话。你必须使用 respond 工具向用户输出最终结果。 
-          [System Error] You are trying to end the conversation. **You MUST use the respond tool to output the final result to the user.**
-          ` })
-        if (!this.runningEphemeral) await this.saveSession()
-        continue
+        // LLM 返回纯文本（无工具调用），正常结束
+        result = fullContent
+        this.setState('idle')
+        this.lastAction = 'completed'
+        break
       }
     }
     if (!result && this.iterations >= this.maxIterations) {
@@ -397,19 +391,6 @@ export abstract class BaseAgent extends EventEmitter {
 
     if (toolName === REQUEST_TOOL_NAME) {
       return this.executeRequestToolCall(toolCall, args)
-    }
-
-    // respond 工具特殊处理：直接通过 channel 发送给用户
-    if (toolName === 'respond') {
-      const message = args['message'] as string || ''
-      if (this.channel) {
-        await this.channel.send({
-          type: 'agent_response',
-          payload: { message },
-          timestamp: new Date()
-        })
-      }
-      return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ success: true, length: message.length }) }
     }
 
     let result: ToolResult
@@ -563,7 +544,7 @@ export abstract class BaseAgent extends EventEmitter {
   protected loadSkill(name: string): string { return utils.loadSkill(this.workspaceRoot, name) }
 
   protected initMessages(input: string): void {
-    const systemContent = `${this.systemPrompt}\n\n## 核心行为准则\n1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request\` 工具请求用户补充输入。绝不能编造虚假信息。\n2. **写入前反思**: 在向 \`data/\` 写入信息前，必须核实数据真实性。\n3. **中文交流**: 始终使用中文与用户交流。\n4. **必须响应**: 你的文本输出是内部思考，用户看不到。完成任务后，必须调用 \`respond\` 工具向用户输出结果。`
+    const systemContent = `${this.systemPrompt}\n\n## 核心行为准则\n1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request\` 工具请求用户补充输入。绝不能编造虚假信息。\n2. **写入前反思**: 在向 \`data/\` 写入信息前，必须核实数据真实性。\n3. **中文交流**: 始终使用中文与用户交流。`
     if (this.messages.length === 0) {
       this.messages.push({ role: 'system', content: systemContent }, { role: 'user', content: input })
     } else {

@@ -7,7 +7,6 @@ import { executeUpsertJob } from './upsertJobWrapper.js'
 import { executeTypstCompile, executeInstallTypst } from './typstCompile.js'
 import { executeShellCommand, detectShell, detectOS } from './shell.js'
 import { executeReadPdf } from './readPdf.js'
-import { executeRespond, RESPOND_TOOL } from './thinkRespond.js'
 import { executeGrep } from './grep.js'
 import { executeGetTime, GET_TIME_TOOL } from './getTime.js'
 import { getLockFilePath } from './utils.js'
@@ -39,7 +38,6 @@ export const TOOL_NAMES = {
   INSTALL_TYPST: 'install_typst',
   RUN_SHELL_COMMAND: 'run_shell_command',
   READ_PDF: 'read_pdf',
-  RESPOND: 'respond',
   GREP: 'grep',
   GET_TIME: 'get_time',
 } as const
@@ -240,7 +238,6 @@ export const TOOLS: ChatCompletionTool[] = [
     },
   },
   GET_TIME_TOOL,
-  RESPOND_TOOL,
 ]
 
 export async function executeTool(
@@ -271,8 +268,6 @@ export async function executeTool(
       return executeShellCommand(args, context)
     case TOOL_NAMES.READ_PDF:
       return executeReadPdf(args, context)
-    case TOOL_NAMES.RESPOND:
-      return executeRespond(args, context)
     case TOOL_NAMES.GREP:
       return executeGrep(args, context)
     case TOOL_NAMES.GET_TIME:

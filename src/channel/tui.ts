@@ -5,8 +5,6 @@ export class TUIChannel implements Channel {
   private isStreaming: boolean = false
   private streamStartLines: number = 0
 
-  private lastStreamLineCount: number = 0
-
   constructor(private logger: (line: string, type: 'info' | 'warn' | 'error') => void, private getRawLog?: () => any) {}
 
   async send(message: ChannelMessage): Promise<void> {
@@ -15,49 +13,6 @@ export class TUIChannel implements Channel {
     let level: 'info' | 'warn' | 'error' = 'info'
     let label = ''
     let content = ''
-
-    // ─── 流式处理逻辑 (Phase 6) ──────────────────────────────────────────────
-    if (message.streaming) {
-      const logObj = this.getRawLog ? this.getRawLog() : null
-
-      if (message.streaming.isFirst) {
-        this.logger(`${headerPrefix} (Agent)`, 'info');
-        this.streamingContent = '';
-        this.isStreaming = true;
-        if (logObj) {
-          logObj.log('🤖 '); // 占位
-          this.streamStartLines = (logObj as any).getLines().length - 1;
-        }
-      }
-
-      if (message.streaming.chunk) {
-        this.streamingContent += message.streaming.chunk;
-      }
-
-      if (logObj && this.isStreaming) {
-        const contentLines = ('🤖 ' + this.streamingContent).split('\n');
-        contentLines.forEach((l, i) => {
-          const targetIdx = this.streamStartLines + i;
-          const currentLinesCount = (logObj as any).getLines().length;
-          const tagged = `{green-fg}${l}{/}`;
-          
-          if (targetIdx < currentLinesCount) {
-            (logObj as any).setLine(targetIdx, tagged);
-          } else {
-            logObj.log(tagged);
-          }
-        });
-        
-        logObj.setScrollPerc(100);
-        logObj.screen.render();
-      }
-
-      if (message.streaming.isFinal) {
-        this.streamingContent = ''
-        this.isStreaming = false
-      }
-      return
-    }
 
     // ─── 常规消息逻辑 ─────────────────────────────────────────────────────────
     if (message.type === 'tool_output') {
@@ -100,6 +55,51 @@ export class TUIChannel implements Channel {
         content = `${message.payload['message']}`
         break
       case 'agent_response' as any:
+        // 流式输出处理
+        if (message.streaming) {
+          const logObj = this.getRawLog ? this.getRawLog() : null
+          
+          // 初始化流式状态（处理 isFirst 或首次收到内容的情况）
+          if (message.streaming.isFirst || !this.isStreaming) {
+            if (!this.isStreaming) {
+              this.logger(`${headerPrefix} (Agent)`, 'info')
+              this.streamingContent = ''
+              this.isStreaming = true
+              if (logObj) {
+                logObj.log('🤖 ')
+                this.streamStartLines = (logObj as any).getLines().length - 1
+              }
+            }
+          }
+
+          if (message.streaming.chunk) {
+            this.streamingContent += message.streaming.chunk
+          }
+
+          if (logObj && this.isStreaming && this.streamingContent) {
+            const contentLines = ('🤖 ' + this.streamingContent).split('\n')
+            contentLines.forEach((l, i) => {
+              const targetIdx = this.streamStartLines + i
+              const currentLinesCount = (logObj as any).getLines().length
+              const tagged = `{green-fg}${l}{/}`
+              if (targetIdx < currentLinesCount) {
+                (logObj as any).setLine(targetIdx, tagged)
+              } else {
+                logObj.log(tagged)
+              }
+            })
+            logObj.setScrollPerc(100)
+            logObj.screen.render()
+          }
+
+          if (message.streaming.isFinal) {
+            this.streamingContent = ''
+            this.isStreaming = false
+          }
+          return
+        }
+        
+        // 非流式输出
         label = 'Agent'
         content = `🤖 ${message.payload['message']}`
         break
@@ -108,18 +108,7 @@ export class TUIChannel implements Channel {
         label = `tool:${toolName}`
         let argsRaw = String(message.payload['args'] || '')
 
-        // respond 工具显示用户消息
-        if (toolName === 'respond') {
-          try {
-            const argsObj = JSON.parse(argsRaw)
-            content = `${argsObj['message'] || ''}`
-          } catch {
-            content = `(输出消息)`
-          }
-          break
-        }
-
-        // 其他工具正常处理
+        // 折叠长内容
         if (toolName === 'write_file' || toolName === 'append_file') {
           try {
             const argsObj = JSON.parse(argsRaw)

@@ -301,20 +301,13 @@ describe('run() 主循环', () => {
           create: vi.fn((params: any) => {
             callCount++
             if (callCount === 1) {
-              // 第一次返回 respond 工具调用
+              // 第一次返回纯文本内容
               return formatResponse(params, {
-                content: null,
-                tool_calls: [{
-                  id: 'call_1',
-                  type: 'function',
-                  function: {
-                    name: 'respond',
-                    arguments: '{"message": "这是最终的回答"}',
-                  },
-                }],
+                content: '这是最终的回答',
+                tool_calls: undefined,
               })
             }
-            // 第二次返回空响应结束
+            // 不应该有第二次调用
             return formatResponse(params, {
               content: null,
             })
@@ -332,8 +325,8 @@ describe('run() 主循环', () => {
 
     const result = await agent.run('你好')
 
-    expect(callCount).toBe(2)
-    expect(result).toBe('任务完成，但没有生成响应。')
+    expect(callCount).toBe(1)
+    expect(result).toBe('这是最终的回答')
     expect(agent.getState().state).toBe('idle')
   })
 
@@ -358,23 +351,11 @@ describe('run() 主循环', () => {
                   },
                 }],
               })
-            } else if (callCount === 2) {
-              // 第二次返回 respond 工具调用
-              return formatResponse(params, {
-                content: null,
-                tool_calls: [{
-                  id: 'call_2',
-                  type: 'function',
-                  function: {
-                    name: 'respond',
-                    arguments: '{"message": "目录内容已列出"}',
-                  },
-                }],
-              })
             } else {
-              // 第三次返回空响应结束
+              // 第二次返回纯文本内容
               return formatResponse(params, {
-                content: null,
+                content: '目录内容已列出',
+                tool_calls: undefined,
               })
             }
           }),
@@ -391,8 +372,8 @@ describe('run() 主循环', () => {
 
     const result = await agent.run('列出 data 目录')
 
-    expect(callCount).toBe(3)
-    expect(result).toBe('任务完成，但没有生成响应。')
+    expect(callCount).toBe(2)
+    expect(result).toBe('目录内容已列出')
   })
 
   test('达到 maxIterations 时状态变为 waiting', async () => {
@@ -665,23 +646,11 @@ describe('并行工具调用', () => {
                   },
                 ],
               })
-            } else if (llmCallCount === 2) {
-              // 第二次返回 respond
-              return formatResponse(params, {
-                content: null,
-                tool_calls: [{
-                  id: 'call_3',
-                  type: 'function',
-                  function: {
-                    name: 'respond',
-                    arguments: '{"message": "两个目录已列出"}',
-                  },
-                }],
-              })
             } else {
-              // 第三次返回空响应结束
+              // 第二次返回纯文本内容
               return formatResponse(params, {
-                content: null,
+                content: '两个目录已列出',
+                tool_calls: undefined,
               })
             }
           }),
@@ -698,14 +667,14 @@ describe('并行工具调用', () => {
 
     const result = await agent.run('列出两个目录')
 
-    // 验证 LLM 被调用三次
-    expect(llmCallCount).toBe(3)
-    expect(result).toBe('任务完成，但没有生成响应。')
+    // 验证 LLM 被调用两次
+    expect(llmCallCount).toBe(2)
+    expect(result).toBe('两个目录已列出')
 
-    // 验证消息历史中包含三个工具结果（两个 list_directory + 一个 respond）
+    // 验证消息历史中包含两个工具结果（两个 list_directory）
     const messages = agent.testGetMessages()
     const toolMessages = messages.filter(m => m.role === 'tool')
-    expect(toolMessages).toHaveLength(3)
+    expect(toolMessages).toHaveLength(2)
   })
 
   test('工具结果按正确顺序加入历史', async () => {
@@ -794,22 +763,11 @@ describe('checkAndCompress()', () => {
             callCount++
             if (callCount === 1) {
               return formatResponse(params, {
-                content: null,
-                tool_calls: [{
-                  id: 'call_1',
-                  type: 'function',
-                  function: {
-                    name: 'respond',
-                    arguments: '{"message": "正常响应"}',
-                  },
-                }],
-              })
-            } else {
-              // 第二次返回空响应结束
-              return formatResponse(params, {
-                content: null,
+                content: '正常响应',
+                tool_calls: undefined,
               })
             }
+            return formatResponse(params, { content: null })
           }),
         },
       },
@@ -824,7 +782,7 @@ describe('checkAndCompress()', () => {
 
     await agent.run('测试')
 
-    // 消息数应该很少（system + user + assistant + tool）
+    // 消息数应该很少（system + user + assistant）
     const messages = agent.testGetMessages()
     expect(messages.length).toBeLessThanOrEqual(6)
   })
@@ -921,15 +879,8 @@ describe('checkAndCompress()', () => {
             callCount++
             if (callCount === 1) {
               return formatResponse(params, {
-                content: null,
-                tool_calls: [{
-                  id: 'call_1',
-                  type: 'function',
-                  function: {
-                    name: 'respond',
-                    arguments: '{"message": "这是对话摘要"}',
-                  },
-                }],
+                content: '这是对话摘要',
+                tool_calls: undefined,
               })
             }
             return formatResponse(params, {
@@ -969,15 +920,8 @@ describe('状态转换', () => {
             callCount++
             if (callCount === 1) {
               return formatResponse(params, {
-                content: null,
-                tool_calls: [{
-                  id: 'call_1',
-                  type: 'function',
-                  function: {
-                    name: 'respond',
-                    arguments: '{"message": "完成"}',
-                  },
-                }],
+                content: '完成',
+                tool_calls: undefined,
               })
             }
             return formatResponse(params, {
@@ -1161,15 +1105,8 @@ describe('requestIntervention (HITL)', () => {
               })
             } else if (llmCallCount === 2) {
               return formatResponse(params, {
-                content: null,
-                tool_calls: [{
-                  id: 'call_respond_1',
-                  type: 'function',
-                  function: {
-                    name: 'respond',
-                    arguments: '{"message": "收到岗位信息，继续执行"}',
-                  },
-                }],
+                content: '收到岗位信息，继续执行',
+                tool_calls: undefined,
               })
             }
             return formatResponse(params, {
@@ -1193,14 +1130,14 @@ describe('requestIntervention (HITL)', () => {
     })
 
     const result = await agent.run('开始')
-    expect(result).toBe('任务完成，但没有生成响应。')
+    expect(result).toBe('收到岗位信息，继续执行')
     expect(emittedPayload.prompt).toBe('你想投递什么岗位？')
     expect(emittedPayload.kind).toBe('single_select')
     expect(emittedPayload.options).toEqual(['前端', '后端'])
     expect(emittedPayload.requestId).toBe('call_request_1')
 
     const toolMessages = agent.testGetMessages().filter((msg) => msg.role === 'tool')
-    expect(toolMessages).toHaveLength(2)
+    expect(toolMessages).toHaveLength(1)
     const requestResult = JSON.parse((toolMessages[0] as any).content)
     expect(requestResult.request_id).toBe('call_request_1')
     expect(requestResult.input).toBe('后端')
@@ -1233,15 +1170,8 @@ describe('requestIntervention (HITL)', () => {
               })
             } else if (llmCallCount === 2) {
               return formatResponse(params, {
-                content: null,
-                tool_calls: [{
-                  id: 'call_respond_2',
-                  type: 'function',
-                  function: {
-                    name: 'respond',
-                    arguments: '{"message": "继续执行"}',
-                  },
-                }],
+                content: '任务完成',
+                tool_calls: undefined,
               })
             }
             return formatResponse(params, {
@@ -1260,7 +1190,7 @@ describe('requestIntervention (HITL)', () => {
     })
 
     const result = await agent.run('开始')
-    expect(result).toBe('任务完成，但没有生成响应。')
+    expect(result).toBe('任务完成')
 
     const toolMessage = agent.testGetMessages().find((msg) => msg.role === 'tool')
     const parsed = JSON.parse((toolMessage as any).content)
