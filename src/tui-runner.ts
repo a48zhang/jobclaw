@@ -95,12 +95,22 @@ export async function runTUI(workspaceRoot: string) {
         }
 
         // ── Default: Send to Agent ──────────────────────────────────────────
-        tui.tuiChannel.send({
-          type: 'user_input' as any,
-          payload: { message: `{cyan-fg}> ${input}{/}` },
-          timestamp: new Date(),
-        })
-        await mainAgent.run(input)
+        const isCommand = input.startsWith('/')
+        if (!isCommand) {
+          tui.tuiChannel.send({
+            type: 'user_input' as any,
+            payload: { message: `{cyan-fg}> ${input}{/}` },
+            timestamp: new Date(),
+          })
+        }
+        const result = await mainAgent.run(input)
+        if (isCommand && result) {
+          tui.tuiChannel.send({
+            type: 'agent_response' as any,
+            payload: { message: result },
+            timestamp: new Date(),
+          })
+        }
       },
     })
 

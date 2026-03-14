@@ -34,12 +34,7 @@ export const BOOTSTRAP_PROMPT = `【系统初始化引导】
 
 1. 请告诉我你的姓名、邮箱和简历链接，我会帮你填写 workspace/data/userinfo.md。
 2. 请告诉我你想监测的目标公司及其招聘页 URL（至少一个），我会帮你填写 workspace/data/targets.md。
-3. 请提供你的 LLM 配置信息：
-   - API_KEY (如果你已经在环境变量中设置了，可以跳过)
-   - MODEL_ID (必须指定)
-   - LIGHT_MODEL_ID (可选，不填则与 MODEL_ID 相同)
-   - BASE_URL (必须指定)
-4. 配置完成后，我会说明如何通过系统 cron 或 PM2 定期运行 "npm run cron" 实现自动化搜索。
-5. 最后我会写入 workspace/config.json 标记初始化已完成。
+3. 配置完成后，我会说明如何通过系统 cron 或 PM2 定期运行 "npm run cron" 实现自动化搜索。
+4. 最后我会写入 workspace/config.json 标记初始化已完成。
 
 请开始：你叫什么名字？`

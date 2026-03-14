@@ -19,22 +19,57 @@ export const CHANNEL_LOG_TYPE_MAP: Record<string, 'info' | 'warn' | 'error'> = {
  * 将 Channel 包装为同步 emit agent:log 的版本
  */
 export function wrapChannel(channel: Channel, agentName: string): Channel {
+  // 用于累积流式内容
+  let streamingContent = ''
+  
   return {
     send: async (message: ChannelMessage): Promise<void> => {
-      const type: 'info' | 'warn' | 'error' = CHANNEL_LOG_TYPE_MAP[message.type] ?? 'info'
-      const text =
-        typeof message.payload['message'] === 'string'
-          ? `[${message.type}] ${message.payload['message']}`
-          : `[${message.type}]`
+      const logType: 'info' | 'warn' | 'error' = CHANNEL_LOG_TYPE_MAP[message.type] ?? 'info'
       
-      if (!message.streaming) {
+      // 处理 agent_response 类型（流式和非流式）
+      if (message.type === 'agent_response') {
+        if (message.streaming) {
+          // 流式模式：累积内容
+          if (message.streaming.chunk) {
+            streamingContent += message.streaming.chunk
+          }
+          // 只在 isFinal 时发送完整的日志
+          if (message.streaming.isFinal && streamingContent) {
+            eventBus.emit('agent:log', {
+              agentName,
+              type: logType,
+              message: streamingContent,
+              timestamp: new Date().toISOString(),
+            })
+            streamingContent = ''
+          }
+        } else {
+          // 非流式：直接发送
+          const msg = typeof message.payload['message'] === 'string' ? message.payload['message'] : ''
+          if (msg) {
+            eventBus.emit('agent:log', {
+              agentName,
+              type: logType,
+              message: msg,
+              timestamp: new Date().toISOString(),
+            })
+          }
+        }
+      } else {
+        // 其他类型消息
+        const text =
+          typeof message.payload['message'] === 'string'
+            ? `[${message.type}] ${message.payload['message']}`
+            : `[${message.type}]`
+        
         eventBus.emit('agent:log', {
           agentName,
-          type,
+          type: logType,
           message: text,
           timestamp: new Date().toISOString(),
         })
       }
+      
       return channel.send(message)
     },
   }

@@ -154,6 +154,27 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   async run(input: string): Promise<string> {
+    // ── 命令处理 ─────────────────────────────────────────────────────────────
+    if (input.startsWith('/')) {
+      const cmd = input.slice(1).toLowerCase().trim()
+      
+      if (cmd === 'new') {
+        const archivePath = this.resetSession()
+        if (archivePath) {
+          return `会话已归档到 ${require('path').basename(archivePath)}，已开始新会话`
+        }
+        return '已开始新会话'
+      }
+      
+      if (cmd === 'clear') {
+        this.resetSession()
+        return '会话已清空'
+      }
+      
+      return `未知命令: /${cmd}。可用命令: /new (新会话), /clear (清空会话)`
+    }
+
+    // ── 正常处理 ─────────────────────────────────────────────────────────────
     this.setState('running'); this.iterations = 0; this.lastAction = 'start'
     try {
       this.initMessages(input)

@@ -116,6 +116,31 @@ export function createApp(workspaceRoot: string): Hono {
     }
   })
 
+  // ── REST: GET /api/session/:agentName ─────────────────────────────────────
+  app.get('/api/session/:agentName', (c) => {
+    const agentName = c.req.param('agentName')
+    const agent = agentRegistry.get(agentName)
+    if (!agent) {
+      return c.json({ ok: false, error: 'Agent not found' }, 404)
+    }
+    
+    const messages = agent.getMessages()
+    // 过滤并转换消息格式，供前端使用
+    const history = messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : '',
+        // 如果有 tool_calls，提取 respond 工具的消息（兼容旧数据）
+        toolCalls: (m as any).tool_calls?.map((tc: any) => ({
+          name: tc.function?.name,
+          args: tc.function?.arguments,
+        })),
+      }))
+    
+    return c.json({ ok: true, messages: history })
+  })
+
   // ── REST: POST /api/chat ─────────────────────────────────────────────────
   app.post('/api/chat', async (c) => {
     try {
@@ -125,9 +150,18 @@ export function createApp(workspaceRoot: string): Hono {
       
       const mainAgent = agentRegistry.get('main')
       if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+
+      // 命令处理在 agent 层，这里只负责触发 run
+      // 对于命令，await 返回结果；对于普通消息，异步执行
+      const isCommand = message.startsWith('/')
       
-      mainAgent.runEphemeral(message).catch(err => console.error('[Server] Chat task failed:', err))
-      return c.json({ ok: true })
+      if (isCommand) {
+        const result = await mainAgent.run(message)
+        return c.json({ ok: true, isCommand: true, message: result })
+      } else {
+        mainAgent.run(message).catch(err => console.error('[Server] Chat task failed:', err))
+        return c.json({ ok: true, isCommand: false })
+      }
     } catch {
       return c.json({ ok: false, error: 'Invalid request' }, 400)
     }
