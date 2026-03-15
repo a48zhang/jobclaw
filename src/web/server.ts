@@ -151,16 +151,23 @@ export function createApp(workspaceRoot: string): Hono {
       const mainAgent = agentRegistry.get('main')
       if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
 
-      // 命令处理在 agent 层，这里只负责触发 run
-      // 对于命令，await 返回结果；对于普通消息，异步执行
-      const isCommand = message.startsWith('/')
+      // 使用 submit 实现异步消息队列
+      const result = mainAgent.submit(message)
       
-      if (isCommand) {
-        const result = await mainAgent.run(message)
-        return c.json({ ok: true, isCommand: true, message: result })
+      if (result.queued) {
+        // 普通消息已入队
+        return c.json({ 
+          ok: true, 
+          queued: true, 
+          queueLength: result.queueLength 
+        })
       } else {
-        mainAgent.run(message).catch(err => console.error('[Server] Chat task failed:', err))
-        return c.json({ ok: true, isCommand: false })
+        // 命令立即执行完成
+        return c.json({ 
+          ok: true, 
+          queued: false, 
+          message: result.message 
+        })
       }
     } catch {
       return c.json({ ok: false, error: 'Invalid request' }, 400)

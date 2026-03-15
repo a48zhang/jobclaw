@@ -55,8 +55,6 @@ async function sendChatMessage() {
   chatSend.disabled = true
   chatSend.classList.add('opacity-50', 'cursor-not-allowed')
   
-  const isCommand = text.startsWith('/')
-  
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -67,13 +65,16 @@ async function sendChatMessage() {
     
     if (!data.ok) {
       appendAgentLog({ type: 'error', message: '发送失败: ' + (data.error || '未知错误') })
-    } else if (data.isCommand) {
-      // 命令执行成功，清空聊天历史并显示结果
+    } else if (data.queued) {
+      // 普通消息已入队，显示用户消息
+      appendUserMessage(text)
+      if (data.queueLength > 1) {
+        appendAgentLog({ type: 'info', message: `消息已入队，前面还有 ${data.queueLength - 1} 条等待处理` })
+      }
+    } else {
+      // 命令执行完成，清空历史并显示结果
       chatHistory.innerHTML = ''
       appendAgentLog({ type: 'info', message: data.message })
-    } else {
-      // 非命令，显示用户消息
-      appendUserMessage(text)
     }
   } catch (err) {
     appendAgentLog({ type: 'error', message: '网络错误: ' + err.message })

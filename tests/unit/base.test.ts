@@ -199,6 +199,69 @@ describe('BaseAgent', () => {
         eventBus.off('agent:state', handler as any)
       }
     })
+
+    test('runEphemeral 期间 submit 的消息不会被吞掉，结束后会继续处理', async () => {
+      let callCount = 0
+      const mockOpenAI = {
+        chat: {
+          completions: {
+            create: vi.fn((params: any) => {
+              callCount++
+              if (params.stream) {
+                if (callCount === 1) {
+                  // 第一次：ephemeral 调用，延迟一小段时间以便插入 submit
+                  return (async function* () {
+                    await new Promise((resolve) => setTimeout(resolve, 30))
+                    yield {
+                      choices: [{
+                        delta: { content: '临时任务完成' },
+                        finish_reason: 'stop',
+                      }],
+                    }
+                  })()
+                }
+
+                // 第二次：队列消息被处理
+                return (async function* () {
+                  yield {
+                    choices: [{
+                      delta: { content: '队列消息已处理' },
+                      finish_reason: 'stop',
+                    }],
+                  }
+                })()
+              }
+
+              return Promise.resolve({ choices: [{ message: { content: 'fallback' } }] })
+            }),
+          },
+        },
+      } as unknown as OpenAI
+
+      const queueAgent = new TestAgent({
+        openai: mockOpenAI,
+        agentName: 'test',
+        model: 'test-model',
+        workspaceRoot: TEST_WORKSPACE,
+      })
+
+      const ephemeralPromise = queueAgent.runEphemeral('临时任务')
+      const submitResult = queueAgent.submit('来自队列的消息')
+      expect(submitResult.queued).toBe(true)
+
+      const ephemeralResult = await ephemeralPromise
+      expect(ephemeralResult).toBe('临时任务完成')
+
+      const deadline = Date.now() + 1500
+      while (callCount < 2 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      }
+
+      expect(callCount).toBeGreaterThanOrEqual(2)
+
+      const messages = queueAgent.testGetMessages()
+      expect(messages.some((m) => m.role === 'user' && (m as any).content === '来自队列的消息')).toBe(true)
+    })
   })
 
   describe('Token 计算', () => {

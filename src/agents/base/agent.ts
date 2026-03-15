@@ -6,6 +6,7 @@ import type {
   ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions'
 import { EventEmitter } from 'node:events'
+import * as path from 'node:path'
 import { executeTool, TOOLS, type ToolContext, type ToolResult } from '../../tools/index.js'
 import type { AgentState, Session, Task } from '../../types.js'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants.js'
@@ -76,6 +77,11 @@ export abstract class BaseAgent extends EventEmitter {
 
   private interventionResolve?: (value: string) => void
 
+  // ── 异步消息队列 ─────────────────────────────────────────────────────────
+  private messageQueue: string[] = []
+  private processing: boolean = false
+  private executionChain: Promise<void> = Promise.resolve()
+
   constructor(config: BaseAgentConfig) {
     super()
     this.openai = config.openai
@@ -93,6 +99,96 @@ export abstract class BaseAgent extends EventEmitter {
       lightModel: this.lightModel,
       keepRecentMessages: this.keepRecentMessages,
     })
+  }
+
+  /**
+   * 提交消息到队列（非阻塞）
+   * - 命令立即执行并返回结果
+   * - 普通消息入队，返回排队状态
+   */
+  submit(input: string): { queued: boolean; message?: string; queueLength?: number } {
+    // 命令立即执行
+    if (input.startsWith('/')) {
+      const cmd = input.slice(1).toLowerCase().trim()
+
+      if (cmd === 'new') {
+        const archivePath = this.resetSession()
+        const message = archivePath
+          ? `会话已归档到 ${path.basename(archivePath)}，已开始新会话`
+          : '已开始新会话'
+        return { queued: false, message }
+      }
+
+      if (cmd === 'clear') {
+        this.resetSession()
+        return { queued: false, message: '会话已清空' }
+      }
+
+      return { queued: false, message: `未知命令: /${cmd}。可用命令: /new (新会话), /clear (清空会话)` }
+    }
+
+    // 普通消息入队
+    const wasEmpty = this.messageQueue.length === 0
+    this.messageQueue.push(input)
+
+    // 如果之前队列为空且没有在处理，启动处理循环
+    if (wasEmpty && !this.processing) {
+      this.startProcessing()
+    }
+
+    return { queued: true, queueLength: this.messageQueue.length }
+  }
+
+  /**
+   * 启动异步处理循环
+   */
+  private startProcessing(): void {
+    if (this.processing) return
+    this.processing = true
+    this.processLoop().catch(err => {
+      console.error(`[${this.agentName}] Process loop error:`, err)
+      this.processing = false
+    })
+  }
+
+  /**
+   * 处理循环：从队列取消息并执行
+   */
+  private async processLoop(): Promise<void> {
+    while (this.messageQueue.length > 0) {
+      const input = this.messageQueue.shift()!
+      try {
+        await this.run(input)
+      } catch (err) {
+        console.error(`[${this.agentName}] Error processing message:`, err)
+      }
+    }
+    this.processing = false
+  }
+
+  /**
+   * 同一 Agent 内串行执行任何 run / runEphemeral 任务，避免共享状态并发读写。
+   */
+  private enqueueExecution<T>(task: () => Promise<T>): Promise<T> {
+    const runTask = this.executionChain.then(task, task)
+    this.executionChain = runTask.then(() => undefined, () => undefined)
+    return runTask
+  }
+
+  /**
+   * 在安全边界（工具调用后 / 一轮完成前）吞掉 submit 队列里尚未处理的用户消息。
+   */
+  private consumePendingQueuedInputs(): number {
+    // runEphemeral 会临时替换 messages，并在结束后恢复；此时吞队列会导致消息丢失。
+    if (this.runningEphemeral) return 0
+
+    if (this.messageQueue.length === 0) return 0
+
+    const pending = this.messageQueue.splice(0)
+    for (const input of pending) {
+      this.messages.push({ role: 'user', content: input })
+    }
+    return pending.length
   }
 
   protected abstract get systemPrompt(): string
@@ -154,41 +250,23 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   async run(input: string): Promise<string> {
-    // ── 命令处理 ─────────────────────────────────────────────────────────────
-    if (input.startsWith('/')) {
-      const cmd = input.slice(1).toLowerCase().trim()
-      
-      if (cmd === 'new') {
-        const archivePath = this.resetSession()
-        if (archivePath) {
-          return `会话已归档到 ${require('path').basename(archivePath)}，已开始新会话`
-        }
-        return '已开始新会话'
+    return this.enqueueExecution(async () => {
+      // ── 正常处理 ─────────────────────────────────────────────────────────────
+      this.setState('running'); this.iterations = 0; this.lastAction = 'start'
+      try {
+        this.initMessages(input)
+        if (!this.runningEphemeral) await this.saveSession()
+        const tools = await this.getAvailableTools()
+        const result = await this.runMainLoop(tools)
+        this.messages = await this.compressor.checkAndCompress(this.messages)
+        if (!this.runningEphemeral) await this.saveSession()
+        return result ?? '任务完成，但没有生成响应。'
+      } catch (error) {
+        this.setState('error'); this.lastAction = `error: ${(error as Error).message}`
+        if (!this.runningEphemeral) await this.saveSession().catch(() => { })
+        throw error
       }
-      
-      if (cmd === 'clear') {
-        this.resetSession()
-        return '会话已清空'
-      }
-      
-      return `未知命令: /${cmd}。可用命令: /new (新会话), /clear (清空会话)`
-    }
-
-    // ── 正常处理 ─────────────────────────────────────────────────────────────
-    this.setState('running'); this.iterations = 0; this.lastAction = 'start'
-    try {
-      this.initMessages(input)
-      if (!this.runningEphemeral) await this.saveSession()
-      const tools = await this.getAvailableTools()
-      const result = await this.runMainLoop(tools)
-      this.messages = await this.compressor.checkAndCompress(this.messages)
-      if (!this.runningEphemeral) await this.saveSession()
-      return result ?? '任务完成，但没有生成响应。'
-    } catch (error) {
-      this.setState('error'); this.lastAction = `error: ${(error as Error).message}`
-      if (!this.runningEphemeral) await this.saveSession().catch(() => { })
-      throw error
-    }
+    })
   }
 
   protected async runMainLoop(tools: ChatCompletionTool[]): Promise<string | null> {
@@ -341,12 +419,27 @@ export abstract class BaseAgent extends EventEmitter {
         // 工具调用结果添加后发送上下文使用量更新
         const tokensAfterTools = this.compressor.calculateTokens(this.messages)
         eventBus.emit('context:usage', { agentName: this.agentName, tokenCount: tokensAfterTools })
+
+        // 在工具边界消费 submit 队列中的待处理用户消息，避免下一轮还要重新排队。
+        const consumed = this.consumePendingQueuedInputs()
+        if (consumed > 0) {
+          this.lastAction = `consumed_${consumed}_queued_messages`
+        }
+
         if (!this.runningEphemeral) await this.saveSession()
         continue
       }
 
       if (fullContent) {
-        // LLM 返回纯文本（无工具调用），正常结束
+        // LLM 返回纯文本（无工具调用），先检查是否有待处理的用户消息。
+        const consumed = this.consumePendingQueuedInputs()
+        if (consumed > 0) {
+          this.lastAction = `consumed_${consumed}_queued_messages`
+          if (!this.runningEphemeral) await this.saveSession()
+          continue
+        }
+
+        // 无新消息，正常结束
         result = fullContent
         this.setState('idle')
         this.lastAction = 'completed'
@@ -363,23 +456,25 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   async runEphemeral(initialPrompt: string, options: { timeoutMs?: number } = {}): Promise<string> {
-    const saved = { messages: [...this.messages], state: this.state, runningEphemeral: this.runningEphemeral }
-    this.messages = []; this.setState('running'); this.iterations = 0; this.lastAction = 'ephemeral_start'; this.runningEphemeral = true
-    let timeoutId: ReturnType<typeof setTimeout> | undefined
-    try {
-      this.initMessages(initialPrompt)
-      const tools = await this.getAvailableTools()
-      const runPromise = this.runMainLoop(tools)
-      const result = options.timeoutMs ? await Promise.race([runPromise, new Promise<null>((_, r) => {
-        timeoutId = setTimeout(() => r(new Error(`[${this.agentName}] runEphemeral timed out`)), options.timeoutMs)
-      })]) : await runPromise
-      return result ?? '任务完成'
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId)
-      this.messages = saved.messages
-      this.runningEphemeral = saved.runningEphemeral
-      this.setState(saved.state)
-    }
+    return this.enqueueExecution(async () => {
+      const saved = { messages: [...this.messages], state: this.state, runningEphemeral: this.runningEphemeral }
+      this.messages = []; this.setState('running'); this.iterations = 0; this.lastAction = 'ephemeral_start'; this.runningEphemeral = true
+      let timeoutId: ReturnType<typeof setTimeout> | undefined
+      try {
+        this.initMessages(initialPrompt)
+        const tools = await this.getAvailableTools()
+        const runPromise = this.runMainLoop(tools)
+        const result = options.timeoutMs ? await Promise.race([runPromise, new Promise<null>((_, r) => {
+          timeoutId = setTimeout(() => r(new Error(`[${this.agentName}] runEphemeral timed out`)), options.timeoutMs)
+        })]) : await runPromise
+        return result ?? '任务完成'
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId)
+        this.messages = saved.messages
+        this.runningEphemeral = saved.runningEphemeral
+        this.setState(saved.state)
+      }
+    })
   }
 
   getState(): AgentSnapshot {

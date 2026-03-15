@@ -1,6 +1,5 @@
 import OpenAI from 'openai'
 import * as fs from 'node:fs'
-import * as path from 'node:path'
 
 import { MainAgent } from './agents/main/index.js'
 import { DeliveryAgent } from './agents/delivery/index.js'
@@ -61,7 +60,7 @@ export async function runTUI(workspaceRoot: string) {
     const tui = new TUI({
       workspaceRoot: workspaceRoot,
       onCommand: async (input) => {
-        // ── Command System ──────────────────────────────────────────────────
+        // ── TUI 特有命令 ──────────────────────────────────────────────────
         if (input.startsWith('/')) {
           const cmd = input.slice(1).toLowerCase().trim()
           if (cmd === 'quit' || cmd === 'exit') {
@@ -72,42 +71,40 @@ export async function runTUI(workspaceRoot: string) {
             tui.toggleJobs()
             return
           }
-          if (cmd === 'new') {
-            // 归档当前会话并重置
-            const archivePath = mainAgent.resetSession()
+          // /new 和 /clear 命令需要额外清理 UI
+          if (cmd === 'new' || cmd === 'clear') {
+            const result = mainAgent.submit(input)
             tui.clearLog()
             tui.updateContextUsage(0)
-            if (archivePath) {
-              tui.tuiChannel.send({
-                type: 'system' as any,
-                payload: { message: `{yellow-fg}(System) 会话已归档到 ${path.basename(archivePath)}{/}` },
-                timestamp: new Date(),
-              })
-            } else {
-              tui.tuiChannel.send({
-                type: 'system' as any,
-                payload: { message: '{yellow-fg}(System) 已开始新会话{/}' },
-                timestamp: new Date(),
-              })
-            }
+            tui.tuiChannel.send({
+              type: 'agent_response' as any,
+              payload: { message: result.message || '' },
+              timestamp: new Date(),
+            })
             return
           }
         }
 
-        // ── Default: Send to Agent ──────────────────────────────────────────
-        const isCommand = input.startsWith('/')
-        if (!isCommand) {
+        // ── 其他输入统一由 submit() 处理 ─────────────────────────────────────
+        const result = mainAgent.submit(input)
+        
+        if (result.queued) {
           tui.tuiChannel.send({
             type: 'user_input' as any,
             payload: { message: `{cyan-fg}> ${input}{/}` },
             timestamp: new Date(),
           })
-        }
-        const result = await mainAgent.run(input)
-        if (isCommand && result) {
+          if (result.queueLength && result.queueLength > 1) {
+            tui.tuiChannel.send({
+              type: 'agent_response' as any,
+              payload: { message: `[排队中，前面还有 ${result.queueLength - 1} 条]` },
+              timestamp: new Date(),
+            })
+          }
+        } else {
           tui.tuiChannel.send({
             type: 'agent_response' as any,
-            payload: { message: result },
+            payload: { message: result.message || '' },
             timestamp: new Date(),
           })
         }
