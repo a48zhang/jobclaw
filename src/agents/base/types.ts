@@ -30,6 +30,8 @@ export interface BaseAgentConfig {
   maxIterations?: number
   keepRecentMessages?: number
   lightModel?: string
+  persistent?: boolean
+  factory?: any // Avoid circular dependency with AgentFactory
 }
 
 /** ContextCompressor 配置 */

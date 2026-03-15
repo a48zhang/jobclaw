@@ -12,6 +12,7 @@ import type { AgentState, Session, Task } from '../../types.js'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants.js'
 import { ContextCompressor } from './context-compressor.js'
 import type { MCPClient, AgentSnapshot, BaseAgentConfig } from './types.js'
+import type { AgentFactory } from '../factory.js'
 import type { Channel } from '../../channel/base.js'
 import { eventBus } from '../../eventBus.js'
 import type { InterventionResolvedPayload, RequestKind } from '../../eventBus.js'
@@ -72,8 +73,9 @@ export abstract class BaseAgent extends EventEmitter {
   protected currentTask: Task | null = null
   protected compressor: ContextCompressor
   protected availableTools: ChatCompletionTool[] | null = null
-  protected runningEphemeral: boolean = false
   protected lastFinishReason?: string
+  protected persistent: boolean
+  protected factory?: AgentFactory
 
   private interventionResolve?: (value: string) => void
 
@@ -93,6 +95,8 @@ export abstract class BaseAgent extends EventEmitter {
     this.maxIterations = config.maxIterations ?? DEFAULT_MAX_ITERATIONS
     this.keepRecentMessages = config.keepRecentMessages ?? DEFAULT_KEEP_RECENT_MESSAGES
     this.lightModel = config.lightModel || config.model
+    this.persistent = config.persistent ?? false
+    this.factory = config.factory
 
     this.compressor = new ContextCompressor({
       openai: this.openai,
@@ -179,9 +183,6 @@ export abstract class BaseAgent extends EventEmitter {
    * 在安全边界（工具调用后 / 一轮完成前）吞掉 submit 队列里尚未处理的用户消息。
    */
   private consumePendingQueuedInputs(): number {
-    // runEphemeral 会临时替换 messages，并在结束后恢复；此时吞队列会导致消息丢失。
-    if (this.runningEphemeral) return 0
-
     if (this.messageQueue.length === 0) return 0
 
     const pending = this.messageQueue.splice(0)
@@ -203,7 +204,7 @@ export abstract class BaseAgent extends EventEmitter {
     timeoutMs?: number,
     options: RequestInterventionOptions = {}
   ): Promise<string> {
-    const timeout = timeoutMs ?? (this.runningEphemeral ? 30_000 : 300_000)
+    const timeout = timeoutMs ?? 300_000
     let timeoutId: ReturnType<typeof setTimeout> | undefined
     const expectedRequestId = options.requestId
     const interventionPromise = new Promise<string>((resolve) => {
@@ -255,15 +256,15 @@ export abstract class BaseAgent extends EventEmitter {
       this.setState('running'); this.iterations = 0; this.lastAction = 'start'
       try {
         this.initMessages(input)
-        if (!this.runningEphemeral) await this.saveSession()
+        await this.saveSession()
         const tools = await this.getAvailableTools()
         const result = await this.runMainLoop(tools)
         this.messages = await this.compressor.checkAndCompress(this.messages)
-        if (!this.runningEphemeral) await this.saveSession()
+        await this.saveSession()
         return result ?? '任务完成，但没有生成响应。'
       } catch (error) {
         this.setState('error'); this.lastAction = `error: ${(error as Error).message}`
-        if (!this.runningEphemeral) await this.saveSession().catch(() => { })
+        await this.saveSession().catch(() => { })
         throw error
       }
     })
@@ -426,7 +427,7 @@ export abstract class BaseAgent extends EventEmitter {
           this.lastAction = `consumed_${consumed}_queued_messages`
         }
 
-        if (!this.runningEphemeral) await this.saveSession()
+        await this.saveSession()
         continue
       }
 
@@ -435,7 +436,7 @@ export abstract class BaseAgent extends EventEmitter {
         const consumed = this.consumePendingQueuedInputs()
         if (consumed > 0) {
           this.lastAction = `consumed_${consumed}_queued_messages`
-          if (!this.runningEphemeral) await this.saveSession()
+          await this.saveSession()
           continue
         }
 
@@ -453,28 +454,6 @@ export abstract class BaseAgent extends EventEmitter {
     }
 
     return result
-  }
-
-  async runEphemeral(initialPrompt: string, options: { timeoutMs?: number } = {}): Promise<string> {
-    return this.enqueueExecution(async () => {
-      const saved = { messages: [...this.messages], state: this.state, runningEphemeral: this.runningEphemeral }
-      this.messages = []; this.setState('running'); this.iterations = 0; this.lastAction = 'ephemeral_start'; this.runningEphemeral = true
-      let timeoutId: ReturnType<typeof setTimeout> | undefined
-      try {
-        this.initMessages(initialPrompt)
-        const tools = await this.getAvailableTools()
-        const runPromise = this.runMainLoop(tools)
-        const result = options.timeoutMs ? await Promise.race([runPromise, new Promise<null>((_, r) => {
-          timeoutId = setTimeout(() => r(new Error(`[${this.agentName}] runEphemeral timed out`)), options.timeoutMs)
-        })]) : await runPromise
-        return result ?? '任务完成'
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId)
-        this.messages = saved.messages
-        this.runningEphemeral = saved.runningEphemeral
-        this.setState(saved.state)
-      }
-    })
   }
 
   getState(): AgentSnapshot {
@@ -515,6 +494,7 @@ export abstract class BaseAgent extends EventEmitter {
       const ctx: ToolContext = {
         workspaceRoot: this.workspaceRoot, agentName: this.agentName,
         logger: (line) => { if (this.channel) this.channel.send({ type: 'tool_output', payload: { message: line, toolName }, timestamp: new Date() }) },
+        factory: this.factory,
       }
       result = await executeTool(toolName, args, ctx)
     } else if (this.mcpClient) {
@@ -646,6 +626,8 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   protected async saveSession(): Promise<void> {
+    if (!this.persistent) return
+
     const session: Session = {
       currentTask: this.currentTask,
       context: this.extractContext(),
