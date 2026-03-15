@@ -6,7 +6,7 @@
  */
 import OpenAI from 'openai'
 import { MainAgent } from './agents/main/index.js'
-import { DeliveryAgent } from './agents/delivery/index.js'
+import { AgentFactory } from './agents/factory.js'
 import { EmailChannel } from './channel/email.js'
 import { validateEnv } from './env.js'
 import { createMCPClient } from './mcp.js'
@@ -38,14 +38,12 @@ export async function runCron(workspaceRoot: string, mode: 'search' | 'digest' =
       baseURL: config.BASE_URL
     });
 
-    const deliveryAgent = new DeliveryAgent({
-      agentName: 'delivery',
+    const factory = new AgentFactory({
       openai,
+      mcpClient,
+      workspaceRoot,
       model: config.MODEL_ID,
       lightModel: config.LIGHT_MODEL_ID,
-      workspaceRoot: workspaceRoot,
-      mcpClient,
-      channel,
     });
 
     const mainAgent = new MainAgent({
@@ -54,22 +52,23 @@ export async function runCron(workspaceRoot: string, mode: 'search' | 'digest' =
       model: config.MODEL_ID,
       lightModel: config.LIGHT_MODEL_ID,
       workspaceRoot: workspaceRoot,
-      deliveryAgent,
       mcpClient,
       channel,
+      factory,
+      persistent: false,
     });
 
     if (mode === 'search') {
       console.log('[cron] 正在启动搜索任务...');
       // 搜索模式保持静默，upsert_job 会负责写入，但不触发单条通知
-      await mainAgent.runEphemeral(
+      await mainAgent.run(
         '搜索 targets.md 中所有公司的最新职位，使用 upsert_job 将发现的新职位写入 jobs.md。此过程无需发送邮件通知。'
       );
       console.log('[cron] 搜索任务完成。');
     } else {
       console.log('[cron] 正在生成日报汇总...');
       // 日报模式由 Agent 读取 jobs.md 并通过 channel 发送汇总
-      await mainAgent.runEphemeral(
+      await mainAgent.run(
         '分析 jobs.md 中的新增岗位并发送日报汇总。如果没有新岗位，请直接回复"今日无新增"。'
       );
       console.log('[cron] 日报任务完成。');

@@ -9,6 +9,7 @@ import { executeShellCommand, detectShell, detectOS } from './shell.js'
 import { executeReadPdf } from './readPdf.js'
 import { executeGrep } from './grep.js'
 import { executeGetTime, GET_TIME_TOOL } from './getTime.js'
+import { executeRunAgent, RUN_AGENT_TOOL } from './runAgent.js'
 import { getLockFilePath } from './utils.js'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
 
@@ -18,6 +19,7 @@ export interface ToolContext {
   workspaceRoot: string
   agentName: string
   logger: (line: string) => void
+  factory?: any // AgentFactory
 }
 
 export interface ToolResult {
@@ -40,6 +42,7 @@ export const TOOL_NAMES = {
   READ_PDF: 'read_pdf',
   GREP: 'grep',
   GET_TIME: 'get_time',
+  RUN_AGENT: 'run_agent',
 } as const
 
 // 动态检测系统与 Shell 环境
@@ -238,6 +241,7 @@ export const TOOLS: ChatCompletionTool[] = [
     },
   },
   GET_TIME_TOOL,
+  RUN_AGENT_TOOL,
 ]
 
 export async function executeTool(
@@ -272,6 +276,8 @@ export async function executeTool(
       return executeGrep(args, context)
     case TOOL_NAMES.GET_TIME:
       return executeGetTime(args, context)
+    case TOOL_NAMES.RUN_AGENT:
+      return executeRunAgent(args, context)
     default:
       return { success: false, content: '', error: `未知工具: ${name}` }
   }

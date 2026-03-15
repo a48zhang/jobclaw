@@ -2,7 +2,7 @@ import OpenAI from 'openai'
 import * as fs from 'node:fs'
 
 import { MainAgent } from './agents/main/index.js'
-import { DeliveryAgent } from './agents/delivery/index.js'
+import { AgentFactory } from './agents/factory.js'
 import { needsBootstrap, BOOTSTRAP_PROMPT } from './bootstrap.js'
 import { validateEnv } from './env.js'
 import { createMCPClient } from './mcp.js'
@@ -32,22 +32,22 @@ export async function runTUI(workspaceRoot: string) {
     // Bootstrap 引导循环
     if (needsBootstrap(workspaceRoot)) {
       const bootstrapChannel = new TUIChannel((line) => process.stderr.write(line + '\n'))
-      const bootstrapDelivery = new DeliveryAgent({
+      const bootstrapFactory = new AgentFactory({
         openai,
-        agentName: 'delivery',
-        model: config.MODEL_ID,
-        workspaceRoot: workspaceRoot,
         mcpClient,
-        channel: bootstrapChannel,
+        workspaceRoot,
+        model: config.MODEL_ID,
+        lightModel: config.LIGHT_MODEL_ID || config.MODEL_ID,
       })
       const bootstrapAgent = new MainAgent({
         openai,
         agentName: 'main',
         model: config.MODEL_ID,
         workspaceRoot: workspaceRoot,
-        deliveryAgent: bootstrapDelivery,
         mcpClient,
         channel: bootstrapChannel,
+        factory: bootstrapFactory,
+        persistent: false,
       })
       while (needsBootstrap(workspaceRoot)) {
         await bootstrapAgent.run(BOOTSTRAP_PROMPT)
@@ -111,14 +111,12 @@ export async function runTUI(workspaceRoot: string) {
       },
     })
 
-    const deliveryAgent = new DeliveryAgent({
+    const factory = new AgentFactory({
       openai,
-      agentName: 'delivery',
+      mcpClient,
+      workspaceRoot,
       model: config.MODEL_ID,
       lightModel: config.LIGHT_MODEL_ID,
-      workspaceRoot: workspaceRoot,
-      mcpClient,
-      channel: tui.tuiChannel,
     })
 
     mainAgent = new MainAgent({
@@ -127,9 +125,10 @@ export async function runTUI(workspaceRoot: string) {
       model: config.MODEL_ID,
       lightModel: config.LIGHT_MODEL_ID,
       workspaceRoot: workspaceRoot,
-      deliveryAgent,
       mcpClient,
       channel: tui.tuiChannel,
+      factory,
+      persistent: true,
     })
 
     // ── Load History & Sync UI ──────────────────────────────────────────────
@@ -162,7 +161,6 @@ export async function runTUI(workspaceRoot: string) {
     })
 
     registerAgent(mainAgent)
-    registerAgent(deliveryAgent)
 
     // Start server with config
     startServer(workspaceRoot, config.SERVER_PORT)
