@@ -86,16 +86,18 @@ async function submitIntervention() {
     if (['y', 'yes', '是', '确认', '同意'].includes(normalized)) input = 'yes'
     if (['n', 'no', '否', '取消', '不同意'].includes(normalized)) input = 'no'
   }
+  // 先保存需要发送的数据，再清除 UI 状态
+  const payload = {
+    input,
+    agentName: window.appState.interventionAgentName,
+    requestId: window.appState.interventionRequestId
+  }
   hideModal()
   try {
     await fetch('/api/intervention', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        input, 
-        agentName: window.appState.interventionAgentName, 
-        requestId: window.appState.interventionRequestId 
-      })
+      body: JSON.stringify(payload)
     })
   } catch { /* ignore */ }
 }
@@ -103,15 +105,16 @@ async function submitIntervention() {
 // 事件绑定
 document.getElementById('modal-submit').addEventListener('click', submitIntervention)
 document.getElementById('modal-cancel').addEventListener('click', () => {
+  const payload = {
+    input: '',
+    agentName: window.appState.interventionAgentName,
+    requestId: window.appState.interventionRequestId
+  }
   hideModal()
   fetch('/api/intervention', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
-      input: '', 
-      agentName: window.appState.interventionAgentName, 
-      requestId: window.appState.interventionRequestId 
-    })
+    body: JSON.stringify(payload)
   }).catch(() => {})
 })
 document.getElementById('modal-input').addEventListener('keydown', (e) => {

@@ -6,11 +6,36 @@ import { AgentFactory } from './agents/factory.js'
 import { needsBootstrap, BOOTSTRAP_PROMPT } from './bootstrap.js'
 import { validateEnv } from './env.js'
 import { createMCPClient } from './mcp.js'
-import { TUI } from './web/tui.js'
-import { TUIChannel } from './channel/tui.js'
 import { registerAgent, startServer } from './web/server.js'
 import { loadConfig } from './config.js'
 import { eventBus } from './eventBus.js'
+
+/**
+ * 服务端模式的空 Channel
+ * 只负责将 agent_response 转发到 eventBus
+ */
+class ServerChannel {
+  async send(message: any): Promise<void> {
+    if (message.type === 'agent_response') {
+      const msg = message.payload?.message
+      if (msg) {
+        eventBus.emit('agent:log', {
+          agentName: 'main',
+          type: 'info',
+          message: msg,
+          timestamp: new Date().toISOString(),
+        })
+      }
+    } else if (message.type === 'tool_call' || message.type === 'tool_output') {
+      eventBus.emit('agent:log', {
+        agentName: 'main',
+        type: 'info',
+        message: message.payload?.message || `[${message.type}]`,
+        timestamp: new Date().toISOString(),
+      })
+    }
+  }
+}
 
 export async function runTUI(workspaceRoot: string) {
   // Ensure workspace directory exists
@@ -29,87 +54,10 @@ export async function runTUI(workspaceRoot: string) {
       baseURL: config.BASE_URL
     })
 
-    // Bootstrap 引导循环
+    // Bootstrap 引导循环（通过 stderr 输出）
     if (needsBootstrap(workspaceRoot)) {
-      const bootstrapChannel = new TUIChannel((line) => process.stderr.write(line + '\n'))
-      const bootstrapFactory = new AgentFactory({
-        openai,
-        mcpClient,
-        workspaceRoot,
-        model: config.MODEL_ID,
-        lightModel: config.LIGHT_MODEL_ID || config.MODEL_ID,
-      })
-      const bootstrapAgent = new MainAgent({
-        openai,
-        agentName: 'main',
-        model: config.MODEL_ID,
-        workspaceRoot: workspaceRoot,
-        mcpClient,
-        channel: bootstrapChannel,
-        factory: bootstrapFactory,
-        persistent: false,
-      })
-      while (needsBootstrap(workspaceRoot)) {
-        await bootstrapAgent.run(BOOTSTRAP_PROMPT)
-      }
+      console.error('[JobClaw] 需要进行初始化引导，请通过 Web UI 完成...')
     }
-
-    // ── Launch TUI ──────────────────────────────────────────────────────────
-    let mainAgent: MainAgent
-
-    const tui = new TUI({
-      workspaceRoot: workspaceRoot,
-      onCommand: async (input) => {
-        // ── TUI 特有命令 ──────────────────────────────────────────────────
-        if (input.startsWith('/')) {
-          const cmd = input.slice(1).toLowerCase().trim()
-          if (cmd === 'quit' || cmd === 'exit') {
-            tui.destroy()
-            process.exit(0)
-          }
-          if (cmd === 'jobs') {
-            tui.toggleJobs()
-            return
-          }
-          // /new 和 /clear 命令需要额外清理 UI
-          if (cmd === 'new' || cmd === 'clear') {
-            const result = mainAgent.submit(input)
-            tui.clearLog()
-            tui.updateContextUsage(0)
-            tui.tuiChannel.send({
-              type: 'agent_response' as any,
-              payload: { message: result.message || '' },
-              timestamp: new Date(),
-            })
-            return
-          }
-        }
-
-        // ── 其他输入统一由 submit() 处理 ─────────────────────────────────────
-        const result = mainAgent.submit(input)
-
-        if (result.queued) {
-          tui.tuiChannel.send({
-            type: 'user_input' as any,
-            payload: { message: `{cyan-fg}> ${input}{/}` },
-            timestamp: new Date(),
-          })
-          if (result.queueLength && result.queueLength > 1) {
-            tui.tuiChannel.send({
-              type: 'agent_response' as any,
-              payload: { message: `[排队中，前面还有 ${result.queueLength - 1} 条]` },
-              timestamp: new Date(),
-            })
-          }
-        } else {
-          tui.tuiChannel.send({
-            type: 'agent_response' as any,
-            payload: { message: result.message || '' },
-            timestamp: new Date(),
-          })
-        }
-      },
-    })
 
     const factory = new AgentFactory({
       openai,
@@ -119,56 +67,27 @@ export async function runTUI(workspaceRoot: string) {
       lightModel: config.LIGHT_MODEL_ID,
     })
 
-    mainAgent = new MainAgent({
+    const mainAgent = new MainAgent({
       openai,
       agentName: 'main',
       model: config.MODEL_ID,
       lightModel: config.LIGHT_MODEL_ID,
       workspaceRoot: workspaceRoot,
       mcpClient,
-      channel: tui.tuiChannel,
+      channel: new ServerChannel() as any,
       factory,
       persistent: true,
     })
 
-    // ── Load History & Sync UI ──────────────────────────────────────────────
+    // 加载历史会话
     await mainAgent.loadSession()
-    const history = mainAgent.getMessages()
-    for (const msg of history) {
-      if (msg.role === 'user' && typeof msg.content === 'string') {
-        tui.tuiChannel.send({
-          type: 'user_input' as any,
-          payload: { message: `{cyan-fg}> ${msg.content}{/}` },
-          timestamp: new Date(),
-        })
-      } else if (msg.role === 'assistant' && typeof msg.content === 'string') {
-        tui.tuiChannel.send({
-          type: 'agent_response' as any,
-          payload: { message: msg.content },
-          timestamp: new Date(),
-        })
-      }
-    }
-    tui.render()
-
-    // 更新初始上下文使用量
-    const initialState = mainAgent.getState()
-    tui.updateContextUsage(initialState.tokenCount)
-
-    // 监听上下文使用量更新事件
-    eventBus.on('context:usage', ({ tokenCount }) => {
-      tui.updateContextUsage(tokenCount)
-    })
 
     registerAgent(mainAgent)
 
-    // Start server with config
+    // 启动 Web 服务器
     startServer(workspaceRoot, config.SERVER_PORT, factory)
 
-    // Wire up HITL: intervention_required → TUI modal
-    tui.attachAgent(mainAgent)
-    tui.startWatching()
-    tui.render()
+    console.log(`[JobClaw] 服务端模式已启动，请访问 http://localhost:${config.SERVER_PORT ?? 3000}`)
   } catch (err) {
     await mcpClient.close()
     throw err

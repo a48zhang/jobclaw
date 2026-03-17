@@ -258,9 +258,10 @@ export class TUI {
   }
 
   attachAgent(agent: BaseAgent): void {
-    agent.on('intervention_required', ({ prompt, resolve, kind, options }: { prompt: string, resolve: (v: string) => void, kind?: string, options?: string[] }) => {
-      this.showInterventionModal(prompt, resolve, agent, kind, options)
-    })
+    // TODO: TUI 人工干预模态框暂时屏蔽，待修复后启用
+    // agent.on('intervention_required', ({ prompt, resolve, kind, options }: { prompt: string, resolve: (v: string) => void, kind?: string, options?: string[] }) => {
+    //   this.showInterventionModal(prompt, resolve, agent, kind, options)
+    // })
   }
 
   startWatching(): void {
@@ -311,6 +312,7 @@ export class TUI {
       top: 'center', left: 'center', width: '60%', height: 12, border: { type: 'line' },
       label: ' ⚠ 人工干预 ', style: { border: { fg: 'yellow' }, fg: 'white' }, tags: true,
       content: `\n {yellow-fg}${prompt}{/}${optionsText}\n\n${inputHint}`, fullUnicode: true,
+      keys: true,
     })
     const input = blessed.textbox({
       parent: modal,
@@ -322,7 +324,6 @@ export class TUI {
       style: { fg: 'yellow', focus: { border: { fg: 'yellow' } } },
       inputOnFocus: true,
       fullUnicode: true,
-      keys: true,
     })
     const cleanup = () => {
       this.screen.remove(modal); this.inputBox.focus(); this.screen.render()
@@ -333,9 +334,10 @@ export class TUI {
     agent.once('intervention_timeout', onTimeout); agent.once('intervention_handled', onHandled)
     this.screen.append(modal)
     this.screen.render()
-    input.focus()
-    input.readInput()
-    input.key('enter', () => { const v = input.getValue(); cleanup(); resolve(v) })
-    input.key('escape', () => { cleanup(); resolve('') })
+    input.readInput((err: Error | null, value: string) => {
+      cleanup()
+      resolve(value ?? '')
+    })
+    modal.key('escape', () => { cleanup(); resolve('') })
   }
 }
