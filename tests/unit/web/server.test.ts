@@ -85,58 +85,42 @@ describe('/api/resume/upload', () => {
 
 describe('/api/resume/review', () => {
   test('returns 400 when no uploaded resume exists', async () => {
-    const runEphemeral = vi.fn(() => Promise.resolve('unused'))
-    registerAgent({
-      agentName: 'main',
-      getState: () => ({
-        agentName: 'main',
-        state: 'idle',
-        iterations: 0,
-        tokenCount: 0,
-        lastAction: '',
-        currentTask: null,
-      }),
-      runEphemeral,
-    } as any)
+    const run = vi.fn(() => Promise.resolve('unused'))
+    const factory = {
+      createAgent: vi.fn(() => ({ run })),
+    }
 
-    const app = createApp(TEST_WORKSPACE)
+    const app = createApp(TEST_WORKSPACE, factory as any)
     const res = await app.request('/api/resume/review', { method: 'POST' })
 
     expect(res.status).toBe(400)
     const json = await res.json() as { ok: boolean; error: string }
     expect(json.ok).toBe(false)
     expect(json.error).toContain('Uploaded resume')
-    expect(runEphemeral).not.toHaveBeenCalled()
+    expect(factory.createAgent).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
   })
 
   test('dispatches a review task to the main agent when uploaded resume exists', async () => {
     fs.mkdirSync(path.dirname(UPLOAD_PATH), { recursive: true })
     fs.writeFileSync(UPLOAD_PATH, 'dummy pdf bytes')
 
-    const runEphemeral = vi.fn(() => Promise.resolve('review started'))
-    registerAgent({
-      agentName: 'main',
-      getState: () => ({
-        agentName: 'main',
-        state: 'idle',
-        iterations: 0,
-        tokenCount: 0,
-        lastAction: '',
-        currentTask: null,
-      }),
-      runEphemeral,
-    } as any)
+    const run = vi.fn(() => Promise.resolve('review started'))
+    const factory = {
+      createAgent: vi.fn(() => ({ run })),
+    }
 
-    const app = createApp(TEST_WORKSPACE)
+    const app = createApp(TEST_WORKSPACE, factory as any)
     const res = await app.request('/api/resume/review', { method: 'POST' })
 
     expect(res.status).toBe(200)
     const json = await res.json() as { ok: boolean; path: string }
     expect(json.ok).toBe(true)
     expect(json.path).toBe('data/uploads/resume-upload.pdf')
-    expect(runEphemeral).toHaveBeenCalledTimes(1)
-    expect(runEphemeral.mock.calls[0]?.[0]).toContain('resume-upload.pdf')
-    expect(runEphemeral.mock.calls[0]?.[0]).toContain('resume-clinic')
-    expect(runEphemeral.mock.calls[0]?.[0]).toContain('read_pdf')
+    expect(factory.createAgent).toHaveBeenCalledTimes(1)
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls[0]?.[0]).toContain('resume-upload.pdf')
+    expect(run.mock.calls[0]?.[0]).toContain('resume-clinic')
+    expect(run.mock.calls[0]?.[0]).toContain('read_pdf')
   })
 })

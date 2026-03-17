@@ -61,9 +61,9 @@ describe('EmailChannel.send', () => {
     sendMailMock = vi.fn(() => Promise.resolve({ messageId: 'test-id' }))
 
     channel = new EmailChannel(makeConfig())
-    // 替换内部 transporter 的 sendMail
-    ;(channel as unknown as { transporter: { sendMail: unknown } }).transporter.sendMail =
-      sendMailMock
+      // 替换内部 transporter 的 sendMail
+      ; (channel as unknown as { transporter: { sendMail: unknown } }).transporter.sendMail =
+        sendMailMock
   })
 
   test('TC-B-03: 发送 new_job 消息，sendMail 被调用一次，subject 包含公司或职位名', async () => {
@@ -83,14 +83,14 @@ describe('EmailChannel.send', () => {
   test('TC-B-04: SMTP 抛出 ECONNREFUSED 时 send() 不抛出异常', async () => {
     sendMailMock = vi.fn(() => {
       const err = new Error('connect ECONNREFUSED')
-      ;(err as NodeJS.ErrnoException).code = 'ECONNREFUSED'
+        ; (err as NodeJS.ErrnoException).code = 'ECONNREFUSED'
       return Promise.reject(err)
     })
-    ;(channel as unknown as { transporter: { sendMail: unknown } }).transporter.sendMail =
-      sendMailMock
+      ; (channel as unknown as { transporter: { sendMail: unknown } }).transporter.sendMail =
+        sendMailMock
 
     const msg: ChannelMessage = {
-      type: 'delivery_success',
+      type: 'agent_response',
       payload: { company: 'Acme', title: 'SWE', url: 'https://acme.com', time: new Date().toISOString() },
       timestamp: new Date(),
     }
@@ -105,8 +105,8 @@ describe('EmailChannel buildBody HTML escape', () => {
   test('TC-B-05: payload 中的 XSS 字符串被正确 escape', async () => {
     const sendMailMock = vi.fn(() => Promise.resolve({ messageId: 'test-id' }))
     const channel = new EmailChannel(makeConfig())
-    ;(channel as unknown as { transporter: { sendMail: unknown } }).transporter.sendMail =
-      sendMailMock
+      ; (channel as unknown as { transporter: { sendMail: unknown } }).transporter.sendMail =
+        sendMailMock
 
     const msg: ChannelMessage = {
       type: 'new_job',

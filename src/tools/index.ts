@@ -12,6 +12,7 @@ import { executeGetTime, GET_TIME_TOOL } from './getTime.js'
 import { executeRunAgent, RUN_AGENT_TOOL } from './runAgent.js'
 import { getLockFilePath } from './utils.js'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
+import type { AgentFactory } from '../agents/factory.js'
 
 export { getLockFilePath }
 
@@ -19,7 +20,7 @@ export interface ToolContext {
   workspaceRoot: string
   agentName: string
   logger: (line: string) => void
-  factory?: any // AgentFactory
+  factory?: AgentFactory
 }
 
 export interface ToolResult {
@@ -44,6 +45,8 @@ export const TOOL_NAMES = {
   GET_TIME: 'get_time',
   RUN_AGENT: 'run_agent',
 } as const
+
+export const LOCAL_TOOL_NAMES = Object.values(TOOL_NAMES)
 
 // 动态检测系统与 Shell 环境
 const CURRENT_OS = detectOS()

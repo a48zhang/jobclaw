@@ -308,11 +308,22 @@ export class TUI {
       ? ' 请在下方输入 yes / no 后按 Enter 继续：'
       : ' 请在下方输入后按 Enter 继续：'
     const modal = blessed.box({
-      top: 'center', left: 'center', width: '60%', height: 10, border: { type: 'line' },
+      top: 'center', left: 'center', width: '60%', height: 12, border: { type: 'line' },
       label: ' ⚠ 人工干预 ', style: { border: { fg: 'yellow' }, fg: 'white' }, tags: true,
       content: `\n {yellow-fg}${prompt}{/}${optionsText}\n\n${inputHint}`, fullUnicode: true,
     })
-    const input = blessed.textbox({ parent: modal, top: 7, left: 2, right: 2, height: 1, style: { fg: 'yellow' }, inputOnFocus: true, fullUnicode: true })
+    const input = blessed.textbox({
+      parent: modal,
+      bottom: 1,
+      left: 2,
+      right: 2,
+      height: 3,
+      border: { type: 'line' },
+      style: { fg: 'yellow', focus: { border: { fg: 'yellow' } } },
+      inputOnFocus: true,
+      fullUnicode: true,
+      keys: true,
+    })
     const cleanup = () => {
       this.screen.remove(modal); this.inputBox.focus(); this.screen.render()
       agent.removeListener('intervention_timeout', onTimeout); agent.removeListener('intervention_handled', onHandled)
@@ -320,7 +331,10 @@ export class TUI {
     const onTimeout = () => { this.activityLog.log(`{yellow-fg}[HITL] 超时已自动跳过{/}`); this.activityLog.setScrollPerc(100); cleanup() }
     const onHandled = () => cleanup()
     agent.once('intervention_timeout', onTimeout); agent.once('intervention_handled', onHandled)
-    this.screen.append(modal); input.focus(); this.screen.render()
+    this.screen.append(modal)
+    this.screen.render()
+    input.focus()
+    input.readInput()
     input.key('enter', () => { const v = input.getValue(); cleanup(); resolve(v) })
     input.key('escape', () => { cleanup(); resolve('') })
   }

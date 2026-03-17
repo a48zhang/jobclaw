@@ -171,7 +171,15 @@ describe('BaseAgent', () => {
         }
       }
 
-      await agent.run('测试')
+      const persistentAgent = new TestAgent({
+        openai: mockOpenAI,
+        agentName: 'test',
+        model: 'test-model',
+        workspaceRoot: TEST_WORKSPACE,
+        persistent: true,
+      })
+
+      await persistentAgent.run('测试')
 
       const sessionPath = path.join(TEST_AGENT_DIR, 'session.json')
       expect(fs.existsSync(sessionPath)).toBe(true)
@@ -183,56 +191,17 @@ describe('BaseAgent', () => {
     })
   })
 
-  describe('runEphemeral 状态同步', () => {
-    test('runEphemeral 结束后恢复原 state 并发出 agent:state', async () => {
-      const states: string[] = []
-      const handler = (p: { agentName: string; state: string }) => {
-        if (p.agentName === 'test') states.push(p.state)
-      }
-      eventBus.on('agent:state', handler as any)
-      try {
-        expect(agent.getState().state).toBe('idle')
-        await agent.runEphemeral('测试临时任务')
-        expect(states).toContain('running')
-        expect(states[states.length - 1]).toBe('idle')
-      } finally {
-        eventBus.off('agent:state', handler as any)
-      }
-    })
-
-    test('runEphemeral 期间 submit 的消息不会被吞掉，结束后会继续处理', async () => {
+  describe('submit 队列处理', () => {
+    test('submit 入队后会被顺序处理', async () => {
       let callCount = 0
       const mockOpenAI = {
         chat: {
           completions: {
             create: vi.fn((params: any) => {
               callCount++
-              if (params.stream) {
-                if (callCount === 1) {
-                  // 第一次：ephemeral 调用，延迟一小段时间以便插入 submit
-                  return (async function* () {
-                    await new Promise((resolve) => setTimeout(resolve, 30))
-                    yield {
-                      choices: [{
-                        delta: { content: '临时任务完成' },
-                        finish_reason: 'stop',
-                      }],
-                    }
-                  })()
-                }
-
-                // 第二次：队列消息被处理
-                return (async function* () {
-                  yield {
-                    choices: [{
-                      delta: { content: '队列消息已处理' },
-                      finish_reason: 'stop',
-                    }],
-                  }
-                })()
-              }
-
-              return Promise.resolve({ choices: [{ message: { content: 'fallback' } }] })
+              return formatResponse(params, {
+                content: callCount === 1 ? '第一条完成' : '第二条完成',
+              })
             }),
           },
         },
@@ -245,22 +214,15 @@ describe('BaseAgent', () => {
         workspaceRoot: TEST_WORKSPACE,
       })
 
-      const ephemeralPromise = queueAgent.runEphemeral('临时任务')
-      const submitResult = queueAgent.submit('来自队列的消息')
-      expect(submitResult.queued).toBe(true)
-
-      const ephemeralResult = await ephemeralPromise
-      expect(ephemeralResult).toBe('临时任务完成')
+      expect(queueAgent.submit('消息 1').queued).toBe(true)
+      expect(queueAgent.submit('消息 2').queued).toBe(true)
 
       const deadline = Date.now() + 1500
       while (callCount < 2 && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 20))
       }
 
-      expect(callCount).toBeGreaterThanOrEqual(2)
-
-      const messages = queueAgent.testGetMessages()
-      expect(messages.some((m) => m.role === 'user' && (m as any).content === '来自队列的消息')).toBe(true)
+      expect(callCount).toBe(2)
     })
   })
 
@@ -618,6 +580,60 @@ describe('executeToolCall()', () => {
     await agent.run('调用自定义工具')
 
     expect(mockMCPClient.callTool).toHaveBeenCalled()
+  })
+
+  test('run_agent 在 MCP 存在时也走本地工具分支', async () => {
+    const mockMCPClient: MCPClient = {
+      listTools: vi.fn(() => Promise.resolve([
+        { name: 'browser_navigate', description: 'navigate', inputSchema: { type: 'object' } },
+      ])),
+      callTool: vi.fn(() => Promise.resolve('mcp result')),
+    }
+
+    const mockFactory = {
+      createAgent: vi.fn(() => ({
+        run: vi.fn(async () => '子任务完成'),
+      })),
+    }
+
+    let callCount = 0
+    const mockOpenAI = {
+      chat: {
+        completions: {
+          create: vi.fn((params: any) => {
+            callCount++
+            if (callCount === 1) {
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'run_agent',
+                    arguments: JSON.stringify({ instruction: '执行子任务' }),
+                  },
+                }],
+              })
+            }
+            return formatResponse(params, { content: '父任务完成' })
+          }),
+        },
+      },
+    } as unknown as OpenAI
+
+    const agent = new TestAgent({
+      openai: mockOpenAI,
+      agentName: 'test_exec',
+      model: 'test-model',
+      workspaceRoot: TEST_WORKSPACE,
+      mcpClient: mockMCPClient,
+      factory: mockFactory as any,
+    })
+
+    const result = await agent.run('执行')
+    expect(result).toBe('父任务完成')
+    expect(mockFactory.createAgent).toHaveBeenCalledTimes(1)
+    expect(mockMCPClient.callTool).not.toHaveBeenCalled()
   })
 
   test('工具参数解析失败返回错误', async () => {

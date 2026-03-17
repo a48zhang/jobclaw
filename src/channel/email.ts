@@ -18,10 +18,6 @@ export interface EmailChannelConfig {
 
 const SUBJECT_MAP: Record<ChannelMessageType, string> = {
   new_job: '【JobClaw】发现新职位',
-  delivery_start: '【JobClaw】开始投递',
-  delivery_success: '【JobClaw】投递成功',
-  delivery_failed: '【JobClaw】投递失败',
-  delivery_blocked: '【JobClaw】投递需人工介入',
   cron_complete: '【JobClaw】定时任务完成',
   tool_warn: '【JobClaw】工具运行警告',
   tool_error: '【JobClaw】工具运行错误',

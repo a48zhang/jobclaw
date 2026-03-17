@@ -24,7 +24,7 @@ export async function runTUI(workspaceRoot: string) {
   const mcpClient = await createMCPClient()
 
   try {
-    const openai = new OpenAI({ 
+    const openai = new OpenAI({
       apiKey: config.API_KEY,
       baseURL: config.BASE_URL
     })
@@ -87,7 +87,7 @@ export async function runTUI(workspaceRoot: string) {
 
         // ── 其他输入统一由 submit() 处理 ─────────────────────────────────────
         const result = mainAgent.submit(input)
-        
+
         if (result.queued) {
           tui.tuiChannel.send({
             type: 'user_input' as any,
@@ -163,7 +163,7 @@ export async function runTUI(workspaceRoot: string) {
     registerAgent(mainAgent)
 
     // Start server with config
-    startServer(workspaceRoot, config.SERVER_PORT)
+    startServer(workspaceRoot, config.SERVER_PORT, factory)
 
     // Wire up HITL: intervention_required → TUI modal
     tui.attachAgent(mainAgent)

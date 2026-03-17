@@ -5,13 +5,13 @@ import type { ChannelMessage } from '../../../src/channel/base'
 
 describe('TUIChannel 构造', () => {
   test('TC-A-01: 提供 callback 后不抛出异常', () => {
-    expect(() => new TUIChannel(() => {})).not.toThrow()
+    expect(() => new TUIChannel(() => { })).not.toThrow()
   })
 })
 
 describe('TUIChannel.send', () => {
   test('TC-A-02: new_job 消息触发 info 日志，分为 Header 和内容两行', async () => {
-    const cb = vi.fn((_line: string, _type: string) => {})
+    const cb = vi.fn((_line: string, _type: string) => { })
     const channel = new TUIChannel(cb)
 
     const msg: ChannelMessage = {
@@ -24,7 +24,7 @@ describe('TUIChannel.send', () => {
 
     // 现在每条消息至少触发两次 logger (Header + Content)
     expect(cb).toHaveBeenCalledTimes(2)
-    
+
     const [headerLine, headerType] = (cb as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string]
     expect(headerType).toBe('info')
     expect(headerLine).toContain('System|Job')
@@ -36,13 +36,13 @@ describe('TUIChannel.send', () => {
     expect(contentLine).toContain('SWE')
   })
 
-  test('TC-A-03: delivery_failed 消息触发 error 日志内容', async () => {
-    const cb = vi.fn((_line: string, _type: string) => {})
+  test('TC-A-03: tool_error 消息触发 error 日志内容', async () => {
+    const cb = vi.fn((_line: string, _type: string) => { })
     const channel = new TUIChannel(cb)
 
     const msg: ChannelMessage = {
-      type: 'delivery_failed',
-      payload: { company: 'Acme', reason: 'Auth Error' },
+      type: 'tool_error',
+      payload: { message: 'Auth Error' },
       timestamp: new Date(),
     }
 
@@ -53,24 +53,24 @@ describe('TUIChannel.send', () => {
     expect(contentType).toBe('error')
   })
 
-  test('TC-A-04: delivery_blocked 消息触发 warn 日志内容', async () => {
-    const cb = vi.fn((_line: string, _type: string) => {})
+  test('TC-A-04: cron_complete 消息触发 info 日志内容', async () => {
+    const cb = vi.fn((_line: string, _type: string) => { })
     const channel = new TUIChannel(cb)
 
     const msg: ChannelMessage = {
-      type: 'delivery_blocked',
-      payload: { company: 'Acme' },
+      type: 'cron_complete',
+      payload: { message: 'done' },
       timestamp: new Date(),
     }
 
     await channel.send(msg)
 
     const [, contentType] = (cb as ReturnType<typeof vi.fn>).mock.calls[1] as [string, string]
-    expect(contentType).toBe('warn')
+    expect(contentType).toBe('info')
   })
 
   test('TC-A-05: cron_complete 显示为 System 标签', async () => {
-    const cb = vi.fn((_line: string, _type: string) => {})
+    const cb = vi.fn((_line: string, _type: string) => { })
     const channel = new TUIChannel(cb)
 
     const msg: ChannelMessage = {
@@ -83,7 +83,7 @@ describe('TUIChannel.send', () => {
 
     const [headerLine] = (cb as ReturnType<typeof vi.fn>).mock.calls[0] as [string, string]
     expect(headerLine).toContain('(System)')
-    
+
     const [contentLine] = (cb as ReturnType<typeof vi.fn>).mock.calls[1] as [string, string]
     expect(contentLine).toContain('任务完成')
     expect(contentLine).toContain('Done')

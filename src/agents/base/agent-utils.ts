@@ -9,9 +9,7 @@ import { eventBus } from '../../eventBus.js'
 
 /** Channel 消息类型 → 日志级别映射 */
 export const CHANNEL_LOG_TYPE_MAP: Record<string, 'info' | 'warn' | 'error'> = {
-  delivery_failed: 'error',
   tool_error: 'error',
-  delivery_blocked: 'warn',
   tool_warn: 'warn',
 }
 
@@ -21,11 +19,11 @@ export const CHANNEL_LOG_TYPE_MAP: Record<string, 'info' | 'warn' | 'error'> = {
 export function wrapChannel(channel: Channel, agentName: string): Channel {
   // 用于累积流式内容
   let streamingContent = ''
-  
+
   return {
     send: async (message: ChannelMessage): Promise<void> => {
       const logType: 'info' | 'warn' | 'error' = CHANNEL_LOG_TYPE_MAP[message.type] ?? 'info'
-      
+
       // 处理 agent_response 类型（流式和非流式）
       if (message.type === 'agent_response') {
         if (message.streaming) {
@@ -61,7 +59,7 @@ export function wrapChannel(channel: Channel, agentName: string): Channel {
           typeof message.payload['message'] === 'string'
             ? `[${message.type}] ${message.payload['message']}`
             : `[${message.type}]`
-        
+
         eventBus.emit('agent:log', {
           agentName,
           type: logType,
@@ -69,7 +67,7 @@ export function wrapChannel(channel: Channel, agentName: string): Channel {
           timestamp: new Date().toISOString(),
         })
       }
-      
+
       return channel.send(message)
     },
   }

@@ -1,10 +1,6 @@
 /** 通知消息类型 */
 export type ChannelMessageType =
   | 'new_job'
-  | 'delivery_start'
-  | 'delivery_success'
-  | 'delivery_failed'
-  | 'delivery_blocked'
   | 'cron_complete'
   | 'tool_warn'
   | 'tool_error'

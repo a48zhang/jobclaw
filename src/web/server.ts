@@ -16,6 +16,7 @@ import type { EventBusMap } from '../eventBus.js'
 import { parseJobsMd } from './tui.js'
 import { lockFile, unlockFile } from '../tools/lockFile.js'
 import type { BaseAgent } from '../agents/base/agent.js'
+import type { AgentFactory } from '../agents/factory.js'
 
 // ─── Agent registry ───────────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ for (const event of BUS_EVENTS) {
 
 // ─── Hono app factory ─────────────────────────────────────────────────────────
 
-export function createApp(workspaceRoot: string): Hono {
+export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
   const app = new Hono()
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
   const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
@@ -123,7 +124,7 @@ export function createApp(workspaceRoot: string): Hono {
     if (!agent) {
       return c.json({ ok: false, error: 'Agent not found' }, 404)
     }
-    
+
     const messages = agent.getMessages()
     // 过滤并转换消息格式，供前端使用
     const history = messages
@@ -137,7 +138,7 @@ export function createApp(workspaceRoot: string): Hono {
           args: tc.function?.arguments,
         })),
       }))
-    
+
     return c.json({ ok: true, messages: history })
   })
 
@@ -147,26 +148,26 @@ export function createApp(workspaceRoot: string): Hono {
       const body = await c.req.json<{ message?: string }>()
       const message = typeof body.message === 'string' ? body.message : ''
       if (!message.trim()) return c.json({ ok: false, error: 'Empty message' }, 400)
-      
+
       const mainAgent = agentRegistry.get('main')
       if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
 
       // 使用 submit 实现异步消息队列
       const result = mainAgent.submit(message)
-      
+
       if (result.queued) {
         // 普通消息已入队
-        return c.json({ 
-          ok: true, 
-          queued: true, 
-          queueLength: result.queueLength 
+        return c.json({
+          ok: true,
+          queued: true,
+          queueLength: result.queueLength
         })
       } else {
         // 命令立即执行完成
-        return c.json({ 
-          ok: true, 
-          queued: false, 
-          message: result.message 
+        return c.json({
+          ok: true,
+          queued: false,
+          message: result.message
         })
       }
     } catch {
@@ -176,22 +177,22 @@ export function createApp(workspaceRoot: string): Hono {
 
   // ── REST: POST /api/resume/build ─────────────────────────────────────────
   app.post('/api/resume/build', async (c) => {
-    const mainAgent = agentRegistry.get('main')
-    if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
-    // Trigger resume build via ephemeral run
-    mainAgent.runEphemeral('生成简历').catch(err => console.error('[Server] Resume build failed:', err))
+    const taskAgent = factory?.createAgent({ persistent: false }) ?? agentRegistry.get('main')
+    if (!taskAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+    taskAgent.run('生成简历').catch(err => console.error('[Server] Resume build failed:', err))
     return c.json({ ok: true })
   })
 
   // ── REST: GET /api/config/:name ───────────────────────────────────────────
   app.post('/api/resume/review', async (c) => {
-    const mainAgent = agentRegistry.get('main')
-    if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
     if (!fs.existsSync(uploadedResumeAbsPath)) {
       return c.json({ ok: false, error: 'Uploaded resume not found' }, 400)
     }
 
-    mainAgent.runEphemeral(
+    const taskAgent = factory?.createAgent({ persistent: false }) ?? agentRegistry.get('main')
+    if (!taskAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+
+    taskAgent.run(
       '评价刚上传的简历。若 data/uploads/resume-upload.pdf 存在，请优先使用 read_pdf 读取内容，并严格按 resume-clinic skill 输出评价、问题分析、改写建议和可直接替换的表达。'
     ).catch(err => console.error('[Server] Resume review failed:', err))
 
@@ -284,7 +285,7 @@ export function createApp(workspaceRoot: string): Hono {
 
   // ── Serve static files from public/ ──────────────────────────────────────
   app.use('/*', serveStatic({ root: './public' }))
-  
+
   // ── Serve workspace/output/ for resume PDFs ─────────────────────────────
   app.use('/workspace/output/*', serveStatic({
     root: './',
@@ -298,9 +299,9 @@ export function createApp(workspaceRoot: string): Hono {
 
 const DEFAULT_PORT = 3000
 
-export function startServer(workspaceRoot: string, port?: number): void {
+export function startServer(workspaceRoot: string, port?: number, factory?: AgentFactory): void {
   const listenPort = port ?? parseInt(process.env['SERVER_PORT'] ?? String(DEFAULT_PORT), 10)
-  const app = createApp(workspaceRoot)
+  const app = createApp(workspaceRoot, factory)
   const server = serve({
     fetch: app.fetch,
     port: listenPort,

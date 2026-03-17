@@ -103,6 +103,19 @@ ${INTERVIEW_AND_RESUME_PROMPT}
         message: `简历 PDF 已生成：${result.content}`,
         timestamp: new Date().toISOString(),
       })
+      return
+    }
+
+    if (toolName === 'run_agent') {
+      eventBus.emit('agent:log', {
+        agentName: this.agentName,
+        type: result.success ? 'info' : 'warn',
+        level: result.success ? 'info' : 'warn',
+        message: result.success
+          ? `子任务执行完成：${result.content}`
+          : `子任务执行失败：${result.error ?? '未知错误'}`,
+        timestamp: new Date().toISOString(),
+      })
     }
   }
 

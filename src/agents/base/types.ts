@@ -2,6 +2,7 @@
 import type OpenAI from 'openai'
 import type { Task } from '../../types.js'
 import type { Channel } from '../../channel/base.js'
+import type { AgentFactory } from '../factory.js'
 
 /** MCP Client 接口 */
 export interface MCPClient {
@@ -31,7 +32,7 @@ export interface BaseAgentConfig {
   keepRecentMessages?: number
   lightModel?: string
   persistent?: boolean
-  factory?: any // Avoid circular dependency with AgentFactory
+  factory?: AgentFactory
 }
 
 /** ContextCompressor 配置 */

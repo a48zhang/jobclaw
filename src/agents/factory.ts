@@ -21,8 +21,6 @@ export class AgentFactory {
   constructor(private config: AgentFactoryConfig) { }
 
   createAgent(options: CreateAgentOptions = {}): MainAgent {
-    // Note: MainAgent config type will be updated to accept these properties
-    // We cast to any to avoid temporary type errors during refactoring
     return new MainAgent({
       openai: this.config.openai,
       mcpClient: this.config.mcpClient,
@@ -33,7 +31,7 @@ export class AgentFactory {
       channel: options.channel,
       persistent: options.persistent ?? false,
       factory: this,
-    } as any)
+    })
   }
 
   private generateAgentName(): string {

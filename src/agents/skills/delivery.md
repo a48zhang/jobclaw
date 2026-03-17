@@ -1,4 +1,4 @@
-# 投递职位 SOP (DeliveryAgent)
+# 投递职位 SOP (delivery skill)
 1. **环境检查**: 读取 `workspace/data/userinfo.md` 确认个人信息（姓名、简历等）完整。
 2. **任务获取**: 读取 `workspace/data/jobs.md`，筛选出状态为 `discovered` 的职位。
 3. **自动化投递**: 对每个待投递职位：

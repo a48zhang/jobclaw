@@ -7,7 +7,7 @@ import type {
 } from 'openai/resources/chat/completions'
 import { EventEmitter } from 'node:events'
 import * as path from 'node:path'
-import { executeTool, TOOLS, type ToolContext, type ToolResult } from '../../tools/index.js'
+import { executeTool, LOCAL_TOOL_NAMES, TOOLS, type ToolContext, type ToolResult } from '../../tools/index.js'
 import type { AgentState, Session, Task } from '../../types.js'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants.js'
 import { ContextCompressor } from './context-compressor.js'
@@ -170,9 +170,7 @@ export abstract class BaseAgent extends EventEmitter {
     this.processing = false
   }
 
-  /**
-   * 同一 Agent 内串行执行任何 run / runEphemeral 任务，避免共享状态并发读写。
-   */
+  /** 同一 Agent 内串行执行 run 任务，避免共享状态并发读写。 */
   private enqueueExecution<T>(task: () => Promise<T>): Promise<T> {
     const runTask = this.executionChain.then(task, task)
     this.executionChain = runTask.then(() => undefined, () => undefined)
@@ -209,7 +207,12 @@ export abstract class BaseAgent extends EventEmitter {
     const expectedRequestId = options.requestId
     const interventionPromise = new Promise<string>((resolve) => {
       this.interventionResolve = resolve
-      this.emit('intervention_required', { prompt, resolve: (i: string) => this.resolveIntervention(i) })
+      this.emit('intervention_required', {
+        prompt,
+        resolve: (i: string) => this.resolveIntervention(i),
+        kind: options.kind,
+        options: options.options,
+      })
     })
     const busResolveHandler = (p: InterventionResolvedPayload): void => {
       if (p.agentName !== this.agentName) return
@@ -489,8 +492,7 @@ export abstract class BaseAgent extends EventEmitter {
     }
 
     let result: ToolResult
-    const localTools = ['read_file', 'write_file', 'append_file', 'list_directory', 'lock_file', 'unlock_file', 'upsert_job', 'typst_compile', 'install_typst', 'run_shell_command', 'read_pdf', 'grep', 'get_time']
-    if (localTools.includes(toolName)) {
+    if (LOCAL_TOOL_NAMES.includes(toolName as (typeof LOCAL_TOOL_NAMES)[number])) {
       const ctx: ToolContext = {
         workspaceRoot: this.workspaceRoot, agentName: this.agentName,
         logger: (line) => { if (this.channel) this.channel.send({ type: 'tool_output', payload: { message: line, toolName }, timestamp: new Date() }) },

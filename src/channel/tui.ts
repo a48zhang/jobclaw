@@ -5,7 +5,7 @@ export class TUIChannel implements Channel {
   private isStreaming: boolean = false
   private streamStartLines: number = 0
 
-  constructor(private logger: (line: string, type: 'info' | 'warn' | 'error') => void, private getRawLog?: () => any) {}
+  constructor(private logger: (line: string, type: 'info' | 'warn' | 'error') => void, private getRawLog?: () => any) { }
 
   async send(message: ChannelMessage): Promise<void> {
     const time = message.timestamp.toLocaleTimeString()
@@ -28,24 +28,6 @@ export class TUIChannel implements Channel {
         label = 'System|Job'
         content = `🦞 发现新职位: ${message.payload['company']} - ${message.payload['title']}`
         break
-      case 'delivery_start':
-        label = 'Agent|Delivery'
-        content = `🚀 开始投递: ${message.payload['company']}`
-        break
-      case 'delivery_success':
-        label = 'Agent|Delivery'
-        content = `✅ 投递成功: ${message.payload['company']}`
-        break
-      case 'delivery_failed':
-        label = 'Agent|Delivery'
-        content = `❌ 投递失败: ${message.payload['company']} (原因: ${message.payload['reason'] || '未知'})`
-        level = 'error'
-        break
-      case 'delivery_blocked':
-        label = 'Agent|Delivery'
-        content = `⚠️ 投递受阻: ${message.payload['company']} (需要人工介入)`
-        level = 'warn'
-        break
       case 'cron_complete':
         label = 'System'
         content = `📅 任务完成: ${message.payload['summary'] || message.payload['message']}`
@@ -58,7 +40,7 @@ export class TUIChannel implements Channel {
         // 流式输出处理
         if (message.streaming) {
           const logObj = this.getRawLog ? this.getRawLog() : null
-          
+
           // 初始化流式状态（处理 isFirst 或首次收到内容的情况）
           if (message.streaming.isFirst || !this.isStreaming) {
             if (!this.isStreaming) {
@@ -98,7 +80,7 @@ export class TUIChannel implements Channel {
           }
           return
         }
-        
+
         // 非流式输出
         label = 'Agent'
         content = `🤖 ${message.payload['message']}`
@@ -122,7 +104,7 @@ export class TUIChannel implements Channel {
                 argsRaw = JSON.stringify(argsObj, null, 2)
               }
             }
-          } catch {}
+          } catch { }
         }
         content = `🛠️ 正在执行 (参数: ${argsRaw})`
         break

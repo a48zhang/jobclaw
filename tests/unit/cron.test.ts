@@ -19,18 +19,18 @@ function makeMockChannel() {
 }
 
 // ─── 辅助：创建 mock MainAgent ────────────────────────────────────────────
-function makeMockMainAgent(runEphemeralResult: string) {
+function makeMockMainAgent(runResult: string) {
   return {
-    runEphemeral: vi.fn(async (_input: string) => runEphemeralResult),
+    run: vi.fn(async (_input: string) => runResult),
   }
 }
 
 // ─── cron main() 逻辑（提取为可测试纯函数）──────────────────────────────────
 async function cronMain(
-  mainAgent: { runEphemeral(input: string): Promise<string> },
+  mainAgent: { run(input: string): Promise<string> },
   channel: Channel
 ): Promise<void> {
-  const result = await mainAgent.runEphemeral(
+  const result = await mainAgent.run(
     '搜索 targets.md 中所有公司的最新职位，将发现的新职位写入 jobs.md'
   )
 
@@ -69,11 +69,11 @@ describe('cron main()', () => {
     expect(sent).toHaveLength(0)
   })
 
-  // ─── TC-B-08: runEphemeral 抛出异常时 main() 抛出 ────────────────────
-  test('TC-B-08: runEphemeral 抛出异常时 cronMain 也抛出', async () => {
+  // ─── TC-B-08: run 抛出异常时 main() 抛出 ─────────────────────────────
+  test('TC-B-08: run 抛出异常时 cronMain 也抛出', async () => {
     const { channel } = makeMockChannel()
     const mainAgent = {
-      runEphemeral: vi.fn(async (_input: string) => {
+      run: vi.fn(async (_input: string) => {
         throw new Error('MCP 连接失败')
       }),
     }

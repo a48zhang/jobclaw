@@ -17,12 +17,13 @@ describe('TOOL_NAMES 常量', () => {
     expect(TOOL_NAMES.READ_PDF).toBe('read_pdf')
     expect(TOOL_NAMES.GREP).toBe('grep')
     expect(TOOL_NAMES.GET_TIME).toBe('get_time')
+    expect(TOOL_NAMES.RUN_AGENT).toBe('run_agent')
   })
 })
 
 describe('TOOLS 数组', () => {
-  test('包含 13 个工具', () => {
-    expect(TOOLS).toHaveLength(13)
+  test('包含 14 个工具', () => {
+    expect(TOOLS).toHaveLength(14)
   })
 
   test('每个工具都有正确的类型', () => {
@@ -68,6 +69,7 @@ describe('TOOLS 数组', () => {
     expect(names).toContain('install_typst')
     expect(names).toContain('read_pdf')
     expect(names).toContain('run_shell_command')
+    expect(names).toContain('run_agent')
   })
 })
 
@@ -153,7 +155,7 @@ describe('JSON 序列化', () => {
     const json = JSON.stringify(TOOLS)
     const parsed = JSON.parse(json) as ChatCompletionTool[]
 
-    expect(parsed).toHaveLength(13)
+    expect(parsed).toHaveLength(14)
     parsed.forEach((tool, index) => {
       expect(tool.type).toBe('function')
       expect(tool.function.name).toBe(TOOLS[index].function.name)

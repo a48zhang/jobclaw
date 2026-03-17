@@ -1,6 +1,5 @@
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
 import type { ToolContext, ToolResult } from './index.js'
-import type { AgentFactory } from '../agents/factory.js'
 
 export const RUN_AGENT_TOOL: ChatCompletionTool = {
   type: 'function',
@@ -45,7 +44,7 @@ export async function executeRunAgent(
     timeout_ms?: number
   }
 
-  const factory = context.factory as AgentFactory
+  const factory = context.factory
   if (!factory) {
     return {
       success: false,
