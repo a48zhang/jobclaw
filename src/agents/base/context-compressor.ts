@@ -2,7 +2,7 @@
 import type OpenAI from 'openai'
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions'
 import { encode } from 'gpt-tokenizer'
-import { COMPRESS_THRESHOLD, DEFAULT_KEEP_RECENT_MESSAGES } from './constants.js'
+import { COMPRESS_TARGET, COMPRESS_THRESHOLD, DEFAULT_KEEP_RECENT_MESSAGES } from './constants.js'
 import type { ContextCompressorConfig } from './types.js'
 
 /** 上下文压缩器 - 计算 token 数并在超过阈值时压缩消息历史 */
@@ -65,7 +65,7 @@ export class ContextCompressor {
   }
 
   async compressMessages(messages: ChatCompletionMessageParam[]): Promise<ChatCompletionMessageParam[]> {
-    if (messages.length <= this.keepRecentMessages + 1) {
+    if (messages.length <= 2) {
       return messages
     }
 
@@ -74,27 +74,33 @@ export class ContextCompressor {
       return messages
     }
 
-    const endIndex = messages.length - this.keepRecentMessages
-    const middleMessages = messages.slice(1, endIndex)
+    let keepRecent = Math.min(this.keepRecentMessages, Math.max(0, messages.length - 2))
 
-    if (middleMessages.length === 0) {
-      return messages
+    while (keepRecent >= 0) {
+      const endIndex = messages.length - keepRecent
+      const middleMessages = messages.slice(1, endIndex)
+      const recentMessages = keepRecent > 0 ? messages.slice(-keepRecent) : []
+      const summary =
+        middleMessages.length > 0 ? await this.generateSummary(middleMessages) : '暂无可压缩的历史消息。'
+
+      const compressedMessages: ChatCompletionMessageParam[] = [
+        systemMessage,
+        { role: 'user', content: `SYSTEM_SUMMARY: ${summary}` },
+        ...recentMessages,
+      ]
+      const compressedTokens = this.calculateTokens(compressedMessages)
+
+      if (compressedTokens <= COMPRESS_TARGET || keepRecent === 0) {
+        console.log(
+          `[ContextCompressor] 压缩完成，消息数: ${compressedMessages.length}, tokens: ${compressedTokens}`
+        )
+        return compressedMessages
+      }
+
+      keepRecent = keepRecent > 4 ? Math.floor(keepRecent / 2) : keepRecent - 1
     }
 
-    const summary = await this.generateSummary(middleMessages)
-    const recentMessages = messages.slice(-this.keepRecentMessages)
-
-    const compressedMessages: ChatCompletionMessageParam[] = [
-      systemMessage,
-      { role: 'user', content: `SYSTEM_SUMMARY: ${summary}` },
-      ...recentMessages,
-    ]
-
-    console.log(
-      `[ContextCompressor] 压缩完成，消息数: ${compressedMessages.length}, tokens: ${this.calculateTokens(compressedMessages)}`
-    )
-
-    return compressedMessages
+    return messages
   }
 
   protected async generateSummary(messages: ChatCompletionMessageParam[]): Promise<string> {

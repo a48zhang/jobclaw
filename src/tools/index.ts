@@ -21,6 +21,7 @@ export interface ToolContext {
   agentName: string
   logger: (line: string) => void
   factory?: AgentFactory
+  signal?: AbortSignal
 }
 
 export interface ToolResult {
@@ -252,6 +253,10 @@ export async function executeTool(
   args: Record<string, any>,
   context: ToolContext
 ): Promise<ToolResult> {
+  if (context.signal?.aborted) {
+    return { success: false, content: '', error: '工具调用已取消' }
+  }
+
   switch (name) {
     case TOOL_NAMES.READ_FILE:
       return executeReadFile(args, context)

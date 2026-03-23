@@ -20,6 +20,14 @@ import * as utils from './agent-utils.js'
 
 const TOOL_CALL_TIMEOUT_MS = 120_000
 const REQUEST_TOOL_NAME = 'request'
+
+class AgentAbortedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AgentAbortedError'
+  }
+}
+
 const REQUEST_TOOL: ChatCompletionTool = {
   type: 'function',
   function: {
@@ -83,6 +91,8 @@ export abstract class BaseAgent extends EventEmitter {
   private messageQueue: string[] = []
   private processing: boolean = false
   private executionChain: Promise<void> = Promise.resolve()
+  private abortController: AbortController = new AbortController()
+  private abortReason: string | null = null
 
   constructor(config: BaseAgentConfig) {
     super()
@@ -197,6 +207,23 @@ export abstract class BaseAgent extends EventEmitter {
     eventBus.emit('agent:state', { agentName: this.agentName, state })
   }
 
+  public abort(reason = 'Agent aborted'): void {
+    if (this.abortController.signal.aborted) return
+    this.abortReason = reason
+    this.abortController.abort(new AgentAbortedError(reason))
+  }
+
+  private resetAbortState(): void {
+    this.abortController = new AbortController()
+    this.abortReason = null
+  }
+
+  private throwIfAborted(): void {
+    if (this.abortController.signal.aborted) {
+      throw new AgentAbortedError(this.abortReason ?? 'Agent aborted')
+    }
+  }
+
   async requestIntervention(
     prompt: string,
     timeoutMs?: number,
@@ -220,6 +247,12 @@ export abstract class BaseAgent extends EventEmitter {
       this.resolveIntervention(p.input)
     }
     eventBus.on('intervention:resolved', busResolveHandler)
+    let abortHandler: (() => void) | undefined
+    const abortPromise = new Promise<string>((_, reject) => {
+      const onAbort = () => reject(new AgentAbortedError(this.abortReason ?? 'Agent aborted'))
+      this.abortController.signal.addEventListener('abort', onAbort, { once: true })
+      abortHandler = onAbort
+    })
     const timeoutPromise = new Promise<string>((resolve) => {
       timeoutId = setTimeout(() => {
         if (this.interventionResolve) {
@@ -239,12 +272,15 @@ export abstract class BaseAgent extends EventEmitter {
       allowEmpty: options.allowEmpty,
     })
     try {
-      const result = await Promise.race([interventionPromise, timeoutPromise])
+      const result = await Promise.race([interventionPromise, timeoutPromise, abortPromise])
       this.emit('intervention_handled')
       return result
     } finally {
       if (timeoutId) clearTimeout(timeoutId)
       eventBus.off('intervention:resolved', busResolveHandler)
+      if (abortHandler) {
+        this.abortController.signal.removeEventListener('abort', abortHandler)
+      }
     }
   }
 
@@ -255,18 +291,28 @@ export abstract class BaseAgent extends EventEmitter {
 
   async run(input: string): Promise<string> {
     return this.enqueueExecution(async () => {
+      this.resetAbortState()
       // ── 正常处理 ─────────────────────────────────────────────────────────────
       this.setState('running'); this.iterations = 0; this.lastAction = 'start'
       try {
         this.initMessages(input)
+        this.throwIfAborted()
         await this.saveSession()
         const tools = await this.getAvailableTools()
+        this.throwIfAborted()
         const result = await this.runMainLoop(tools)
+        this.throwIfAborted()
         this.messages = await this.compressor.checkAndCompress(this.messages)
         await this.saveSession()
         return result ?? '任务完成，但没有生成响应。'
       } catch (error) {
-        this.setState('error'); this.lastAction = `error: ${(error as Error).message}`
+        if (error instanceof AgentAbortedError) {
+          this.setState('idle')
+          this.lastAction = `aborted: ${error.message}`
+        } else {
+          this.setState('error')
+          this.lastAction = `error: ${(error as Error).message}`
+        }
         await this.saveSession().catch(() => { })
         throw error
       }
@@ -277,6 +323,7 @@ export abstract class BaseAgent extends EventEmitter {
     let result: string | null = null
 
     while (this.iterations < this.maxIterations) {
+      this.throwIfAborted()
       this.iterations++; this.lastAction = 'llm_call'
 
       let fullContent = ''; let toolCalls: any[] = []
@@ -313,14 +360,22 @@ export abstract class BaseAgent extends EventEmitter {
       eventBus.emit('context:usage', { agentName: this.agentName, tokenCount })
 
       try {
-        const stream = await this.openai.chat.completions.create({
-          model: this.model, messages: messagesWithTime, tools, tool_choice: 'auto', stream: true
-        })
+        const stream = await this.openai.chat.completions.create(
+          {
+            model: this.model,
+            messages: messagesWithTime,
+            tools,
+            tool_choice: 'auto',
+            stream: true,
+          },
+          { signal: this.abortController.signal }
+        )
 
         const iterator = stream[Symbol.asyncIterator]()
         let iterResult = await iterator.next()
 
         while (!iterResult.done) {
+          this.throwIfAborted()
           const chunk = iterResult.value
           chunkCount++
           const choice = chunk.choices?.[0]
@@ -389,10 +444,14 @@ export abstract class BaseAgent extends EventEmitter {
         const tokensAfterResponse = this.compressor.calculateTokens(this.messages)
         eventBus.emit('context:usage', { agentName: this.agentName, tokenCount: tokensAfterResponse })
       } catch (e: any) {
+        if (this.abortController.signal.aborted || e?.name === 'AbortError') {
+          throw new AgentAbortedError(this.abortReason ?? 'Agent aborted')
+        }
         throw new Error(`LLM API 请求失败 [Status: ${e.status}, Code: ${e.code}]: ${e.message}`)
       }
 
       const finalToolCalls = toolCalls.filter(Boolean)
+      this.throwIfAborted()
 
       // 不添加空的assistant消息
       if (!fullContent && finalToolCalls.length === 0) {
@@ -481,6 +540,7 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   protected async executeToolCall(toolCall: ChatCompletionMessageToolCall): Promise<ChatCompletionMessageParam> {
+    this.throwIfAborted()
     const toolName = toolCall.function.name
     let args: Record<string, unknown> = {}
     try { args = JSON.parse(toolCall.function.arguments) } catch {
@@ -497,6 +557,7 @@ export abstract class BaseAgent extends EventEmitter {
         workspaceRoot: this.workspaceRoot, agentName: this.agentName,
         logger: (line) => { if (this.channel) this.channel.send({ type: 'tool_output', payload: { message: line, toolName }, timestamp: new Date() }) },
         factory: this.factory,
+        signal: this.abortController.signal,
       }
       result = await executeTool(toolName, args, ctx)
     } else if (this.mcpClient) {
@@ -505,6 +566,7 @@ export abstract class BaseAgent extends EventEmitter {
         result = { success: true, content: typeof r === 'string' ? r : JSON.stringify(r) }
       } catch (e) { result = { success: false, content: '', error: (e as Error).message } }
     } else { result = { success: false, content: '', error: `未知工具: ${toolName}` } }
+    this.throwIfAborted()
     await this.onToolResult(toolName, result)
     return { role: 'tool', tool_call_id: toolCall.id, content: result.success ? result.content : `错误: ${result.error}` }
   }
@@ -592,10 +654,19 @@ export abstract class BaseAgent extends EventEmitter {
   }
 
   protected async executeToolCalls(toolCalls: ChatCompletionMessageToolCall[]): Promise<ChatCompletionMessageParam[]> {
-    return Promise.all(toolCalls.map((tc) => Promise.race([
-      this.executeToolCall(tc),
-      new Promise<ChatCompletionMessageParam>((resolve) => setTimeout(() => resolve({ role: 'tool', tool_call_id: tc.id, content: `错误: 工具调用超时` }), TOOL_CALL_TIMEOUT_MS)),
-    ])))
+    const results: ChatCompletionMessageParam[] = []
+    for (const tc of toolCalls) {
+      this.throwIfAborted()
+      const result = await Promise.race([
+        this.executeToolCall(tc),
+        new Promise<ChatCompletionMessageParam>((resolve) =>
+          setTimeout(() => resolve({ role: 'tool', tool_call_id: tc.id, content: `错误: 工具调用超时` }), TOOL_CALL_TIMEOUT_MS)
+        ),
+      ])
+      this.throwIfAborted()
+      results.push(result)
+    }
+    return results
   }
 
   protected async onToolResult(_name: string, _res: ToolResult): Promise<void> { }
@@ -661,6 +732,14 @@ export abstract class BaseAgent extends EventEmitter {
 
   protected async callLLM(tools: ChatCompletionTool[]): Promise<OpenAI.Chat.Completions.ChatCompletion> {
     // 基础方法仍保留，但在 runMainLoop 中现在优先使用流式逻辑
-    return this.openai.chat.completions.create({ model: this.model, messages: this.messages, tools, tool_choice: 'auto' })
+    return this.openai.chat.completions.create(
+      {
+        model: this.model,
+        messages: this.messages,
+        tools,
+        tool_choice: 'auto',
+      },
+      { signal: this.abortController.signal }
+    )
   }
 }

@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type OpenAI from 'openai'
 import { ContextCompressor } from '../../../src/agents/base/context-compressor'
-import { COMPRESS_THRESHOLD } from '../../../src/agents/base/constants'
+import { COMPRESS_TARGET, COMPRESS_THRESHOLD } from '../../../src/agents/base/constants'
 
 describe('ContextCompressor', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   const mockOpenAI = {
     chat: {
       completions: {
@@ -113,6 +117,21 @@ describe('ContextCompressor', () => {
       
       const result = await compressor.compressMessages(messages as any)
       expect(result).toEqual(messages as any)
+    })
+
+    it('should keep compressing until the result fits the token budget', async () => {
+      const huge = 'a '.repeat(100000)
+      const messages = [
+        { role: 'system', content: 'System message' },
+        { role: 'user', content: huge },
+        { role: 'assistant', content: huge },
+        { role: 'user', content: huge },
+        { role: 'assistant', content: huge },
+      ]
+
+      const result = await compressor.compressMessages(messages as any)
+
+      expect(compressor.calculateTokens(result as any)).toBeLessThanOrEqual(COMPRESS_TARGET)
     })
   })
 })
