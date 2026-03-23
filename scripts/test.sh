@@ -17,6 +17,7 @@ echo "=== Running tests, log: $LOG_FILE ===" >&2
   echo ""
   echo "=== Cleaning up build artifacts ==="
   rm -rf dist coverage .coverage
+  rm -rf .vitest-cache
 
   echo ""
   echo "=== Cleaning up test temp files ==="
