@@ -5,7 +5,6 @@ import * as os from 'node:os'
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Channel, ChannelMessage } from '../../src/channel/base'
 import { validateEnv } from '../../src/env'
-import { needsBootstrap } from '../../src/bootstrap'
 
 // ─── 辅助：创建 mock Channel ──────────────────────────────────────────────
 function makeMockChannel() {
@@ -139,44 +138,5 @@ describe('validateEnv', () => {
       BASE_URL: 'https://example.com/v1',
     }))
     expect(() => validateEnv(tmpDir)).not.toThrow()
-  })
-})
-
-describe('needsBootstrap', () => {
-  let tmpDir: string
-  const originalEnv = process.env
-
-  beforeEach(() => {
-    process.env = { ...originalEnv }
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-test-'))
-  })
-
-  afterEach(() => {
-    process.env = originalEnv
-    fs.rmSync(tmpDir, { recursive: true, force: true })
-  })
-
-  test('TC-B-09: config.json 存在时且配置完整返回 false', () => {
-    fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
-      API_KEY: 'test',
-      MODEL_ID: 'test',
-      BASE_URL: 'https://example.com/v1',
-    }))
-    expect(needsBootstrap(tmpDir)).toBe(false)
-  })
-
-  test('TC-B-10: config.json 不存在时返回 true', () => {
-    expect(needsBootstrap(tmpDir)).toBe(true)
-  })
-
-  test('TC-B-11: env 提供 API_KEY/MODEL 时仍应进入 bootstrap（文件为空）', () => {
-    process.env.OPENAI_API_KEY = 'sk-env'
-    process.env.MODEL = 'o3-mini'
-    fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
-      API_KEY: '',
-      MODEL_ID: '',
-      LIGHT_MODEL_ID: '',
-    }))
-    expect(needsBootstrap(tmpDir)).toBe(true)
   })
 })

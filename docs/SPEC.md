@@ -7,10 +7,10 @@
 
 ## 1. 项目概述
 
-**JobClaw** 是一个全自动求职管家 Multi-Agent 系统。
+**JobClaw** 是一个以 `MainAgent` 为核心、按需派生子任务的求职自动化系统。
 
 - **MainAgent**: 负责用户交互、职位搜索协调、任务调度及简历制作。
-- **DeliveryAgent**: 通过 Playwright MCP 浏览器工具执行自动化表单填写与职位投递。
+- **Ephemeral Sub-Agent**: 通过 `run_agent` + skill 执行隔离子任务，例如投递或专项整理。
 - **Web Dashboard**: 实时可视化看板，支持 Agent 状态监控、实时日志流及人工干预（HITL）。
 
 ---
@@ -32,11 +32,11 @@
                               │ 继承
                  ┌────────────┴────────────┐
                  │                         │
-        ┌───────────────┐        ┌───────────────┐
-        │  MainAgent    │        │ DeliveryAgent │
-        │ (交互+调度)   │        │  (表单投递)   │
-        └───────┬───────┘        └───────────────┘
-                │ spawnAgent(deliveryAgent, ...)
+        ┌───────────────┐        ┌────────────────────┐
+        │  MainAgent    │        │ Ephemeral Sub-Agent│
+        │ (交互+调度)   │        │  (skill-driven)    │
+        └───────┬───────┘        └────────────────────┘
+                │ run_agent(skill=...)
                 └──────串行，共享 MCP 实例──────▶
 ```
 
@@ -47,8 +47,7 @@
 ```
 jobclaw/
 ├── src/
-│   ├── index.ts             # 交互模式入口（检测 config.json，决定是否 Bootstrap）
-│   ├── bootstrap.ts         # Bootstrap 引导流程定义
+│   ├── index.ts             # CLI 入口
 │   ├── cron.ts              # 定时任务入口（无状态拉起）
 │   ├── config.ts            # 配置加载器（支持 config.json 与环境变量）
 │   ├── env.ts               # 环境校验与路径预检
@@ -58,7 +57,7 @@ jobclaw/
 │   │   │   ├── agent.ts     # 逻辑核心（已重构拆分）
 │   │   │   └── agent-utils.ts # 通用辅助（Session/Channel/Skill）
 │   │   ├── main/            # 主 Agent 逻辑
-│   │   └── delivery/        # 投递 Agent 逻辑
+│   │   └── skills/          # 任务 skill 与 SOP
 │   ├── tools/               # 智能工具库 (Shell, Typst, File, UpsertJob)
 │   ├── web/
 │   │   ├── server.ts        # Hono Web 服务器 (REST API + WebSocket)
@@ -91,7 +90,7 @@ jobclaw/
 ### 4.2 记忆压缩
 
 - **机制**: 当 Token 计数超过阈值时，`ContextCompressor` 将历史消息汇总为摘要。
-- **保护**: 始终保留 `system` 消息和最近 `N` 条原始消息。
+- **保护**: 始终保留 `system` 消息，并在预算内尽可能保留最近 `N` 条原始消息。
 
 ### 4.3 文件锁机制
 
@@ -108,8 +107,8 @@ jobclaw/
 - **人工干预 (HITL)**: 当 Agent 调用 `request` 工具时，网页弹出实时弹窗供用户输入。
 - **配置编辑**: 支持直接在线编辑 Markdown 配置并保存。
 
-### 5.2 TUI 仪表盘
-- 针对命令行环境的 Blessed 界面，显示任务统计与活动流水。
+### 5.2 Web 控制台
+- 当前默认入口为 Web 控制台；终端 TUI 不再作为默认启动模式。
 
 ---
 
@@ -126,6 +125,6 @@ jobclaw/
 
 - [x] **Phase 1-2**: 核心 Agent 循环与 MCP 集成。
 - [x] **Phase 3**: 搜索与投递业务闭环。
-- [x] **Phase 4**: TUI 交互与系统鲁棒性。
+- [x] **Phase 4**: Web 交互与系统鲁棒性。
 - [x] **Phase 5**: Web 可视化看板、HITL、智能简历制作工具链。
 - [ ] **Phase 6**: 高级生产特性（自动化重试、Session 深度管理等）。

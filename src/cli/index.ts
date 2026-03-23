@@ -1,16 +1,16 @@
 import { cac } from 'cac'
 import * as path from 'node:path'
-import { runTUI } from '../tui-runner.js'
+import { runServer } from '../tui-runner.js'
 import { runCron } from '../cron.js'
 
 export function bootstrapCLI() {
   const cli = cac('jobclaw')
 
   cli
-    .command('', 'Start JobClaw in TUI mode (Default)')
+    .command('', 'Start JobClaw web console (Default)')
     .option('-w, --workspace <path>', 'Path to workspace directory', { default: path.join(process.cwd(), 'workspace') })
     .action(async (options) => {
-      await runTUI(options.workspace)
+      await runServer(options.workspace)
     })
 
   cli

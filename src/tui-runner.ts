@@ -3,7 +3,6 @@ import * as fs from 'node:fs'
 
 import { MainAgent } from './agents/main/index.js'
 import { AgentFactory } from './agents/factory.js'
-import { needsBootstrap, BOOTSTRAP_PROMPT } from './bootstrap.js'
 import { validateEnv } from './env.js'
 import { createMCPClient } from './mcp.js'
 import { registerAgent, startServer } from './web/server.js'
@@ -37,7 +36,7 @@ class ServerChannel {
   }
 }
 
-export async function runTUI(workspaceRoot: string) {
+export async function runServer(workspaceRoot: string) {
   // Ensure workspace directory exists
   if (!fs.existsSync(workspaceRoot)) {
     fs.mkdirSync(workspaceRoot, { recursive: true })
@@ -53,11 +52,6 @@ export async function runTUI(workspaceRoot: string) {
       apiKey: config.API_KEY,
       baseURL: config.BASE_URL
     })
-
-    // Bootstrap 引导循环（通过 stderr 输出）
-    if (needsBootstrap(workspaceRoot)) {
-      console.error('[JobClaw] 需要进行初始化引导，请通过 Web UI 完成...')
-    }
 
     const factory = new AgentFactory({
       openai,

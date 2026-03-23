@@ -18,17 +18,17 @@
                               │ 继承
                  ┌────────────┴────────────┐
                  │                         │
-        ┌───────────────┐        ┌───────────────┐
-        │  MainAgent    │        │ DeliveryAgent │
-        │ (调度+交互)   │        │  (自动投递)   │
-        └───────┬───────┘        └───────────────┘
-                │ spawnAgent(deliveryAgent, ...)
-                └──────串行，共享 MCP 实例──────▶
+        ┌───────────────┐        ┌────────────────────┐
+        │  MainAgent    │        │ Ephemeral Sub-Agent│
+        │ (调度+交互)   │        │ (skill-driven)     │
+        └───────┬───────┘        └────────────────────┘
+                │ run_agent(skill=...)
+                └──────串行，共享配置与工具──────▶
 ```
 
-**双 Agent 协作架构**：
+**主 Agent + 临时子任务架构**：
 - **MainAgent**：处理用户交互，协调任务流。直接通过 Playwright MCP 搜索职位。
-- **DeliveryAgent**：专注表单填写与投递，由主 Agent 派生执行（Ephemeral 模式）。
+- **Ephemeral Sub-Agent**：通过 `run_agent` 临时创建，结合指定 skill 执行投递、简历处理等隔离任务。
 - **HITL 机制**: 引入 `request` 工具（内部复用 `requestIntervention`），允许 Agent 在关键节点（如简历润色、登录受阻）挂起并请求用户通过 Web/TUI 介入。
 
 ---
@@ -64,8 +64,8 @@
 
 ### 3.2 运行模式
 
-1. **Persistent (run)**: 加载 session.json，执行完毕后保存状态。用于主交互。
-2. **Ephemeral (runEphemeral)**: 临时上下文，不读写磁盘 session。用于子任务或 Cron 自动化。
+1. **Persistent (`persistent: true`)**: 加载 session.json，执行完毕后保存状态。用于主交互。
+2. **Ephemeral (`persistent: false`)**: 临时上下文，不读写磁盘 session。用于子任务或 Cron 自动化。
 
 ---
 
@@ -74,14 +74,14 @@
 ### 4.1 MainAgent
 
 - **职责**: 职位搜索、简历制作、任务调度。
-- **SOP 驱动**: 动态加载 `src/agents/skills/index.md` 了解所需技能，并在需要时按需读取对应的具体 SOP（如 `Bootstrap`、`搜索职位`、`简历制作` 等）文件。
+- **SOP 驱动**: 动态加载 `src/agents/skills/index.md` 了解所需技能，并在需要时按需读取对应的具体 SOP（如 `搜索职位`、`简历制作` 等）文件。
 - **HITL**: 在简历润色阶段调用 `request` 等待用户输入。
 
-### 4.2 DeliveryAgent
+### 4.2 Ephemeral Sub-Agent
 
-- **职责**: 自动投递。
-- **触发**: 由 MainAgent 通过 `spawnAgent` 拉起。
-- **状态同步**: 投递成功或失败后，通过 `upsert_job` 同步状态至 `jobs.md`，并通过包装后的 Channel 自动发布日志至 EventBus。
+- **职责**: 执行隔离子任务，例如投递、批量整理或特定 skill 驱动的任务。
+- **触发**: 由 MainAgent 通过 `run_agent` 工具拉起。
+- **状态同步**: 子任务通过共享工具（如 `upsert_job`）更新共享状态，由主 Agent 统一输出日志。
 
 ---
 

@@ -6,6 +6,7 @@
     "jobclaw": "./src/index.ts"
   },
   "scripts": {
+    "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
     "cron": "tsx src/cron.ts",
     "test": "sh scripts/test.sh"

@@ -53,6 +53,7 @@ export async function executeRunAgent(
     }
   }
 
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
   try {
     // 构建带 skill 的指令
     const fullInstruction = skill
@@ -64,22 +65,23 @@ export async function executeRunAgent(
 
     const timeout = timeout_ms ?? 300_000
     let timedOut = false
+    const runPromise = subAgent.run(fullInstruction).then((value) => {
+      if (timedOut) {
+        throw new Error('Agent finished after timeout and result was discarded')
+      }
+      return value
+    })
 
     const result = await Promise.race([
-      subAgent.run(fullInstruction).then((value) => {
-        if (timedOut) {
-          throw new Error('Agent finished after timeout and result was discarded')
-        }
-        return value
-      }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
           timedOut = true
+          subAgent.abort('Agent timeout')
           reject(new Error('Agent timeout'))
         }, timeout)
       ),
+      runPromise,
     ])
-
     return {
       success: true,
       content: result,
@@ -90,5 +92,7 @@ export async function executeRunAgent(
       content: '',
       error: `子任务执行失败: ${(error as Error).message}`,
     }
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
   }
 }
