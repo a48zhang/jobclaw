@@ -56,6 +56,16 @@ function broadcast(type: string, data: unknown): void {
   }
 }
 
+function ensureFileExists(filePath: string): void {
+  const dir = path.dirname(filePath)
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, '', 'utf-8')
+  }
+}
+
 /** Forward all eventBus events to WebSocket clients */
 const BUS_EVENTS: (keyof EventBusMap)[] = [
   'agent:state',
@@ -270,9 +280,10 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
     try {
       const body = await c.req.json<{ content?: string }>()
       const content = typeof body.content === 'string' ? body.content : ''
+      const filePath = path.resolve(workspaceRoot, relPath)
+      ensureFileExists(filePath)
       await lockFile(relPath, 'web-server', workspaceRoot)
       try {
-        const filePath = path.resolve(workspaceRoot, relPath)
         fs.writeFileSync(filePath, content, 'utf-8')
       } finally {
         await unlockFile(relPath, 'web-server', workspaceRoot)
@@ -283,14 +294,23 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
     }
   })
 
+  app.get('/workspace/output/*', async (c) => {
+    const relativePath = c.req.path.replace(/^\/workspace\/output\//, '')
+    const outputRoot = path.resolve(workspaceRoot, 'output')
+    const filePath = path.resolve(outputRoot, relativePath)
+
+    if (filePath !== outputRoot && !filePath.startsWith(`${outputRoot}${path.sep}`)) {
+      return c.text('Forbidden', 403)
+    }
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      return c.text('404 Not Found', 404)
+    }
+
+    return c.body(fs.readFileSync(filePath))
+  })
+
   // ── Serve static files from public/ ──────────────────────────────────────
   app.use('/*', serveStatic({ root: './public' }))
-
-  // ── Serve workspace/output/ for resume PDFs ─────────────────────────────
-  app.use('/workspace/output/*', serveStatic({
-    root: './',
-    rewriteRequestPath: (p: string) => p.replace(/^\/workspace/, '/workspace')
-  }))
 
   return app
 }

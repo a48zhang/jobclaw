@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { eventBus } from '../../../src/eventBus'
@@ -122,5 +123,47 @@ describe('/api/resume/review', () => {
     expect(run.mock.calls[0]?.[0]).toContain('resume-upload.pdf')
     expect(run.mock.calls[0]?.[0]).toContain('resume-clinic')
     expect(run.mock.calls[0]?.[0]).toContain('read_pdf')
+  })
+})
+
+describe('/api/config/:name', () => {
+  test('creates the target file on first save', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-config-'))
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/config/targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: '# targets' }),
+      })
+
+      expect(res.status).toBe(200)
+      const json = await res.json() as { ok: boolean }
+      expect(json.ok).toBe(true)
+      expect(fs.readFileSync(path.join(workspace, 'data/targets.md'), 'utf-8')).toBe('# targets')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('/workspace/output/*', () => {
+  test('serves files from the provided workspace root', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-output-'))
+    const outputDir = path.join(workspace, 'output')
+    fs.mkdirSync(outputDir, { recursive: true })
+    fs.writeFileSync(path.join(outputDir, 'resume.pdf'), 'hello')
+
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/workspace/output/resume.pdf')
+
+      expect(res.status).toBe(200)
+      expect(await res.text()).toBe('hello')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
   })
 })
