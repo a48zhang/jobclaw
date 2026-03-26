@@ -8,7 +8,12 @@ function connectWS() {
 
   window.appState.ws.addEventListener('open', () => {
     setWsStatus(true)
-    clearTimeout(window.appState.reconnectTimer)
+    if (window.appState.reconnectTimer) {
+      clearInterval(window.appState.reconnectTimer)
+      window.appState.reconnectTimer = null
+    }
+    clearQueueStatus()
+    window.appState.reconnectCountdown = 0
     // 加载历史消息
     loadSessionHistory()
   })
@@ -22,7 +27,8 @@ function connectWS() {
 
   window.appState.ws.addEventListener('close', () => {
     setWsStatus(false)
-    window.appState.reconnectTimer = setTimeout(connectWS, 3000)
+    clearQueueStatus()
+    scheduleReconnect()
   })
 
   window.appState.ws.addEventListener('error', () => {
@@ -37,10 +43,53 @@ function setWsStatus(connected) {
   label.textContent = connected ? '已连接' : '连接断开'
 }
 
+function scheduleReconnect() {
+  const label = document.getElementById('ws-status')
+  if (window.appState.reconnectTimer) {
+    clearInterval(window.appState.reconnectTimer)
+  }
+  window.appState.reconnectCountdown = 3
+  if (label) label.textContent = `连接断开，${window.appState.reconnectCountdown}s 后重试`
+
+  const timer = setInterval(() => {
+    window.appState.reconnectCountdown -= 1
+    if (window.appState.reconnectCountdown <= 0) {
+      clearInterval(timer)
+      window.appState.reconnectTimer = null
+      connectWS()
+      return
+    }
+    if (label) label.textContent = `连接断开，${window.appState.reconnectCountdown}s 后重试`
+  }, 1000)
+
+  window.appState.reconnectTimer = timer
+}
+
+function clearQueueStatus() {
+  if (typeof window.setQueueStatus === 'function') {
+    window.setQueueStatus(null)
+  }
+}
+
 function handleWsEvent(event, data) {
   switch (event) {
     case 'snapshot':
       if (Array.isArray(data)) data.forEach(d => updateAgentState(d))
+      break
+    case 'agent:stream':
+      setQueueStatus(null)
+      appendStreamingChunk(data)
+      break
+    case 'agent:tool':
+      appendAgentLog({ type: 'info', message: `[${data.toolType}] ${data.message}`, agentName: data.agentName })
+      if (typeof window.addToolLogEntry === 'function') {
+        window.addToolLogEntry({
+          type: data.toolType === 'tool_output' ? 'info' : 'warn',
+          message: `[${data.toolType}] ${data.message}`,
+          agentName: data.agentName,
+          timestamp: data.timestamp,
+        })
+      }
       break
     case 'agent:state':
       updateAgentState(data)
@@ -49,7 +98,13 @@ function handleWsEvent(event, data) {
       appendAgentLog(data)
       break
     case 'job:updated':
+      if (data?.status === 'resume_ready') {
+        showResumeReady('/workspace/output/resume.pdf')
+      }
       fetchJobs()
+      break
+    case 'context:usage':
+      updateTokenUsage(data)
       break
     case 'intervention:required':
       showModal(data)
@@ -79,6 +134,21 @@ function renderAgentCards() {
       <span class="text-[10px] uppercase tracking-wider opacity-80">${escHtml(state)}</span>
     </div>
   `).join('') || '<span class="text-slate-500 text-xs">暂无 Agent</span>'
+}
+
+function updateTokenUsage({ tokenCount }) {
+  const container = document.getElementById('agent-states')
+  if (!container) return
+  const badge = document.getElementById('token-usage')
+  if (badge) {
+    badge.textContent = `${tokenCount.toLocaleString()} tokens`
+    return
+  }
+  const span = document.createElement('span')
+  span.id = 'token-usage'
+  span.className = 'text-slate-500 text-xs'
+  span.textContent = `${tokenCount.toLocaleString()} tokens`
+  container.appendChild(span)
 }
 
 // 加载历史 session 消息
@@ -128,3 +198,4 @@ window.handleWsEvent = handleWsEvent
 window.updateAgentState = updateAgentState
 window.renderAgentCards = renderAgentCards
 window.loadSessionHistory = loadSessionHistory
+window.updateTokenUsage = updateTokenUsage

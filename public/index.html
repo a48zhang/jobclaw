@@ -42,10 +42,20 @@
   <section id="tab-chat" class="tab-content active h-full flex flex-col">
     <div class="bg-slate-800 rounded-xl p-4 flex-1 flex flex-col min-h-0 shadow-lg">
       <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">与 Agent 对话</h2>
+      <div class="chat-hints" id="chat-hints">
+        <span class="hint-chip">/new 新会话</span>
+        <span class="hint-chip">/clear 清空会话</span>
+        <span class="hint-chip">run search 搜索职位</span>
+      </div>
+      <div id="first-run-banner" class="mb-3 rounded-lg border border-blue-500/40 bg-blue-950/30 px-4 py-3 text-sm text-slate-200 hidden">
+        <div class="font-semibold text-blue-300 mb-1">欢迎使用 JobClaw</div>
+        <div class="text-slate-300">请先完善 <span class="text-blue-200">targets.md</span> 和 <span class="text-blue-200">userinfo.md</span>。填写完成后，在这里输入“run search”开始搜索职位。</div>
+      </div>
       <div class="chat-container">
         <div id="chat-history" class="chat-history">
           <div class="text-center text-slate-500 text-xs my-4">--- 连接已建立 ---</div>
         </div>
+        <div id="queue-status" class="queue-status hidden"></div>
         <div class="flex gap-2 items-end">
           <textarea id="chat-input" 
                     class="flex-1 bg-slate-900 text-slate-200 text-sm p-3 rounded-lg resize-none outline-none border border-slate-700 focus:border-blue-500 shadow-inner" 
@@ -57,6 +67,16 @@
           </button>
         </div>
       </div>
+      <div class="log-panel" id="tool-log-panel">
+        <div class="log-header">
+          <div class="log-title">操作日志</div>
+          <div class="log-actions">
+            <button id="log-toggle" class="log-btn">收起</button>
+            <button id="log-clear" class="log-btn">清空</button>
+          </div>
+        </div>
+        <div id="tool-log-list" class="log-list"></div>
+      </div>
     </div>
   </section>
 
@@ -65,16 +85,24 @@
     <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 h-full">
       <!-- Job Table -->
       <div class="xl:col-span-3 bg-slate-800 rounded-xl p-4 flex flex-col shadow-lg h-[calc(100vh-140px)]">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">职位列表</h2>
-          <button id="refresh-jobs" class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded shadow">
-            刷新
-          </button>
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">职位列表</h2>
+        <div class="flex items-center gap-2">
+          <span id="selected-count" class="text-xs text-slate-500">已选 0</span>
+          <button id="batch-apply" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded shadow">标记已投递</button>
+          <button id="batch-fail" class="text-xs bg-rose-600 hover:bg-rose-500 text-white px-3 py-1 rounded shadow">标记失败</button>
+          <button id="batch-favorite" class="text-xs bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded shadow">标记关注</button>
+          <button id="batch-delete" class="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded shadow">删除</button>
+          <button id="refresh-jobs" class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded shadow">刷新</button>
         </div>
+      </div>
         <div class="overflow-y-auto flex-1 bg-slate-900 rounded-lg border border-slate-700">
           <table class="w-full text-sm">
             <thead class="sticky top-0 bg-slate-800 shadow">
               <tr class="text-slate-400 border-b border-slate-700">
+                <th class="text-left py-3 px-4 w-10">
+                  <input id="select-all" type="checkbox" class="accent-blue-500" />
+                </th>
                 <th class="sortable-th text-left py-3 px-4" data-col="company">公司 ⇅</th>
                 <th class="sortable-th text-left py-3 px-4" data-col="title">职位 ⇅</th>
                 <th class="text-left py-3 px-4">链接</th>
@@ -157,12 +185,15 @@
           <span>⚙️</span> 生成简历 PDF
         </button>
         
-        <div id="resume-preview" class="mt-4 bg-slate-900 border border-slate-700 p-4 rounded-lg text-center">
+        <div id="resume-preview" class="mt-4 bg-slate-900 border border-slate-700 p-4 rounded-lg text-center hidden">
           <p class="text-green-400 mb-2 text-sm">✓ 生成成功</p>
           <a id="resume-link" href="/workspace/output/resume.pdf" target="_blank"
              class="inline-block bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded font-semibold text-sm">
             📄 查看并下载 PDF
           </a>
+        </div>
+        <div id="resume-preview-empty" class="mt-4 bg-slate-900 border border-slate-700 p-4 rounded-lg text-center">
+          <p class="text-slate-400 text-sm">尚未生成简历。生成成功后会在这里显示下载入口。</p>
         </div>
       </div>
     </div>

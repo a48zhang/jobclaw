@@ -62,6 +62,133 @@ body {
   position: relative;
 }
 
+.chat-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.hint-chip {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: #cbd5f5;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.queue-status {
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.6rem;
+  font-size: 0.8rem;
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  margin-bottom: 0.6rem;
+}
+
+.queue-status.hidden {
+  display: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.streaming-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.streaming-indicator::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 0 rgba(56, 189, 248, 0.5);
+  animation: ping 1.3s infinite ease-in-out;
+}
+
+@keyframes ping {
+  0% { transform: scale(1); opacity: 0.7; }
+  70% { transform: scale(1.6); opacity: 0; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.log-panel {
+  margin-top: 1rem;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 0.85rem;
+  padding: 0.75rem 0.9rem;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+
+.log-title {
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.log-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.log-btn {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #cbd5f5;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.log-btn:hover {
+  background: rgba(30, 41, 59, 0.8);
+}
+
+.log-list {
+  display: grid;
+  gap: 0.45rem;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.log-item {
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.6rem;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.log-item.warn {
+  border-left: 3px solid #fbbf24;
+}
+
+.log-item.error {
+  border-left: 3px solid #f87171;
+}
+
+.log-collapsed .log-list {
+  display: none;
+}
+
 .chat-history::before {
   content: "";
   position: absolute;

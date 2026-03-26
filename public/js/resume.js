@@ -91,6 +91,8 @@ document.getElementById('review-uploaded-resume').addEventListener('click', asyn
 // 生成简历
 document.getElementById('gen-resume').addEventListener('click', async () => {
   const btn = document.getElementById('gen-resume')
+  const preview = document.getElementById('resume-preview')
+  const previewEmpty = document.getElementById('resume-preview-empty')
   
   btn.disabled = true
   btn.classList.add('opacity-70', 'cursor-not-allowed')
@@ -103,9 +105,10 @@ document.getElementById('gen-resume').addEventListener('click', async () => {
     })
     const json = await res.json()
     if (json.ok) {
-      // 切换到聊天标签页查看进度
       document.querySelector('[data-target="tab-chat"]').click()
       appendAgentLog({ type: 'info', message: '已提交简历生成任务，请关注后续日志。', agentName: 'System' })
+      if (preview) preview.classList.add('hidden')
+      if (previewEmpty) previewEmpty.classList.remove('hidden')
     } else {
       alert('任务提交失败: ' + json.error)
     }
@@ -117,3 +120,14 @@ document.getElementById('gen-resume').addEventListener('click', async () => {
     btn.innerHTML = '<span>⚙️</span> 生成简历 PDF'
   }
 })
+
+function showResumeReady(path) {
+  const preview = document.getElementById('resume-preview')
+  const previewEmpty = document.getElementById('resume-preview-empty')
+  const link = document.getElementById('resume-link')
+  if (link && path) link.href = path
+  if (preview) preview.classList.remove('hidden')
+  if (previewEmpty) previewEmpty.classList.add('hidden')
+}
+
+window.showResumeReady = showResumeReady

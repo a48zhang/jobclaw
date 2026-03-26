@@ -31,3 +31,31 @@ document.querySelector('.nav-btn.active').classList.remove('text-slate-400')
 connectWS()
 fetchJobs()
 loadFile('targets')
+
+async function checkFirstRun() {
+  try {
+    const [targetsRes, userinfoRes] = await Promise.all([
+      fetch('/api/config/targets'),
+      fetch('/api/config/userinfo')
+    ])
+    const targetsJson = await targetsRes.json()
+    const userinfoJson = await userinfoRes.json()
+    const banner = document.getElementById('first-run-banner')
+    if (!banner) return
+    const targetsContent = targetsJson?.content || ''
+    const userinfoContent = userinfoJson?.content || ''
+    const targetsEmpty = targetsContent.trim().length === 0
+    const userinfoEmpty = userinfoContent.trim().length === 0
+    const targetsDefault = targetsContent.includes('示例公司') || targetsContent.includes('每行一条目标')
+    const userinfoDefault = userinfoContent.includes('姓名：') || userinfoContent.includes('求职意向')
+    if (targetsEmpty || userinfoEmpty || targetsDefault || userinfoDefault) {
+      banner.classList.remove('hidden')
+    } else {
+      banner.classList.add('hidden')
+    }
+  } catch {
+    // ignore
+  }
+}
+
+checkFirstRun()

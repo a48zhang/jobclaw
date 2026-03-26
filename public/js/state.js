@@ -27,9 +27,14 @@ let interventionOptions = []
 // WebSocket
 let ws = null
 let reconnectTimer = null
+let reconnectCountdown = 0
 
 // Agent 状态
 const agentStates = {}
+
+let queueInfo = null
+let streamingState = { active: false, messageId: null }
+let selectedJobs = null
 
 // 导出状态和设置函数
 window.appState = {
@@ -46,7 +51,11 @@ window.appState = {
   get interventionOptions() { return interventionOptions },
   get ws() { return ws },
   get reconnectTimer() { return reconnectTimer },
+  get reconnectCountdown() { return reconnectCountdown },
   get agentStates() { return agentStates },
+  get queueInfo() { return queueInfo },
+  get streamingState() { return streamingState },
+  get selectedJobs() { return selectedJobs },
 
   // setters
   set currentAgentName(v) { currentAgentName = v },
@@ -61,4 +70,8 @@ window.appState = {
   set interventionOptions(v) { interventionOptions = v },
   set ws(v) { ws = v },
   set reconnectTimer(v) { reconnectTimer = v },
+  set reconnectCountdown(v) { reconnectCountdown = v },
+  set queueInfo(v) { queueInfo = v },
+  set streamingState(v) { streamingState = v },
+  set selectedJobs(v) { selectedJobs = v },
 }

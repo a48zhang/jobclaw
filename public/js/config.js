@@ -21,6 +21,7 @@ async function loadFile(name) {
     document.getElementById('md-editor').value = ''
     document.getElementById('save-status').textContent = '✗ 加载失败'
     document.getElementById('save-status').className = 'text-sm text-red-400'
+    appendAgentLog({ type: 'error', message: '配置加载失败，请检查服务是否正常。', agentName: 'System' })
   }
 }
 
