@@ -26,6 +26,20 @@ export interface JobUpdatedPayload {
   status: string
 }
 
+export interface AgentStreamPayload {
+  agentName: string
+  chunk: string
+  isFirst: boolean
+  isFinal: boolean
+}
+
+export interface AgentToolPayload {
+  agentName: string
+  toolType: 'tool_call' | 'tool_output'
+  message: string
+  timestamp: string
+}
+
 export type RequestKind = 'text' | 'confirm' | 'single_select'
 
 export interface InterventionRequiredPayload {
@@ -53,6 +67,8 @@ export interface ContextUsagePayload {
 export interface EventBusMap {
   'agent:state': AgentStatePayload
   'agent:log': AgentLogPayload
+  'agent:stream': AgentStreamPayload
+  'agent:tool': AgentToolPayload
   'job:updated': JobUpdatedPayload
   'intervention:required': InterventionRequiredPayload
   'intervention:resolved': InterventionResolvedPayload

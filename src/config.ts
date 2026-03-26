@@ -18,6 +18,41 @@ const DEFAULT_CONFIG: Config = {
   SERVER_PORT: 3000,
 }
 
+const DEFAULT_USERINFO_MD = `# 个人信息
+
+- 姓名：
+- 邮箱：
+- 手机：
+- 个人主页：
+
+## 求职意向
+
+- 方向：
+- 城市：
+- 学历/年限：
+- 关键词：
+
+## 技能栈
+
+- 语言：
+- 框架：
+- 工具：
+
+## 项目经历
+
+- 项目名称：
+  - 时间：
+  - 技术栈：
+  - 亮点：
+`
+
+const DEFAULT_TARGETS_MD = `# 监测目标
+
+> 每行一条目标，格式：公司名 | 网址 | 备注
+
+- 示例公司 | https://example.com/jobs | 前端/后端
+`
+
 /**
  * 加载配置信息。
  * 同时负责确保 workspace 及其所有子目录（agents, data, skills, output）存在。
@@ -34,6 +69,15 @@ export function loadConfig(workspaceRoot: string): Config {
     if (!fs.existsSync(p)) {
       fs.mkdirSync(p, { recursive: true })
     }
+  }
+
+  const userinfoPath = path.join(workspaceRoot, 'data', 'userinfo.md')
+  if (!fs.existsSync(userinfoPath)) {
+    fs.writeFileSync(userinfoPath, DEFAULT_USERINFO_MD, 'utf-8')
+  }
+  const targetsPath = path.join(workspaceRoot, 'data', 'targets.md')
+  if (!fs.existsSync(targetsPath)) {
+    fs.writeFileSync(targetsPath, DEFAULT_TARGETS_MD, 'utf-8')
   }
 
   // 1.5 自动拷贝默认 Skills 到用户的 workspace/skills
@@ -83,6 +127,6 @@ export function loadConfig(workspaceRoot: string): Config {
     MODEL_ID: resolvedModel,
     LIGHT_MODEL_ID: resolvedLightModel || resolvedModel,
     BASE_URL: fileConfig.BASE_URL || process.env['BASE_URL'] || process.env['OPENAI_BASE_URL'] || DEFAULT_CONFIG.BASE_URL,
-    SERVER_PORT: fileConfig.SERVER_PORT || parseInt(process.env['SERVER_PORT'] || '', 10) || DEFAULT_CONFIG.SERVER_PORT,
+    SERVER_PORT: parseInt(process.env['SERVER_PORT'] || '', 10) || fileConfig.SERVER_PORT || DEFAULT_CONFIG.SERVER_PORT,
   }
 }

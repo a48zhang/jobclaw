@@ -67,13 +67,16 @@ function ensureFileExists(filePath: string): void {
 }
 
 /** Forward all eventBus events to WebSocket clients */
-const BUS_EVENTS: (keyof EventBusMap)[] = [
-  'agent:state',
-  'agent:log',
-  'job:updated',
-  'intervention:required',
-  'intervention:resolved',
-]
+  const BUS_EVENTS: (keyof EventBusMap)[] = [
+    'agent:state',
+    'agent:log',
+    'agent:stream',
+    'agent:tool',
+    'job:updated',
+    'intervention:required',
+    'intervention:resolved',
+    'context:usage',
+  ]
 for (const event of BUS_EVENTS) {
   eventBus.on(event, (payload) => broadcast(event, payload))
 }
@@ -257,7 +260,7 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
   app.get('/api/config/:name', (c) => {
     let name = c.req.param('name')
     if (!name.endsWith('.md')) name += '.md'
-    if (name !== 'targets.md' && name !== 'userinfo.md') {
+    if (name !== 'targets.md' && name !== 'userinfo.md' && name !== 'jobs.md') {
       return c.json({ ok: false, error: 'Unknown config name' }, 400)
     }
     const filePath = path.resolve(workspaceRoot, 'data', name)
@@ -273,7 +276,7 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
   app.post('/api/config/:name', async (c) => {
     let name = c.req.param('name')
     if (!name.endsWith('.md')) name += '.md'
-    if (name !== 'targets.md' && name !== 'userinfo.md') {
+    if (name !== 'targets.md' && name !== 'userinfo.md' && name !== 'jobs.md') {
       return c.json({ ok: false, error: 'Unknown config name' }, 400)
     }
     const relPath = `data/${name}`
@@ -287,6 +290,9 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
         fs.writeFileSync(filePath, content, 'utf-8')
       } finally {
         await unlockFile(relPath, 'web-server', workspaceRoot)
+      }
+      if (name === 'jobs.md') {
+        eventBus.emit('job:updated', { company: 'system', title: 'jobs', status: 'updated' })
       }
       return c.json({ ok: true })
     } catch (err) {

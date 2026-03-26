@@ -103,6 +103,11 @@ ${INTERVIEW_AND_RESUME_PROMPT}
         message: `简历 PDF 已生成：${result.content}`,
         timestamp: new Date().toISOString(),
       })
+      eventBus.emit('job:updated', {
+        company: 'system',
+        title: 'resume',
+        status: 'resume_ready',
+      })
       return
     }
 

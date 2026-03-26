@@ -16,19 +16,22 @@ import { eventBus } from './eventBus.js'
 class ServerChannel {
   async send(message: any): Promise<void> {
     if (message.type === 'agent_response') {
-      const msg = message.payload?.message
-      if (msg) {
-        eventBus.emit('agent:log', {
+      const payload = message.payload ?? {}
+      const streaming = message.streaming ?? {}
+      const chunk = typeof payload.message === 'string' ? payload.message : ''
+
+      if (chunk || streaming.isFinal || streaming.isFirst) {
+        eventBus.emit('agent:stream', {
           agentName: 'main',
-          type: 'info',
-          message: msg,
-          timestamp: new Date().toISOString(),
+          chunk,
+          isFirst: Boolean(streaming.isFirst),
+          isFinal: Boolean(streaming.isFinal),
         })
       }
     } else if (message.type === 'tool_call' || message.type === 'tool_output') {
-      eventBus.emit('agent:log', {
+      eventBus.emit('agent:tool', {
         agentName: 'main',
-        type: 'info',
+        toolType: message.type,
         message: message.payload?.message || `[${message.type}]`,
         timestamp: new Date().toISOString(),
       })
@@ -45,7 +48,7 @@ export async function runServer(workspaceRoot: string) {
   validateEnv(workspaceRoot)
 
   const config = loadConfig(workspaceRoot)
-  const mcpClient = await createMCPClient()
+  const mcpClient = (await createMCPClient()) ?? undefined
 
   try {
     const openai = new OpenAI({
@@ -78,12 +81,21 @@ export async function runServer(workspaceRoot: string) {
 
     registerAgent(mainAgent)
 
+    if (!mcpClient) {
+      eventBus.emit('agent:log', {
+        agentName: 'system',
+        type: 'warn',
+        message: 'MCP 未连接：浏览器自动化能力不可用。请检查 Playwright MCP 安装或网络环境。',
+        timestamp: new Date().toISOString(),
+      })
+    }
+
     // 启动 Web 服务器
     startServer(workspaceRoot, config.SERVER_PORT, factory)
 
     console.log(`[JobClaw] 服务端模式已启动，请访问 http://localhost:${config.SERVER_PORT ?? 3000}`)
   } catch (err) {
-    await mcpClient.close()
+    if (mcpClient) await mcpClient.close()
     throw err
   }
 }

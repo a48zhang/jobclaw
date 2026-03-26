@@ -13,14 +13,31 @@ import type { MCPClient } from './agents/base/types.js'
  * Playwright MCP クライアントを生成して接続する。
  * 呼び出し元は不要になった時点で `close()` すること。
  */
-export async function createMCPClient(): Promise<MCPClient & { close(): Promise<void> }> {
+export interface MCPClientStatus {
+  connected: boolean
+  error?: string
+}
+
+export async function createMCPClient(): Promise<(MCPClient & { close(): Promise<void> }) | null> {
+  if (process.env.MCP_DISABLED === '1') {
+    return null
+  }
   const transport = new StdioClientTransport({
     command: 'npx',
     args: ['@playwright/mcp@latest', '--headless'],
   })
 
   const client = new Client({ name: 'jobclaw', version: '0.1.0' })
-  await client.connect(transport)
+  try {
+    await client.connect(transport)
+  } catch (err) {
+    try {
+      await client.close()
+    } catch {
+      // ignore
+    }
+    return null
+  }
 
   return {
     async listTools() {
@@ -34,7 +51,6 @@ export async function createMCPClient(): Promise<MCPClient & { close(): Promise<
 
     async callTool(name: string, args: Record<string, unknown>) {
       const result = await client.callTool({ name, arguments: args })
-      // Extract text content if available to save tokens
       const textParts = (result.content as any[])
         .filter((c) => c.type === 'text')
         .map((c) => c.text)
@@ -43,7 +59,6 @@ export async function createMCPClient(): Promise<MCPClient & { close(): Promise<
         return textParts.join('\n')
       }
 
-      // Fallback to JSON if no text parts found
       return JSON.stringify(result.content)
     },
 

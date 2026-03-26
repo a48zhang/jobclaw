@@ -30,7 +30,7 @@ export async function runCron(workspaceRoot: string, mode: 'search' | 'digest' =
         })
       : { send: async () => {} };
 
-  const mcpClient = await createMCPClient();
+  const mcpClient = (await createMCPClient()) ?? undefined;
 
   try {
     const openai = new OpenAI({ 
@@ -75,6 +75,6 @@ export async function runCron(workspaceRoot: string, mode: 'search' | 'digest' =
     }
 
   } finally {
-    await mcpClient.close();
+    if (mcpClient) await mcpClient.close();
   }
 }

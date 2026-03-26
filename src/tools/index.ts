@@ -153,7 +153,7 @@ export const TOOLS: ChatCompletionTool[] = [
           company: { type: 'string' },
           title: { type: 'string' },
           url: { type: 'string' },
-          status: { type: 'string', enum: ['discovered', 'applied', 'failed', 'login_required'] },
+          status: { type: 'string', enum: ['discovered', 'applied', 'failed', 'login_required', 'favorite'] },
         },
         required: ['company', 'title', 'url', 'status'],
       },

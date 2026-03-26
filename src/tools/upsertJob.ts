@@ -8,7 +8,7 @@ export interface UpsertJobArgs {
   company: string;
   title: string;
   url: string;
-  status: 'discovered' | 'applied' | 'failed' | 'login_required';
+  status: 'discovered' | 'applied' | 'failed' | 'login_required' | 'favorite';
   time?: string;
 }
 

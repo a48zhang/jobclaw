@@ -447,7 +447,9 @@ export abstract class BaseAgent extends EventEmitter {
         if (this.abortController.signal.aborted || e?.name === 'AbortError') {
           throw new AgentAbortedError(this.abortReason ?? 'Agent aborted')
         }
-        throw new Error(`LLM API 请求失败 [Status: ${e.status}, Code: ${e.code}]: ${e.message}`)
+        const status = e?.status ? `Status: ${e.status}` : 'Status: unknown'
+        const code = e?.code ? `Code: ${e.code}` : 'Code: unknown'
+        throw new Error(`LLM API 请求失败（${status}, ${code}）。请检查 API_KEY、BASE_URL 和网络连接。`)
       }
 
       const finalToolCalls = toolCalls.filter(Boolean)
