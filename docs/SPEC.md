@@ -1,130 +1,273 @@
 # JobClaw 技术规格说明书
 
-> 版本: 0.2.0  
-> 更新日期: 2026-03-12
-
----
+> 版本: 0.1.0  
+> 更新日期: 2026-03-27
 
 ## 1. 项目概述
 
-**JobClaw** 是一个以 `MainAgent` 为核心、按需派生子任务的求职自动化系统。
+JobClaw 是一个以 `MainAgent` 为核心的求职自动化系统，默认通过 Web 控制台运行。
 
-- **MainAgent**: 负责用户交互、职位搜索协调、任务调度及简历制作。
-- **Ephemeral Sub-Agent**: 通过 `run_agent` + skill 执行隔离子任务，例如投递或专项整理。
-- **Web Dashboard**: 实时可视化看板，支持 Agent 状态监控、实时日志流及人工干预（HITL）。
+- `MainAgent` 负责用户交互、职位搜索、简历生成、简历评价与子任务调度。
+- 子任务不再依赖独立 Agent 类型，而是通过 `run_agent` 创建临时 `MainAgent` 实例执行。
+- Web 端通过 HTTP API + WebSocket 展示会话、日志、工具调用、职位状态与人工干预请求。
+- `workspace/` 是运行期事实来源，配置、会话和业务数据都写入其中。
 
----
+## 2. 运行入口
 
-## 2. 系统架构
+### 2.1 默认启动
 
-```
-┌────────────────────────────────────────────────────────────┐
-│                        BaseAgent                           │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │                    Agent Loop                       │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                            │
-│  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐   │
-│  │   LLM Client  │  │     Tools     │  │   MCP Client  │   │
-│  └───────────────┘  └───────────────┘  └───────────────┘   │
-└────────────────────────────────────────────────────────────┘
-                              ▲
-                              │ 继承
-                 ┌────────────┴────────────┐
-                 │                         │
-        ┌───────────────┐        ┌────────────────────┐
-        │  MainAgent    │        │ Ephemeral Sub-Agent│
-        │ (交互+调度)   │        │  (skill-driven)    │
-        └───────┬───────┘        └────────────────────┘
-                │ run_agent(skill=...)
-                └──────串行，共享 MCP 实例──────▶
+CLI 默认命令是启动 Web 控制台：
+
+```bash
+jobclaw
+# 或
+npm run start
 ```
 
----
+对应代码路径：
 
-## 3. 目录结构
+- `src/index.ts`: 进程入口与全局 crash logger
+- `src/cli/index.ts`: CLI 命令定义
+- `src/tui-runner.ts`: 实际启动 Web 服务、加载配置、创建 `MainAgent`
 
+### 2.2 Cron 模式
+
+```bash
+jobclaw cron
+# 或
+npm run cron
 ```
+
+`src/cron.ts` 当前支持两种模式：
+
+- `search`: 运行一次搜索任务，静默写入 `jobs.md`
+- `digest`: 运行日报任务，通过 `EmailChannel` 发送汇总
+
+## 3. 系统架构
+
+```text
+CLI / Cron
+   |
+   v
+runServer / runCron
+   |
+   +-- Config + Workspace bootstrap
+   +-- OpenAI client
+   +-- Playwright MCP client (optional)
+   +-- AgentFactory
+   \-- MainAgent
+          |
+          +-- BaseAgent loop
+          +-- Local tools
+          +-- MCP tools
+          \-- request / run_agent
+```
+
+当前真实架构特点：
+
+- `MainAgent` 是唯一有业务实现的 Agent。
+- `src/agents/search/index.ts` 当前没有独立搜索逻辑，不应视为可运行 Agent。
+- 临时子任务通过 `AgentFactory.createAgent({ persistent: false })` 创建。
+- Web 与 TUI 共用部分展示/解析逻辑，但默认交互模式是 Web。
+
+## 4. 目录结构
+
+```text
 jobclaw/
 ├── src/
-│   ├── index.ts             # CLI 入口
-│   ├── cron.ts              # 定时任务入口（无状态拉起）
-│   ├── config.ts            # 配置加载器（支持 config.json 与环境变量）
-│   ├── env.ts               # 环境校验与路径预检
-│   ├── eventBus.ts          # 全局强类型事件总线 (TypedEventBus)
+│   ├── index.ts
+│   ├── cli/index.ts
+│   ├── tui-runner.ts
+│   ├── cron.ts
+│   ├── config.ts
+│   ├── env.ts
+│   ├── eventBus.ts
+│   ├── mcp.ts
 │   ├── agents/
-│   │   ├── base/            # Agent 基座
-│   │   │   ├── agent.ts     # 逻辑核心（已重构拆分）
-│   │   │   └── agent-utils.ts # 通用辅助（Session/Channel/Skill）
-│   │   ├── main/            # 主 Agent 逻辑
-│   │   └── skills/          # 任务 skill 与 SOP
-│   ├── tools/               # 智能工具库 (Shell, Typst, File, UpsertJob)
+│   │   ├── base/
+│   │   ├── factory.ts
+│   │   ├── main/
+│   │   ├── search/
+│   │   └── skills/
+│   ├── tools/
 │   ├── web/
-│   │   ├── server.ts        # Hono Web 服务器 (REST API + WebSocket)
-│   │   └── tui.ts           # Blessed TUI 界面
-│   └── channel/             # 通知通道 (Email, TUI)
-├── public/                  # 静态前端资源 (Vanilla JS + Tailwind)
-├── workspace/               # 工作区目录
-│   ├── config.json          # 扁平化全局配置
-│   ├── data/                # 业务数据 (jobs.md, userinfo.md, targets.md)
-│   ├── agents/              # Agent 私有记忆
-│   └── output/              # 产物输出 (resume.pdf)
+│   └── channel/
+├── public/
+├── docs/
+├── tests/
+└── workspace/
+    ├── config.json
+    ├── agents/
+    ├── data/
+    ├── output/
+    └── skills/
 ```
 
----
+`workspace/` 在代码里会被自动初始化：
 
-## 4. 记忆与配置机制
+- `config.json`
+- `data/userinfo.md`
+- `data/targets.md`
+- `skills/` 默认 skill 副本
+- `agents/` 会话目录
+- `output/` 产物目录
 
-### 4.1 扁平化配置 (`config.json`)
+## 5. 配置与环境
 
-系统采用扁平化的配置结构，支持环境变量覆盖：
+### 5.1 配置文件
 
-| 配置项 | 环境变量 | 说明 |
-| :--- | :--- | :--- |
-| `API_KEY` | `OPENAI_API_KEY` | LLM 鉴权密钥 |
-| `MODEL_ID` | `MODEL` | 主任务模型 ID |
-| `LIGHT_MODEL_ID` | `LIGHT_MODEL` | 轻量模型 ID（可选） |
-| `BASE_URL` | `OPENAI_BASE_URL` | API Endpoint (Base URL) |
-| `SERVER_PORT` | `SERVER_PORT` | Web 看板端口 (默认 3000) |
+配置文件是 `workspace/config.json`，字段为扁平结构：
 
-### 4.2 记忆压缩
+- `API_KEY`
+- `MODEL_ID`
+- `LIGHT_MODEL_ID`
+- `BASE_URL`
+- `SERVER_PORT`
 
-- **机制**: 当 Token 计数超过阈值时，`ContextCompressor` 将历史消息汇总为摘要。
-- **保护**: 始终保留 `system` 消息，并在预算内尽可能保留最近 `N` 条原始消息。
+### 5.2 环境变量覆盖
 
-### 4.3 文件锁机制
+`src/config.ts` 当前支持的覆盖关系：
 
-共享文件（如 `jobs.md`, `targets.md`）由 `lock_file` 工具管理：
-- **租约**: 30 秒超时自动释放。
-- **粒度**: 文件级互斥锁。
+- `API_KEY` <- `API_KEY` / `OPENAI_API_KEY`
+- `MODEL_ID` <- `MODEL_ID` / `MODEL`
+- `LIGHT_MODEL_ID` <- `LIGHT_MODEL_ID` / `LIGHT_MODEL`
+- `BASE_URL` <- `BASE_URL` / `OPENAI_BASE_URL`
+- `SERVER_PORT` <- `SERVER_PORT`
 
----
+### 5.3 启动校验
 
-## 5. 交互与可视化
+`src/env.ts` 的实际行为：
 
-### 5.1 Web 看板 (Phase 5)
-- **实时流**: 基于 WebSocket 推送 Agent 的 `Think` 和 `Tool` 详细日志。
-- **人工干预 (HITL)**: 当 Agent 调用 `request` 工具时，网页弹出实时弹窗供用户输入。
-- **配置编辑**: 支持直接在线编辑 Markdown 配置并保存。
+- Web 模式允许缺少基础 LLM 配置启动，此时进入“设置向导模式”
+- Cron 模式要求基础配置完整
+- `digest` 模式额外要求 SMTP 相关环境变量
+- 启动时会尝试检查 `typst`，缺失时只警告，不阻止服务启动
 
-### 5.2 Web 控制台
-- 当前默认入口为 Web 控制台；终端 TUI 不再作为默认启动模式。
+## 6. Agent 运行模型
 
----
+### 6.1 BaseAgent
 
-## 6. 专用工具集
+`BaseAgent` 负责：
 
-- **`run_shell_command`**: 环境感知工具，自动探测 OS (Windows/Linux/macOS) 和 Shell (Bash/Pwsh)。
-- **`typst_compile`**: 智能简历编译，支持环境自愈引导。
-- **`upsert_job`**: 原子化职位数据维护，自动触发通知。
-- **`read_pdf`**: 读取 PDF 并提取文本（简历/JD），失败时返回明确错误。
+- 维护消息队列与串行执行链
+- 调用 OpenAI 流式 Chat Completions
+- 动态装载本地工具与 MCP 工具
+- 执行 tool call 并把结果写回消息历史
+- 支持 `request` 工具触发人工干预
+- 支持上下文压缩与持久化 session
 
----
+### 6.2 MainAgent
 
-## 7. 路线图完成度
+`MainAgent` 在系统提示中内嵌：
 
-- [x] **Phase 1-2**: 核心 Agent 循环与 MCP 集成。
-- [x] **Phase 3**: 搜索与投递业务闭环。
-- [x] **Phase 4**: Web 交互与系统鲁棒性。
-- [x] **Phase 5**: Web 可视化看板、HITL、智能简历制作工具链。
-- [ ] **Phase 6**: 高级生产特性（自动化重试、Session 深度管理等）。
+- 职位搜索规则
+- 简历生成规则
+- 简历评价与模拟面试规则
+- skill 索引内容
+
+当前它负责的主要能力：
+
+- 搜索职位
+- 调用 `upsert_job` 维护 `jobs.md`
+- 调用 `run_agent` 执行投递类或其他隔离子任务
+- 生成简历 PDF
+- 基于上传 PDF 或工作区材料做简历评价
+- 发起 `request` 等待用户补充输入
+
+### 6.3 持久化策略
+
+- `persistent: true` 的 Agent 会读写 `workspace/agents/{agentName}/session.json`
+- Web 模式主 Agent 默认持久化
+- `run_agent` 创建的临时 Agent 默认不持久化
+- `cron` 中的 Agent 默认不持久化
+
+## 7. 工具系统
+
+`src/tools/index.ts` 当前注册的本地工具包括：
+
+- `read_file`
+- `write_file`
+- `append_file`
+- `list_directory`
+- `lock_file`
+- `unlock_file`
+- `upsert_job`
+- `typst_compile`
+- `install_typst`
+- `run_shell_command`
+- `read_pdf`
+- `grep`
+- `get_time`
+- `run_agent`
+
+此外，`BaseAgent` 还会额外注入内建工具：
+
+- `request`
+
+如果 MCP 可用，Playwright MCP 暴露的浏览器工具也会并入工具列表。
+
+## 8. Web 控制台
+
+### 8.1 当前前端能力
+
+`public/` 下的前端实现当前包含：
+
+- 聊天面板
+- 职位看板与统计
+- 基础设置编辑
+- `targets.md` / `userinfo.md` 编辑
+- 简历 PDF 生成
+- PDF 简历上传与评价
+- 人工干预弹窗
+- 实时日志与 agent 状态展示
+
+### 8.2 API 概览
+
+`src/web/server.ts` 当前提供的主要接口：
+
+- `GET /api/settings`
+- `POST /api/settings`
+- `GET /api/jobs`
+- `GET /api/stats`
+- `POST /api/intervention`
+- `GET /api/session/:agentName`
+- `POST /api/chat`
+- `POST /api/resume/build`
+- `POST /api/resume/review`
+- `POST /api/resume/upload`
+- `GET /api/config/:name`
+- `POST /api/config/:name`
+- `GET /workspace/output/*`
+- `GET /ws` WebSocket
+
+### 8.3 WebSocket 事件
+
+当前事件总线与 WebSocket 会广播：
+
+- `agent:state`
+- `agent:log`
+- `agent:stream`
+- `agent:tool`
+- `job:updated`
+- `intervention:required`
+- `intervention:resolved`
+- `context:usage`
+
+## 9. 数据文件
+
+当前运行依赖的主要数据文件：
+
+- `workspace/config.json`
+- `workspace/data/userinfo.md`
+- `workspace/data/targets.md`
+- `workspace/data/jobs.md`
+- `workspace/data/uploads/resume-upload.pdf`
+- `workspace/output/resume.pdf`
+- `workspace/agents/*/session.json`
+
+## 10. 一致性约束
+
+- 职位写入应优先通过 `upsert_job`，不要手写覆盖 `jobs.md` 结构。
+- 文档描述的默认入口应始终与 CLI 行为一致。
+- “子 Agent” 在当前代码语义里是“临时 `MainAgent` 实例”，不是独立类层级。
+- 文档中提到的功能，只有在 `src/` 中存在对应入口、工具或路由时才视为已实现。

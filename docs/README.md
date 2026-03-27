@@ -13,14 +13,18 @@
 
 | 文件 | 说明 |
 |------|------|
-| [SPEC.md](SPEC.md) | 技术规格说明书 - 系统架构、目录结构、多 Agent 架构、记忆机制等 |
-| [agent-design.md](agent-design.md) | Agent 核心实现方案 - 类型定义、工具层、BaseAgent 及子类实现细节 |
+| [SPEC.md](SPEC.md) | 当前系统规格：入口、运行模式、目录结构、配置、Web API、工具与数据流。 |
+| [agent-design.md](agent-design.md) | Agent 实现说明：`BaseAgent` 主循环、工具调度、会话持久化、`request` 交互与子 Agent。 |
 
 ## 开发文档
 
 | 文件 | 说明 |
 |------|------|
-| [dev/plan.md](dev/plan.md) | 开发计划总览与阶段依赖关系 |
-| [dev/phase6-p2-interview-resume.md](dev/phase6-p2-interview-resume.md) | Phase 6 P2 重点计划：模拟面试与简历评价 |
+| [dev/plan.md](dev/plan.md) | 当前仍未完成或需要继续演进的开发项。 |
 
-> 说明：历史 Phase 分拆文档已收敛整合到 `dev/plan.md`，避免多文件重复与失同步。
+## 已知原则
+
+- 默认启动模式是 Web 控制台，不是 TUI。
+- 代码中的真实入口是 `src/index.ts -> src/cli/index.ts -> src/tui-runner.ts`。
+- `MainAgent` 是当前唯一实际业务 Agent 类型；“子 Agent”通过 `AgentFactory + run_agent` 创建，复用同一套 `MainAgent` 实现。
+- 职位数据以 `workspace/data/jobs.md` 为事实来源，结构化写入优先使用 `upsert_job`。
