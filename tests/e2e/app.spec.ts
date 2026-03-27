@@ -1,34 +1,4 @@
-import { test as base, expect, chromium, type Browser, type BrowserContext, type Page } from '@playwright/test'
-import { lightpanda } from '@lightpanda/browser'
-
-type Fixtures = {
-  page: Page
-}
-
-const test = base.extend<Fixtures>({
-  page: async ({ baseURL }, use) => {
-    const port = 9322 + Math.floor(Math.random() * 1000)
-    const lightpandaProc = await lightpanda.serve({
-      host: '127.0.0.1',
-      port,
-    })
-    const browser: Browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`)
-    const context: BrowserContext = browser.contexts()[0]
-    const page = await context.newPage()
-    if (baseURL) {
-      await page.goto(baseURL, { waitUntil: 'load' })
-    }
-    try {
-      await use(page)
-    } finally {
-      await page.close()
-      await browser.close()
-      lightpandaProc.stdout.destroy()
-      lightpandaProc.stderr.destroy()
-      lightpandaProc.kill()
-    }
-  },
-})
+import { test, expect } from './support/lightpanda.js'
 
 test.describe('JobClaw Web UI', () => {
   test('loads chat page and exposes primary chat controls', async ({ page }) => {

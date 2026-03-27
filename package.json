@@ -9,8 +9,9 @@
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
     "cron": "tsx src/cron.ts",
+    "mcp:lightpanda": "node scripts/lightpanda-mcp.mjs",
     "test": "sh scripts/test.sh",
-    "test:e2e": "playwright test"
+    "test:e2e": "node scripts/ensure-lightpanda.mjs && playwright test"
   },
   "dependencies": {
     "@hono/node-server": "^1.0.0",
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@lightpanda/browser": "^1.2.0",
+    "@playwright/mcp": "^0.0.68",
     "@types/blessed": "^0.1.27",
     "@types/node": "^20.0.0",
     "@types/nodemailer": "^6.4.0",
