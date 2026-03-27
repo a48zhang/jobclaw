@@ -4,7 +4,7 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { WebSocketServer, WebSocket } from 'ws'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { eventBus } from '../eventBus.js'
+import { eventBus, mapRuntimeEventToLegacyEvent } from '../eventBus.js'
 import type { EventBusMap } from '../eventBus.js'
 import { JobsService } from '../domain/jobs-service.js'
 import { ConversationStore } from '../memory/conversationStore.js'
@@ -17,7 +17,7 @@ import type { AgentFactory } from '../agents/factory.js'
 import type { Config, ConfigStatus } from '../config.js'
 import { getConfigStatus as readConfigStatus, readConfigFile, saveConfigFile } from '../config.js'
 import type { MCPClientStatus } from '../mcp.js'
-import type { AgentSession, DelegatedRun, InterventionRecord, JobStatus } from '../runtime/contracts.js'
+import type { AgentSession, DelegatedRun, EventStream, InterventionRecord, JobStatus, RuntimeEvent } from '../runtime/contracts.js'
 
 const agentRegistry = new Map<string, BaseAgent>()
 
@@ -50,6 +50,7 @@ export interface ServerRuntime {
   getConfigStatus(): ConfigStatus
   reloadFromConfig(): Promise<void>
   getRuntimeStatus?(): RuntimeStatusPayload
+  getEventStream?(): EventStream | undefined
   getSessionStore?(): RuntimeSessionStore | undefined
   getDelegationStore?(): RuntimeDelegationStore | undefined
   getInterventionManager?(): RuntimeInterventionManager | undefined
@@ -69,6 +70,8 @@ export function clearAgentRegistryForTests(): void {
 }
 
 const wsClients = new Set<WebSocket>()
+type WebSocketMessage = { event: string; data: unknown }
+
 function broadcast(type: string, data: unknown): void {
   const msg = JSON.stringify({ event: type, data })
   for (const ws of wsClients) {
@@ -158,6 +161,13 @@ function buildLiveSession(agent: BaseAgent): AgentSession {
   }
 }
 
+function toAgentSnapshot(session: AgentSession): { agentName: string; state: string } {
+  return {
+    agentName: session.agentName,
+    state: session.state,
+  }
+}
+
 function resolveLiveAgent(runtime: ServerRuntime, agentName: string): BaseAgent | undefined {
   const registered = agentRegistry.get(agentName)
   if (registered) return registered
@@ -176,8 +186,97 @@ const BUS_EVENTS: (keyof EventBusMap)[] = [
   'intervention:resolved',
   'context:usage',
 ]
-for (const event of BUS_EVENTS) {
-  eventBus.on(event, (payload) => broadcast(event, payload))
+
+export async function getWebSocketSnapshots(runtime: ServerRuntime): Promise<Array<{ agentName: string; state: string }>> {
+  const runtimeSessionStore = runtime.getSessionStore?.()
+  if (runtimeSessionStore) {
+    const sessions = await runtimeSessionStore.list()
+    return sessions.map(toAgentSnapshot)
+  }
+
+  return [...agentRegistry.values()].map((agent) => {
+    const snapshot = agent.getState()
+    return {
+      agentName: snapshot.agentName,
+      state: normalizeAgentState(snapshot.state),
+    }
+  })
+}
+
+export async function getPendingInterventionMessages(runtime: ServerRuntime): Promise<WebSocketMessage[]> {
+  const interventionManager = runtime.getInterventionManager?.()
+  if (!interventionManager) return []
+
+  const pending = await interventionManager.listPending()
+  return pending.map((record) => ({
+    event: 'intervention:required',
+    data: {
+      agentName: record.ownerType === 'session' ? record.ownerId : 'main',
+      prompt: record.prompt,
+      requestId: record.id,
+      kind: record.kind,
+      options: record.options,
+      timeoutMs: record.timeoutMs,
+      allowEmpty: record.allowEmpty,
+    },
+  }))
+}
+
+export function mapRuntimeEventToWebSocketMessages(event: RuntimeEvent): WebSocketMessage[] {
+  if (event.type === 'intervention.timed_out' || event.type === 'intervention.cancelled') {
+    const agentName = event.agentName ?? event.sessionId ?? 'main'
+    const requestId = typeof event.payload.requestId === 'string' ? event.payload.requestId : undefined
+    return [
+      {
+        event: 'intervention:resolved',
+        data: {
+          agentName,
+          input: '',
+          requestId,
+        },
+      },
+      {
+        event: 'agent:log',
+        data: {
+          agentName,
+          type: 'warn',
+          level: 'warn',
+          message: event.type === 'intervention.timed_out' ? '输入请求已超时，系统已自动继续。' : '输入请求已取消。',
+          timestamp: event.timestamp,
+        },
+      },
+    ]
+  }
+
+  const legacy = mapRuntimeEventToLegacyEvent(event)
+  if (!legacy) return []
+  return [{ event: legacy.name, data: legacy.payload }]
+}
+
+function attachLegacyBusBroadcast(): () => void {
+  const unbinders = BUS_EVENTS.map((event) => {
+    const handler = (payload: EventBusMap[typeof event]) => broadcast(event, payload)
+    eventBus.on(event, handler)
+    return () => eventBus.off(event, handler)
+  })
+  return () => {
+    for (const unbind of unbinders) {
+      unbind()
+    }
+  }
+}
+
+function attachRuntimeBroadcast(runtime: ServerRuntime): () => void {
+  const stream = runtime.getEventStream?.()
+  if (!stream) {
+    return attachLegacyBusBroadcast()
+  }
+
+  return stream.subscribe((event) => {
+    for (const message of mapRuntimeEventToWebSocketMessages(event)) {
+      broadcast(message.event, message.data)
+    }
+  })
 }
 
 function buildConfigPayload(
@@ -673,12 +772,16 @@ export function startServer(workspaceRoot: string, port: number | undefined, run
   const listenPort = port ?? parseInt(process.env['SERVER_PORT'] ?? String(DEFAULT_PORT), 10)
   const app = createApp(workspaceRoot, runtime)
   const server = serve({ fetch: app.fetch, port: listenPort })
+  const detachBroadcast = attachRuntimeBroadcast(runtime)
 
   const wss = new WebSocketServer({ noServer: true })
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', async (ws: WebSocket) => {
     wsClients.add(ws)
-    const snapshots = [...agentRegistry.values()].map((a) => a.getState())
+    const snapshots = await getWebSocketSnapshots(runtime)
     ws.send(JSON.stringify({ event: 'snapshot', data: snapshots }))
+    for (const message of await getPendingInterventionMessages(runtime)) {
+      ws.send(JSON.stringify(message))
+    }
     ws.on('close', () => {
       wsClients.delete(ws)
     })
@@ -692,6 +795,9 @@ export function startServer(workspaceRoot: string, port: number | undefined, run
     wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
       wss.emit('connection', ws, req)
     })
+  })
+  server.on('close', () => {
+    detachBroadcast()
   })
 
   console.log(`[JobClaw] API server listening on port ${listenPort}`)

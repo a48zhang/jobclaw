@@ -197,7 +197,16 @@ function toRuntimeEvent(
           },
         }
       }
-      return null
+      return {
+        type: 'runtime.log',
+        agentName: value.agentName,
+        sessionId: value.agentName,
+        payload: {
+          message: value.message,
+          timestamp: value.timestamp,
+          level: value.level ?? value.type ?? 'info',
+        },
+      }
     }
     case 'delegation.created':
     case 'delegation.state_changed':
@@ -220,8 +229,17 @@ function toRuntimeEvent(
         },
       }
     }
-    case 'context:usage':
-      return null
+    case 'context:usage': {
+      const value = payload as ContextUsagePayload
+      return {
+        type: 'context.usage',
+        sessionId: value.agentName,
+        agentName: value.agentName,
+        payload: {
+          tokenCount: value.tokenCount,
+        },
+      }
+    }
     default:
       return null
   }
@@ -326,14 +344,33 @@ function toLegacyEvent(
     }
     case 'runtime.warning':
     case 'runtime.error':
+    case 'runtime.log':
       return {
         name: 'agent:log',
         payload: {
           agentName: event.agentName ?? 'system',
-          type: event.type === 'runtime.warning' ? 'warn' : 'error',
-          level: event.type === 'runtime.warning' ? 'warn' : 'error',
+          type:
+            event.type === 'runtime.warning'
+              ? 'warn'
+              : event.type === 'runtime.error'
+                ? 'error'
+                : 'info',
+          level:
+            event.type === 'runtime.warning'
+              ? 'warn'
+              : event.type === 'runtime.error'
+                ? 'error'
+                : 'info',
           message: String(event.payload.message ?? event.type),
           timestamp: String(event.payload.timestamp ?? event.timestamp),
+        },
+      }
+    case 'context.usage':
+      return {
+        name: 'context:usage',
+        payload: {
+          agentName: event.agentName ?? event.sessionId ?? 'main',
+          tokenCount: Number(event.payload.tokenCount ?? 0),
         },
       }
     default:
@@ -398,4 +435,10 @@ export const eventBus = new LegacyEventBus()
 
 export function bindRuntimeEventStream(stream?: EventStream): void {
   eventBus.bindStream(stream)
+}
+
+export function mapRuntimeEventToLegacyEvent(
+  event: RuntimeEvent
+): { name: keyof EventBusMap; payload: EventBusMap[keyof EventBusMap] } | null {
+  return toLegacyEvent(event)
 }

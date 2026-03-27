@@ -4,7 +4,14 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { eventBus } from '../../../src/eventBus'
-import { clearAgentRegistryForTests, createApp, registerAgent } from '../../../src/web/server'
+import {
+  clearAgentRegistryForTests,
+  createApp,
+  getPendingInterventionMessages,
+  getWebSocketSnapshots,
+  mapRuntimeEventToWebSocketMessages,
+  registerAgent,
+} from '../../../src/web/server'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -749,6 +756,126 @@ describe('/api/runtime adapters', () => {
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
+  })
+})
+
+describe('websocket runtime adapters', () => {
+  test('builds initial snapshots from the runtime session store', async () => {
+    const snapshots = await getWebSocketSnapshots({
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getSessionStore: () => ({
+        list: async () => [
+          {
+            id: 'main',
+            agentName: 'main',
+            profile: 'main',
+            createdAt: '2026-03-27T00:00:00.000Z',
+            updatedAt: '2026-03-27T00:00:01.000Z',
+            state: 'running',
+          },
+        ],
+        get: async () => null,
+      }),
+    } as any)
+
+    expect(snapshots).toEqual([{ agentName: 'main', state: 'running' }])
+  })
+
+  test('maps runtime timeout events into existing websocket messages', () => {
+    const messages = mapRuntimeEventToWebSocketMessages({
+      id: 'evt-1',
+      type: 'intervention.timed_out',
+      timestamp: '2026-03-27T00:00:01.000Z',
+      sessionId: 'main',
+      agentName: 'main',
+      payload: {
+        requestId: 'ivr-1',
+      },
+    })
+
+    expect(messages).toEqual([
+      {
+        event: 'intervention:resolved',
+        data: {
+          agentName: 'main',
+          input: '',
+          requestId: 'ivr-1',
+        },
+      },
+      {
+        event: 'agent:log',
+        data: expect.objectContaining({
+          agentName: 'main',
+          type: 'warn',
+          message: '输入请求已超时，系统已自动继续。',
+        }),
+      },
+    ])
+  })
+
+  test('replays pending interventions into existing websocket messages on reconnect', async () => {
+    const messages = await getPendingInterventionMessages({
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getInterventionManager: () => ({
+        list: async () => [],
+        listPending: async () => [
+          {
+            id: 'ivr-1',
+            ownerType: 'session',
+            ownerId: 'main',
+            kind: 'text',
+            prompt: 'Need input',
+            status: 'pending',
+            createdAt: '2026-03-27T00:00:00.000Z',
+            updatedAt: '2026-03-27T00:00:01.000Z',
+            allowEmpty: false,
+            timeoutMs: 30_000,
+          },
+        ],
+        resolve: async () => null,
+      }),
+    } as any)
+
+    expect(messages).toEqual([
+      {
+        event: 'intervention:required',
+        data: {
+          agentName: 'main',
+          prompt: 'Need input',
+          requestId: 'ivr-1',
+          kind: 'text',
+          options: undefined,
+          timeoutMs: 30_000,
+          allowEmpty: false,
+        },
+      },
+    ])
   })
 })
 
