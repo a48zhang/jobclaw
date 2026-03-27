@@ -1,10 +1,3 @@
-/**
- * Web Server - Phase 5 Integration
- * Hono HTTP server + Node WebSocket at /ws + REST APIs
- *
- * Combines Team A's logic (Typed EventBus, Agent Registry)
- * with Team C's architecture (Hono Middleware, Static Files).
- */
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
@@ -17,37 +10,37 @@ import { parseJobsMd } from './tui.js'
 import { lockFile, unlockFile } from '../tools/lockFile.js'
 import type { BaseAgent } from '../agents/base/agent.js'
 import type { AgentFactory } from '../agents/factory.js'
-
-// ─── Agent registry ───────────────────────────────────────────────────────────
+import type { Config, ConfigStatus } from '../config.js'
+import { getConfigStatus as readConfigStatus, readConfigFile, saveConfigFile } from '../config.js'
 
 const agentRegistry = new Map<string, BaseAgent>()
 
-/**
- * Register an agent so its snapshot is included in the WS on-connect payload.
- * Call this from index.ts for each agent before starting the server.
- */
+export interface ServerRuntime {
+  getMainAgent(): BaseAgent | undefined
+  getFactory(): AgentFactory | undefined
+  getConfigStatus(): ConfigStatus
+  reloadFromConfig(): Promise<void>
+}
+
 export function registerAgent(agent: BaseAgent): void {
   agentRegistry.set(agent.agentName, agent)
 }
 
-export function clearAgentRegistryForTests(): void {
+export function clearAgentRegistry(): void {
   agentRegistry.clear()
 }
 
-// ─── WebSocket client registry ───────────────────────────────────────────────
+export function clearAgentRegistryForTests(): void {
+  clearAgentRegistry()
+}
 
-/** WebSocket OPEN ready state */
-const WS_OPEN = 1
-
-/** Active WebSocket connections */
 const wsClients = new Set<WebSocket>()
 
-/** Broadcast a JSON message to all connected WebSocket clients */
 function broadcast(type: string, data: unknown): void {
   const msg = JSON.stringify({ event: type, data })
   for (const ws of wsClients) {
     try {
-      if (ws.readyState === 1) { // 1 is WebSocket.OPEN
+      if (ws.readyState === 1) {
         ws.send(msg)
       }
     } catch {
@@ -66,29 +59,88 @@ function ensureFileExists(filePath: string): void {
   }
 }
 
-/** Forward all eventBus events to WebSocket clients */
-  const BUS_EVENTS: (keyof EventBusMap)[] = [
-    'agent:state',
-    'agent:log',
-    'agent:stream',
-    'agent:tool',
-    'job:updated',
-    'intervention:required',
-    'intervention:resolved',
-    'context:usage',
-  ]
+const BUS_EVENTS: (keyof EventBusMap)[] = [
+  'agent:state',
+  'agent:log',
+  'agent:stream',
+  'agent:tool',
+  'job:updated',
+  'intervention:required',
+  'intervention:resolved',
+  'context:usage',
+]
 for (const event of BUS_EVENTS) {
   eventBus.on(event, (payload) => broadcast(event, payload))
 }
 
-// ─── Hono app factory ─────────────────────────────────────────────────────────
+function buildConfigPayload(workspaceRoot: string, status: ConfigStatus) {
+  const stored = readConfigFile(workspaceRoot)
+  return {
+    ok: true,
+    settings: {
+      API_KEY: String(stored.API_KEY ?? ''),
+      MODEL_ID: String(stored.MODEL_ID ?? ''),
+      LIGHT_MODEL_ID: String(stored.LIGHT_MODEL_ID ?? ''),
+      BASE_URL: String(stored.BASE_URL ?? ''),
+      SERVER_PORT: status.config.SERVER_PORT,
+    },
+    status: {
+      ready: status.ready,
+      missingFields: status.missingFields,
+    },
+  }
+}
 
-export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
+function getUnavailableResponse(status: ConfigStatus) {
+  return {
+    ok: false,
+    error: `基础配置未完成：缺少 ${status.missingFields.join(', ')}`,
+    missingFields: status.missingFields,
+  }
+}
+
+function isServerRuntime(value: unknown): value is ServerRuntime {
+  return Boolean(value) && typeof (value as ServerRuntime).getConfigStatus === 'function'
+}
+
+export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntime | AgentFactory): Hono {
+  const runtime: ServerRuntime = isServerRuntime(runtimeOrFactory)
+    ? runtimeOrFactory
+    : {
+        getMainAgent: () => agentRegistry.get('main'),
+        getFactory: () => runtimeOrFactory as AgentFactory | undefined,
+        getConfigStatus: () => readConfigStatus(workspaceRoot),
+        reloadFromConfig: async () => {},
+      }
+
   const app = new Hono()
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
   const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
 
-  // ── REST: GET /api/jobs ───────────────────────────────────────────────────
+  app.get('/api/settings', (c) => {
+    const status = runtime.getConfigStatus()
+    return c.json(buildConfigPayload(workspaceRoot, status))
+  })
+
+  app.post('/api/settings', async (c) => {
+    try {
+      const body = await c.req.json<Partial<Config>>()
+      const updates: Partial<Config> = {
+        API_KEY: typeof body.API_KEY === 'string' ? body.API_KEY.trim() : undefined,
+        MODEL_ID: typeof body.MODEL_ID === 'string' ? body.MODEL_ID.trim() : undefined,
+        LIGHT_MODEL_ID: typeof body.LIGHT_MODEL_ID === 'string' ? body.LIGHT_MODEL_ID.trim() : undefined,
+        BASE_URL: typeof body.BASE_URL === 'string' ? body.BASE_URL.trim() : undefined,
+        SERVER_PORT: body.SERVER_PORT,
+      }
+
+      saveConfigFile(workspaceRoot, updates)
+      await runtime.reloadFromConfig()
+      return c.json(buildConfigPayload(workspaceRoot, runtime.getConfigStatus()))
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
   app.get('/api/jobs', (c) => {
     try {
       const jobsPath = path.resolve(workspaceRoot, 'data/jobs.md')
@@ -99,7 +151,6 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
     }
   })
 
-  // ── REST: GET /api/stats ──────────────────────────────────────────────────
   app.get('/api/stats', (c) => {
     try {
       const jobsPath = path.resolve(workspaceRoot, 'data/jobs.md')
@@ -116,7 +167,6 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
     }
   })
 
-  // ── REST: POST /api/intervention ─────────────────────────────────────────
   app.post('/api/intervention', async (c) => {
     try {
       const body = await c.req.json<{ input?: string; agentName?: string; requestId?: string }>()
@@ -130,7 +180,6 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
     }
   })
 
-  // ── REST: GET /api/session/:agentName ─────────────────────────────────────
   app.get('/api/session/:agentName', (c) => {
     const agentName = c.req.param('agentName')
     const agent = agentRegistry.get(agentName)
@@ -138,14 +187,11 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
       return c.json({ ok: false, error: 'Agent not found' }, 404)
     }
 
-    const messages = agent.getMessages()
-    // 过滤并转换消息格式，供前端使用
-    const history = messages
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({
+    const history = agent.getMessages()
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({
         role: m.role,
         content: typeof m.content === 'string' ? m.content : '',
-        // 如果有 tool_calls，提取 respond 工具的消息（兼容旧数据）
         toolCalls: (m as any).tool_calls?.map((tc: any) => ({
           name: tc.function?.name,
           args: tc.function?.arguments,
@@ -155,60 +201,74 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
     return c.json({ ok: true, messages: history })
   })
 
-  // ── REST: POST /api/chat ─────────────────────────────────────────────────
   app.post('/api/chat', async (c) => {
     try {
+      const status = runtime.getConfigStatus()
+      if (!status.ready) {
+        return c.json(getUnavailableResponse(status), 409)
+      }
+
       const body = await c.req.json<{ message?: string }>()
       const message = typeof body.message === 'string' ? body.message : ''
       if (!message.trim()) return c.json({ ok: false, error: 'Empty message' }, 400)
 
-      const mainAgent = agentRegistry.get('main')
+      const mainAgent = runtime.getMainAgent()
       if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
 
-      // 使用 submit 实现异步消息队列
       const result = mainAgent.submit(message)
-
       if (result.queued) {
-        // 普通消息已入队
-        return c.json({
-          ok: true,
-          queued: true,
-          queueLength: result.queueLength
-        })
-      } else {
-        // 命令立即执行完成
-        return c.json({
-          ok: true,
-          queued: false,
-          message: result.message
-        })
+        return c.json({ ok: true, queued: true, queueLength: result.queueLength })
       }
+      return c.json({ ok: true, queued: false, message: result.message })
     } catch {
       return c.json({ ok: false, error: 'Invalid request' }, 400)
     }
   })
 
-  // ── REST: POST /api/resume/build ─────────────────────────────────────────
   app.post('/api/resume/build', async (c) => {
-    const taskAgent = factory?.createAgent({ persistent: false }) ?? agentRegistry.get('main')
-    if (!taskAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
-    taskAgent.run('生成简历').catch(err => console.error('[Server] Resume build failed:', err))
+    const status = runtime.getConfigStatus()
+    if (!status.ready) {
+      return c.json(getUnavailableResponse(status), 409)
+    }
+
+    const mainAgent = runtime.getMainAgent()
+    if (mainAgent) {
+      mainAgent.submit('生成简历')
+      return c.json({ ok: true })
+    }
+
+    const factory = runtime.getFactory()
+    if (!factory) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+
+    const taskAgent = factory.createAgent({ persistent: false })
+    taskAgent.run('生成简历').catch((err) => console.error('[Server] Resume build failed:', err))
     return c.json({ ok: true })
   })
 
-  // ── REST: GET /api/config/:name ───────────────────────────────────────────
   app.post('/api/resume/review', async (c) => {
     if (!fs.existsSync(uploadedResumeAbsPath)) {
       return c.json({ ok: false, error: 'Uploaded resume not found' }, 400)
     }
 
-    const taskAgent = factory?.createAgent({ persistent: false }) ?? agentRegistry.get('main')
-    if (!taskAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+    const status = runtime.getConfigStatus()
+    if (!status.ready) {
+      return c.json(getUnavailableResponse(status), 409)
+    }
 
-    taskAgent.run(
+    const prompt =
       '评价刚上传的简历。若 data/uploads/resume-upload.pdf 存在，请优先使用 read_pdf 读取内容，并严格按 resume-clinic skill 输出评价、问题分析、改写建议和可直接替换的表达。'
-    ).catch(err => console.error('[Server] Resume review failed:', err))
 
+    const mainAgent = runtime.getMainAgent()
+    if (mainAgent) {
+      mainAgent.submit(prompt)
+      return c.json({ ok: true, path: uploadedResumeRelPath })
+    }
+
+    const factory = runtime.getFactory()
+    if (!factory) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+
+    const taskAgent = factory.createAgent({ persistent: false })
+    taskAgent.run(prompt).catch((err) => console.error('[Server] Resume review failed:', err))
     return c.json({ ok: true, path: uploadedResumeRelPath })
   })
 
@@ -272,7 +332,6 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
     }
   })
 
-  // ── REST: POST /api/config/:name ─────────────────────────────────────────
   app.post('/api/config/:name', async (c) => {
     let name = c.req.param('name')
     if (!name.endsWith('.md')) name += '.md'
@@ -315,28 +374,21 @@ export function createApp(workspaceRoot: string, factory?: AgentFactory): Hono {
     return c.body(fs.readFileSync(filePath))
   })
 
-  // ── Serve static files from public/ ──────────────────────────────────────
   app.use('/*', serveStatic({ root: './public' }))
 
   return app
 }
 
-// ─── Server startup ────────────────────────────────────────────────────────
-
 const DEFAULT_PORT = 3000
 
-export function startServer(workspaceRoot: string, port?: number, factory?: AgentFactory): void {
+export function startServer(workspaceRoot: string, port: number | undefined, runtime: ServerRuntime): void {
   const listenPort = port ?? parseInt(process.env['SERVER_PORT'] ?? String(DEFAULT_PORT), 10)
-  const app = createApp(workspaceRoot, factory)
-  const server = serve({
-    fetch: app.fetch,
-    port: listenPort,
-  })
+  const app = createApp(workspaceRoot, runtime)
+  const server = serve({ fetch: app.fetch, port: listenPort })
 
   const wss = new WebSocketServer({ noServer: true })
   wss.on('connection', (ws: WebSocket) => {
     wsClients.add(ws)
-    // Send a snapshot of all registered agents immediately on connect
     const snapshots = [...agentRegistry.values()].map((a) => a.getState())
     ws.send(JSON.stringify({ event: 'snapshot', data: snapshots }))
     ws.on('close', () => {

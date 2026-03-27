@@ -27,10 +27,7 @@ function createMessageMeta(ts, agent) {
 
 function renderMarkdown(text) {
   if (window.marked && window.DOMPurify) {
-    marked.setOptions({
-      breaks: true,
-      gfm: true
-    })
+    marked.setOptions({ breaks: true, gfm: true })
     const raw = marked.parse(String(text || ''))
     return DOMPurify.sanitize(raw)
   }
@@ -84,7 +81,7 @@ function appendStreamingChunk({ agentName, chunk, isFirst, isFinal }) {
     window.appState.streamingState = { active: true, messageId }
     div.dataset.streamId = messageId
   } else {
-    const target = [...chatHistory.querySelectorAll('.msg')].reverse().find(el => el.dataset.streamId === state.messageId)
+    const target = [...chatHistory.querySelectorAll('.msg')].reverse().find((el) => el.dataset.streamId === state.messageId)
     if (target) {
       const body = target.querySelector('.msg-body')
       if (body) {
@@ -96,7 +93,7 @@ function appendStreamingChunk({ agentName, chunk, isFirst, isFinal }) {
   }
 
   if (isFinal) {
-    const target = [...chatHistory.querySelectorAll('.msg')].reverse().find(el => el.dataset.streamId === window.appState.streamingState.messageId)
+    const target = [...chatHistory.querySelectorAll('.msg')].reverse().find((el) => el.dataset.streamId === window.appState.streamingState.messageId)
     if (target) {
       const indicator = target.querySelector('.streaming-indicator')
       if (indicator) indicator.remove()
@@ -110,32 +107,51 @@ function scrollToBottom() {
   chatHistory.scrollTop = chatHistory.scrollHeight
 }
 
+function redirectToSettings() {
+  const configTabBtn = document.querySelector('[data-target="tab-config"]')
+  if (configTabBtn) configTabBtn.click()
+}
+
 async function sendChatMessage() {
+  if (!window.appState.appReady) {
+    appendAgentLog({
+      type: 'warn',
+      message: `当前仍缺少基础配置：${window.appState.missingFields.join(', ') || 'API_KEY, MODEL_ID, BASE_URL'}。请先到“工作区配置”页完成设置。`,
+      agentName: 'System',
+    })
+    redirectToSettings()
+    return
+  }
+
   const text = chatInput.value.trim()
   if (!text) return
-  
+
   chatInput.value = ''
   chatInput.focus()
   chatSend.disabled = true
   chatSend.classList.add('opacity-50', 'cursor-not-allowed')
-  
+
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text })
+      body: JSON.stringify({ message: text }),
     })
     const data = await res.json()
-    
-  if (!data.ok) {
+
+    if (!data.ok) {
       appendAgentLog({ type: 'error', message: '发送失败: ' + (data.error || '未知错误') })
+      if (res.status === 409) {
+        window.appState.appReady = false
+        window.appState.missingFields = data.missingFields || []
+        if (typeof window.applyFeatureAvailability === 'function') window.applyFeatureAvailability()
+        redirectToSettings()
+      }
     } else if (data.queued) {
-      // 普通消息已入队，显示用户消息
       appendUserMessage(text)
       const waiting = Math.max(0, (data.queueLength ?? 1) - 1)
       setQueueStatus({ message: waiting > 0 ? `消息已入队，前面还有 ${waiting} 条等待处理` : '消息已入队，等待处理' })
     } else {
-      // 命令执行完成，清空历史并显示结果
       chatHistory.innerHTML = ''
       appendAgentLog({ type: 'info', message: data.message })
     }
@@ -143,12 +159,12 @@ async function sendChatMessage() {
     const msg = err && err.message ? err.message : '未知错误'
     appendAgentLog({ type: 'error', message: `网络错误：${msg}。请检查服务是否在运行。` })
   } finally {
-    chatSend.disabled = false
-    chatSend.classList.remove('opacity-50', 'cursor-not-allowed')
+    chatSend.disabled = !window.appState.appReady
+    chatSend.classList.toggle('opacity-50', !window.appState.appReady)
+    chatSend.classList.toggle('cursor-not-allowed', !window.appState.appReady)
   }
 }
 
-// 事件绑定
 chatSend.addEventListener('click', sendChatMessage)
 chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -157,7 +173,6 @@ chatInput.addEventListener('keydown', (e) => {
   }
 })
 
-// 导出到全局
 window.appendUserMessage = appendUserMessage
 window.appendAgentLog = appendAgentLog
 window.scrollToBottom = scrollToBottom

@@ -2,43 +2,34 @@
  * 全局状态管理
  */
 
-// 当前 agent 名称
 let currentAgentName = 'main'
-
-// 配置文件
 let currentFile = 'targets'
-
-// 职位数据
 let jobs = []
-
-// 排序状态
 let sortCol = 'time'
 let sortAsc = false
-
-// 图表实例
 let donutChart = null
-
-// 干预相关
 let interventionAgentName = 'main'
 let interventionRequestId = null
 let interventionKind = 'text'
 let interventionOptions = []
-
-// WebSocket
 let ws = null
 let reconnectTimer = null
 let reconnectCountdown = 0
-
-// Agent 状态
 const agentStates = {}
-
 let queueInfo = null
 let streamingState = { active: false, messageId: null }
 let selectedJobs = null
+let appReady = false
+let missingFields = []
+let settings = {
+  API_KEY: '',
+  MODEL_ID: '',
+  LIGHT_MODEL_ID: '',
+  BASE_URL: '',
+  SERVER_PORT: 3000,
+}
 
-// 导出状态和设置函数
 window.appState = {
-  // getters
   get currentAgentName() { return currentAgentName },
   get currentFile() { return currentFile },
   get jobs() { return jobs },
@@ -56,8 +47,10 @@ window.appState = {
   get queueInfo() { return queueInfo },
   get streamingState() { return streamingState },
   get selectedJobs() { return selectedJobs },
+  get appReady() { return appReady },
+  get missingFields() { return missingFields },
+  get settings() { return settings },
 
-  // setters
   set currentAgentName(v) { currentAgentName = v },
   set currentFile(v) { currentFile = v },
   set jobs(v) { jobs = v },
@@ -74,4 +67,7 @@ window.appState = {
   set queueInfo(v) { queueInfo = v },
   set streamingState(v) { streamingState = v },
   set selectedJobs(v) { selectedJobs = v },
+  set appReady(v) { appReady = v },
+  set missingFields(v) { missingFields = Array.isArray(v) ? v : [] },
+  set settings(v) { settings = { ...settings, ...v } },
 }
