@@ -98,12 +98,14 @@ export class JobStore {
     return { deleted, total: next.length }
   }
 
-  async exportToMarkdown(): Promise<void> {
+  async exportToMarkdown(options: { preserveContent?: string } = {}): Promise<void> {
     const records = await this.list()
     await ensureWorkspaceData(this.workspaceRoot)
+    const preservedRows = extractPreservedMarkdownRows(options.preserveContent ?? await this.readMarkdownSource())
     const markdownLines = [
       JOBS_HEADER,
       JOBS_DIVIDER,
+      ...preservedRows,
       ...records.map((record) =>
         `| ${record.company} | ${record.title} | ${record.url} | ${record.status} | ${record.discoveredAt} |`
       ),
@@ -238,4 +240,20 @@ function normalizeStatus(value: string): JobStatus | undefined {
     default:
       return undefined
   }
+}
+
+function extractPreservedMarkdownRows(content: string): string[] {
+  const lines = content.split(/\r?\n/)
+  return lines.filter((line) => {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('|')) return false
+    if (trimmed === JOBS_HEADER || trimmed === JOBS_DIVIDER) return false
+
+    const cells = line.split('|').map((cell) => cell.trim())
+    if (cells.length < 6) return true
+
+    const [, company, title, url, statusText] = cells
+    if (!company || !title || !url) return true
+    return !normalizeStatus(statusText)
+  })
 }

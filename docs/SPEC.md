@@ -10,7 +10,7 @@ JobClaw 是一个默认通过 Web 控制台运行的求职自动化系统。
 当前系统由 3 个核心层组成：
 
 - `RuntimeKernel`
-  负责配置装配、主 Agent 生命周期、MCP 接入、事件流、会话状态和人工干预状态。
+  负责配置装配、主 Agent 生命周期、MCP 接入、事件流、会话状态、人工干预状态和运行时恢复语义。
 - `MainAgent`
   是用户长期面对的主 Agent，负责自由对话、任务调度和主流程控制。
 - `ProfileAgent`
@@ -80,7 +80,7 @@ RuntimeKernel
    +-- Config + Workspace bootstrap
    +-- OpenAI client
    +-- Playwright MCP client (optional)
-   +-- Event stream + session store + intervention manager
+   +-- Event stream + session/delegation/conversation stores + intervention manager
    \-- AgentFactory
           |
           +-- MainAgent
@@ -133,6 +133,7 @@ jobclaw/
 - `agents/` 持久化会话目录
 - `output/` 产物目录
 - `state/session`
+- `state/conversation`
 - `state/delegation`
 - `state/interventions`
 - `state/jobs`
@@ -220,6 +221,9 @@ profile 决定：
 - Web 模式主 Agent 默认持久化到 `workspace/agents/{agentName}/session.json`
 - `run_agent` 创建的子 Agent 默认不持久化
 - cron 中创建的 Agent 默认不持久化
+- `workspace/agents/{agentName}/session.json` 是 Agent 私有 checkpoint
+- `workspace/state/session/{sessionId}.json` 是 Runtime / Web 的会话读模型
+- `workspace/state/conversation/{sessionId}.json` 保存最近对话与摘要，供 Web 恢复历史消息
 
 ## 7. 工具与能力控制
 
@@ -279,6 +283,11 @@ profile 决定：
 - `POST /api/jobs/status`
 - `POST /api/jobs/delete`
 - `POST /api/intervention`
+- `GET /api/runtime/sessions`
+- `GET /api/delegations`
+- `GET /api/delegations/:sessionId`
+- `GET /api/interventions`
+- `GET /api/interventions/:ownerId`
 - `GET /api/session/:agentName`
 - `POST /api/chat`
 - `POST /api/resume/build`
@@ -303,6 +312,12 @@ profile 决定：
 - `intervention:resolved`
 - `context:usage`
 
+补充说明：
+
+- WebSocket 的真实上游已经是 runtime event stream 与 structured stores。
+- 为了维持前端兼容，server 会把 runtime 事件适配为现有的 `agent:*` / `intervention:*` / `context:usage` 事件。
+- 连接建立时的 `snapshot` 来自 `state/session`；若存在 pending intervention，也会在连接时补发对应的 `intervention:required`。
+
 ## 9. 数据文件
 
 当前运行依赖的主要文件和目录：
@@ -311,10 +326,16 @@ profile 决定：
 - `workspace/data/userinfo.md`
 - `workspace/data/targets.md`
 - `workspace/data/jobs.md`
+- `workspace/state/jobs/jobs.json`
 - `workspace/data/uploads/resume-upload.pdf`
 - `workspace/output/resume.pdf`
 - `workspace/agents/**`
 - `workspace/state/**`
+
+事实源规则：
+
+- 职位数据以后端结构化存储 `workspace/state/jobs/jobs.json` 为正式事实源。
+- `workspace/data/jobs.md` 保留为可读、可编辑的导入导出表示，不再作为后端唯一数据源。
 
 ## 10. 当前文档边界
 

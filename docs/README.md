@@ -44,7 +44,8 @@
 
 ## 已知原则
 
-- 默认启动模式是 Web 控制台，不是 TUI。
+- 默认启动模式是 Web 控制台，不是 TUI；TUI 只保留兼容/调试定位。
 - 代码中的真实入口是 `src/index.ts -> src/cli/index.ts -> src/tui-runner.ts`。
 - `MainAgent` 是用户唯一长期入口；子任务通过 `AgentFactory + run_agent` 按 profile 创建 `ProfileAgent`。
-- 职位数据以 `workspace/data/jobs.md` 为事实来源；Web 端优先使用专用职位变更接口，而不是整表覆盖。
+- 职位数据以后端结构化存储 `workspace/state/jobs/jobs.json` 为事实来源；`workspace/data/jobs.md` 是可读、可编辑的导入导出视图。
+- `workspace/state/session` 与 `workspace/state/conversation` 是 Runtime / Web 的正式读模型；`workspace/agents/*/session.json` 是 Agent 私有 checkpoint。

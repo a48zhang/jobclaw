@@ -90,10 +90,10 @@ BaseAgent
 
 ### 2.5 持久化
 
-- `loadSession()` 读取 `workspace/agents/{agentName}/session.json`
-- `saveSession()` 仅在 `persistent: true` 时写盘
-- `resetSession()` 会归档旧 session 并清空内存状态
-- `ContextCompressor` 负责长会话压缩
+- `loadSession()` / `saveSession()` 继续使用 `workspace/agents/{agentName}/session.json` 作为 Agent 私有 checkpoint
+- `saveSession()` 同步维护 `workspace/state/conversation/{sessionId}.json`，供 Web / Runtime 读取最近对话摘要
+- `resetSession()` 会同时清理 checkpoint 对应的 conversation snapshot
+- `ContextCompressor` 负责长会话压缩；运行中持久化会使用截断快照避免 `session.json` 持续膨胀
 
 ## 3. ProfileAgent
 
@@ -218,9 +218,20 @@ Agent 与前端并不直接耦合。
 - 工具调用 / 工具输出
 - Agent 状态变化
 - 上下文 token 使用量
-- 人工干预请求
 
-## 8. 容易混淆的点
+补充约束：
+
+- WebSocket 的上游已经切到 runtime event stream 与 structured stores，不再依赖 `agentRegistry` 作为主读面。
+- 为了避免前端协议震荡，server 仍会把 runtime 事件适配成现有的 `snapshot` / `agent:*` / `intervention:*` 事件名。
+- 页面重连时，server 会基于 runtime store 重新下发 agent snapshot，并补发仍处于 pending 的人工干预。
+
+## 8. 当前边界
+
+- Web 是主路径；TUI 仍保留，但定位为兼容 / 调试入口。
+- `state/session` 与 `state/conversation` 是 Runtime / Web 的正式会话读模型。
+- `workspace/agents/{agentName}/session.json` 不是对外 API 契约，而是 BaseAgent 自己的执行恢复文件。
+
+## 9. 容易混淆的点
 
 - 当前默认入口是 Web，不是 TUI
 - `MainAgent` 仍是用户唯一长期入口
