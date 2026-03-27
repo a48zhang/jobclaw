@@ -9,6 +9,7 @@ import { ConversationStore } from '../memory/conversationStore.js'
 import { DelegationStore } from '../memory/delegationStore.js'
 import { InMemoryEventStream } from './event-stream.js'
 import { InterventionManager } from './intervention-manager.js'
+import { cancelActiveDelegations } from './recovery.js'
 import { JsonSessionStore } from './session-store.js'
 import { ensureRuntimeStateDirs, nowIso } from './utils.js'
 import type { AgentSession, DelegatedRun, DelegatedRunState, EventStream } from './contracts.js'
@@ -50,6 +51,7 @@ export class RuntimeKernel {
   private mainAgent?: MainAgent
   private factory?: AgentFactory
   private started = false
+  private interventionSweepTimer?: ReturnType<typeof setInterval>
 
   constructor(config: RuntimeKernelConfig) {
     this.workspaceRoot = config.workspaceRoot
@@ -71,6 +73,7 @@ export class RuntimeKernel {
     this.started = true
     bindRuntimeEventStream(this.eventStream)
     this.installRuntimeObservers()
+    this.startMaintenanceLoop()
     await this.reloadConfig()
   }
 
@@ -88,6 +91,10 @@ export class RuntimeKernel {
       await this.mcpClient.close()
       this.mcpClient = null
     }
+    if (this.interventionSweepTimer) {
+      clearInterval(this.interventionSweepTimer)
+      this.interventionSweepTimer = undefined
+    }
     this.mcpStatus = {
       enabled: process.env.MCP_DISABLED !== '1',
       connected: false,
@@ -102,10 +109,14 @@ export class RuntimeKernel {
   }
 
   async reloadFromConfig(): Promise<void> {
+    const recoveryReason = this.mainAgent || this.factory
+      ? 'Runtime reloaded before delegated run completed'
+      : 'Runtime restarted before delegated run completed'
     this.mainAgent?.abort('Runtime reload')
     this.mainAgent = undefined
     this.factory = undefined
     await this.onMainAgentChanged?.(undefined)
+    await this.recoverRuntimeState(recoveryReason)
 
     const status = this.getConfigStatus()
     if (!status.ready) {
@@ -223,6 +234,22 @@ export class RuntimeKernel {
     return this.conversationStore
   }
 
+  private startMaintenanceLoop(): void {
+    if (this.interventionSweepTimer) return
+    this.interventionSweepTimer = setInterval(() => {
+      void this.interventionManager.syncTimeouts().catch((error) => {
+        this.eventStream.publish({
+          type: 'runtime.warning',
+          sessionId: this.mainAgentName,
+          agentName: 'system',
+          payload: {
+            message: `Intervention timeout sweep failed: ${(error as Error).message}`,
+          },
+        })
+      })
+    }, 1_000)
+  }
+
   private installRuntimeObservers(): void {
     this.unsubscribers.push(
       this.eventStream.subscribe(async (event) => {
@@ -310,6 +337,11 @@ export class RuntimeKernel {
         }
       })
     )
+  }
+
+  private async recoverRuntimeState(reason: string): Promise<void> {
+    await this.interventionManager.syncTimeouts()
+    await cancelActiveDelegations(this.delegationStore, { reason })
   }
 
   private async ensureMainSession(state: AgentSession['state']): Promise<AgentSession> {

@@ -33,6 +33,7 @@ interface InterventionMutationOptions {
 
 export class InterventionManager {
   private readonly store: InterventionStore
+  private syncTimeoutsTask?: Promise<InterventionRecord[]>
 
   constructor(
     workspaceRoot: string,
@@ -117,23 +118,26 @@ export class InterventionManager {
     return nextRecord
   }
 
-  async cancel(recordId: string): Promise<InterventionRecord | null> {
-    return this.transition(recordId, 'cancelled')
+  async cancel(recordId: string, options: InterventionMutationOptions = {}): Promise<InterventionRecord | null> {
+    return this.transition(recordId, 'cancelled', options)
   }
 
-  async timeout(recordId: string): Promise<InterventionRecord | null> {
-    return this.transition(recordId, 'timeout')
+  async timeout(recordId: string, options: InterventionMutationOptions = {}): Promise<InterventionRecord | null> {
+    return this.transition(recordId, 'timeout', options)
   }
 
   async syncTimeouts(now = Date.now()): Promise<InterventionRecord[]> {
-    const timedOut: InterventionRecord[] = []
-    for (const record of await this.list()) {
-      if (record.status !== 'pending' || !record.timeoutMs) continue
-      if (Date.parse(record.createdAt) + record.timeoutMs > now) continue
-      const nextRecord = await this.timeout(record.id)
-      if (nextRecord) timedOut.push(nextRecord)
+    if (this.syncTimeoutsTask) {
+      return this.syncTimeoutsTask
     }
-    return timedOut
+
+    const task = this.runTimeoutSweep(now)
+    this.syncTimeoutsTask = task.finally(() => {
+      if (this.syncTimeoutsTask === task) {
+        this.syncTimeoutsTask = undefined
+      }
+    })
+    return this.syncTimeoutsTask
   }
 
   async get(recordId: string): Promise<InterventionRecord | null> {
@@ -163,7 +167,8 @@ export class InterventionManager {
 
   private async transition(
     recordId: string,
-    status: Exclude<InterventionStatus, 'pending' | 'resolved'>
+    status: Exclude<InterventionStatus, 'pending' | 'resolved'>,
+    options: InterventionMutationOptions = {}
   ): Promise<InterventionRecord | null> {
     const record = await this.get(recordId)
     if (!record || record.status !== 'pending') return null
@@ -173,6 +178,50 @@ export class InterventionManager {
       updatedAt: nowIso(),
     }
     await this.store.update(nextRecord)
+
+    if (options.emitEvent !== false) {
+      const ownerOptions = this.resolveOwnerOptions(nextRecord)
+      this.eventStream.publish(
+        {
+          type: status === 'timeout' ? 'intervention.timed_out' : 'intervention.cancelled',
+          sessionId: options.sessionId ?? ownerOptions.sessionId,
+          delegatedRunId: options.delegatedRunId ?? ownerOptions.delegatedRunId,
+          agentName: options.agentName ?? ownerOptions.agentName,
+          payload: {
+            requestId: nextRecord.id,
+            prompt: nextRecord.prompt,
+            status: nextRecord.status,
+          },
+        },
+        { origin: 'runtime' }
+      )
+    }
+
     return nextRecord
+  }
+
+  private async runTimeoutSweep(now: number): Promise<InterventionRecord[]> {
+    const timedOut: InterventionRecord[] = []
+    for (const record of await this.list()) {
+      if (record.status !== 'pending' || !record.timeoutMs) continue
+      if (Date.parse(record.createdAt) + record.timeoutMs > now) continue
+      const nextRecord = await this.timeout(record.id)
+      if (nextRecord) timedOut.push(nextRecord)
+    }
+    return timedOut
+  }
+
+  private resolveOwnerOptions(
+    record: InterventionRecord
+  ): Pick<InterventionMutationOptions, 'sessionId' | 'delegatedRunId' | 'agentName'> {
+    if (record.ownerType === 'delegated_run') {
+      return {
+        delegatedRunId: record.ownerId,
+      }
+    }
+    return {
+      sessionId: record.ownerId,
+      agentName: record.ownerId,
+    }
   }
 }
