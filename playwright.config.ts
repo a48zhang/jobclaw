@@ -7,10 +7,9 @@ export default defineConfig({
   workers: 1,
   use: {
     baseURL: 'http://localhost:3100',
-    headless: true,
   },
   webServer: {
-    command: 'SERVER_PORT=3100 MCP_DISABLED=1 API_KEY=local MODEL_ID=local BASE_URL=http://localhost npx tsx src/index.ts --workspace /tmp/jobclaw-e2e',
+    command: 'rm -rf /tmp/jobclaw-e2e && PATH=/home/ccnuacm/work/jobclaw/.tools/node-v22.14.0-linux-x64/bin:$PATH SERVER_PORT=3100 MCP_DISABLED=1 API_KEY=local MODEL_ID=local BASE_URL=http://localhost ./node_modules/.bin/tsx src/index.ts --workspace /tmp/jobclaw-e2e',
     url: 'http://localhost:3100',
     reuseExistingServer: false,
     timeout: 120_000,

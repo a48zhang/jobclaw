@@ -67,6 +67,9 @@ async function checkFirstRun() {
 connectWS()
 fetchJobs()
 loadFile('targets')
+if (typeof window.loadResumeStatus === 'function') {
+  window.loadResumeStatus()
+}
 loadSettings().then(() => {
   checkFirstRun()
   if (!window.appState.appReady) {

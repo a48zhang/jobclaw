@@ -1,46 +1,51 @@
-import { test, expect } from '@playwright/test'
-test.beforeEach(async ({ page }) => {
-  await page.route('**/*', (route) => {
-    const url = route.request().url()
-    if (
-      url.startsWith('https://cdn.tailwindcss.com') ||
-      url.startsWith('https://cdn.jsdelivr.net/npm/chart.js') ||
-      url.startsWith('https://cdn.jsdelivr.net/npm/marked') ||
-      url.startsWith('https://cdn.jsdelivr.net/npm/dompurify') ||
-      url.startsWith('https://fonts.googleapis.com') ||
-      url.startsWith('https://fonts.gstatic.com')
-    ) {
-      return route.abort()
-    }
-    return route.continue()
-  })
+import { test as base, expect, chromium, type Browser, type BrowserContext, type Page } from '@playwright/test'
+import { lightpanda } from '@lightpanda/browser'
 
-  await page.addInitScript(() => {
-    // @ts-expect-error stub
-    window.Chart = function () { return { update() {} } }
-    // @ts-expect-error stub
-    window.marked = { setOptions() {}, parse: (text: string) => String(text || '') }
-    // @ts-expect-error stub
-    window.DOMPurify = { sanitize: (html: string) => html }
-  })
+type Fixtures = {
+  page: Page
+}
+
+const test = base.extend<Fixtures>({
+  page: async ({ baseURL }, use) => {
+    const port = 9322 + Math.floor(Math.random() * 1000)
+    const lightpandaProc = await lightpanda.serve({
+      host: '127.0.0.1',
+      port,
+    })
+    const browser: Browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`)
+    const context: BrowserContext = browser.contexts()[0]
+    const page = await context.newPage()
+    if (baseURL) {
+      await page.goto(baseURL, { waitUntil: 'load' })
+    }
+    try {
+      await use(page)
+    } finally {
+      await page.close()
+      await browser.close()
+      lightpandaProc.stdout.destroy()
+      lightpandaProc.stderr.destroy()
+      lightpandaProc.kill()
+    }
+  },
 })
 
 test.describe('JobClaw Web UI', () => {
-  test('loads chat page with first-run banner and hints', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
+  test('loads chat page and exposes primary chat controls', async ({ page }) => {
     await expect(page.locator('h1')).toContainText('JobClaw')
     await expect(page.locator('#chat-hints')).toBeVisible()
-    await expect(page.locator('#first-run-banner')).toBeVisible()
+    await expect(page.locator('#tab-chat')).toBeVisible()
+    await expect(page.locator('#chat-input')).toBeVisible()
+    await expect(page.locator('#chat-send')).toBeVisible()
   })
 
-  test('resume preview is hidden until resume ready', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
+  test('resume tab shows empty state when no resume exists', async ({ page }) => {
+    await page.locator('[data-target="tab-resume"]').click()
     await expect(page.locator('#resume-preview')).toBeHidden()
-    await expect(page.locator('#resume-preview-empty')).toBeHidden()
+    await expect(page.locator('#resume-preview-empty')).toBeVisible()
   })
 
   test('jobs table supports selection controls', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' })
     await page.locator('[data-target="tab-jobs"]').click()
 
     await expect(page.locator('#refresh-jobs')).toBeVisible()

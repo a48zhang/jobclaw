@@ -35,6 +35,16 @@ export function clearAgentRegistryForTests(): void {
 }
 
 const wsClients = new Set<WebSocket>()
+const JOBS_HEADER = '| 公司 | 职位 | 链接 | 状态 | 时间 |'
+const JOBS_SEPARATOR = '| --- | --- | --- | --- | --- |'
+
+interface JobMutationRow {
+  company: string
+  title: string
+  url: string
+  status: string
+  time: string
+}
 
 function broadcast(type: string, data: unknown): void {
   const msg = JSON.stringify({ event: type, data })
@@ -57,6 +67,29 @@ function ensureFileExists(filePath: string): void {
   if (!fs.existsSync(filePath)) {
     fs.writeFileSync(filePath, '', 'utf-8')
   }
+}
+
+function ensureJobsFileExists(workspaceRoot: string): string {
+  const jobsPath = path.resolve(workspaceRoot, 'data/jobs.md')
+  const dir = path.dirname(jobsPath)
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
+  if (!fs.existsSync(jobsPath)) {
+    fs.writeFileSync(jobsPath, `${JOBS_HEADER}\n${JOBS_SEPARATOR}\n`, 'utf-8')
+  }
+  return jobsPath
+}
+
+function serializeJobsMd(rows: JobMutationRow[]): string {
+  const lines = rows.map((row) => `| ${row.company} | ${row.title} | ${row.url} | ${row.status} | ${row.time} |`)
+  return [JOBS_HEADER, JOBS_SEPARATOR, ...lines, ''].join('\n')
+}
+
+function readJobsRows(workspaceRoot: string): JobMutationRow[] {
+  const jobsPath = ensureJobsFileExists(workspaceRoot)
+  const content = fs.readFileSync(jobsPath, 'utf-8')
+  return parseJobsMd(content)
 }
 
 const BUS_EVENTS: (keyof EventBusMap)[] = [
@@ -245,6 +278,22 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     return c.json({ ok: true })
   })
 
+  app.get('/api/resume/status', (c) => {
+    try {
+      const exists = fs.existsSync(path.resolve(workspaceRoot, 'output/resume.pdf'))
+      const absolutePath = path.resolve(workspaceRoot, 'output/resume.pdf')
+      const stats = exists ? fs.statSync(absolutePath) : null
+      return c.json({
+        ok: true,
+        exists,
+        path: '/workspace/output/resume.pdf',
+        mtime: stats?.mtime.toISOString() ?? null,
+      })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
   app.post('/api/resume/review', async (c) => {
     if (!fs.existsSync(uploadedResumeAbsPath)) {
       return c.json({ ok: false, error: 'Uploaded resume not found' }, 400)
@@ -312,6 +361,75 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         size: file.size,
         type: file.type || 'application/pdf',
       })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.post('/api/jobs/status', async (c) => {
+    try {
+      const body = await c.req.json<{ updates?: Array<{ url?: string; status?: string }> }>()
+      const updates = Array.isArray(body.updates) ? body.updates : []
+      const normalizedUpdates = updates
+        .map((item) => ({
+          url: typeof item.url === 'string' ? item.url.trim() : '',
+          status: typeof item.status === 'string' ? item.status.trim() : '',
+        }))
+        .filter((item) => item.url && item.status)
+
+      if (normalizedUpdates.length === 0) {
+        return c.json({ ok: false, error: 'No valid updates provided' }, 400)
+      }
+
+      ensureJobsFileExists(workspaceRoot)
+      await lockFile('data/jobs.md', 'web-server', workspaceRoot)
+      try {
+        const rows = readJobsRows(workspaceRoot)
+        const statusByUrl = new Map(normalizedUpdates.map((item) => [item.url, item.status]))
+        let changed = 0
+        const nextRows = rows.map((row) => {
+          const nextStatus = statusByUrl.get(row.url)
+          if (!nextStatus || nextStatus === row.status) {
+            return row
+          }
+          changed += 1
+          return { ...row, status: nextStatus }
+        })
+        fs.writeFileSync(path.resolve(workspaceRoot, 'data/jobs.md'), serializeJobsMd(nextRows), 'utf-8')
+        eventBus.emit('job:updated', { company: 'system', title: 'jobs', status: 'updated' })
+        return c.json({ ok: true, changed, requested: normalizedUpdates.length, total: nextRows.length })
+      } finally {
+        await unlockFile('data/jobs.md', 'web-server', workspaceRoot)
+      }
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.post('/api/jobs/delete', async (c) => {
+    try {
+      const body = await c.req.json<{ urls?: string[] }>()
+      const urls = Array.isArray(body.urls)
+        ? body.urls.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
+        : []
+
+      if (urls.length === 0) {
+        return c.json({ ok: false, error: 'No valid urls provided' }, 400)
+      }
+
+      ensureJobsFileExists(workspaceRoot)
+      await lockFile('data/jobs.md', 'web-server', workspaceRoot)
+      try {
+        const rows = readJobsRows(workspaceRoot)
+        const urlSet = new Set(urls)
+        const nextRows = rows.filter((row) => !urlSet.has(row.url))
+        const deleted = rows.length - nextRows.length
+        fs.writeFileSync(path.resolve(workspaceRoot, 'data/jobs.md'), serializeJobsMd(nextRows), 'utf-8')
+        eventBus.emit('job:updated', { company: 'system', title: 'jobs', status: 'updated' })
+        return c.json({ ok: true, deleted, requested: urls.length, total: nextRows.length })
+      } finally {
+        await unlockFile('data/jobs.md', 'web-server', workspaceRoot)
+      }
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }

@@ -84,22 +84,17 @@ function bindSelectionHandlers(sorted) {
   window.appState.selectedJobs = { rows: sorted, indices: () => [...selects].filter(i => i.checked).map(i => Number(i.dataset.index)) }
 }
 
-async function persistJobs(rows) {
-  const header = '| 公司 | 职位 | 链接 | 状态 | 时间 |'
-  const sep = '| --- | --- | --- | --- | --- |'
-  const lines = rows.map(r => `| ${r.company} | ${r.title} | ${r.url} | ${r.status} | ${r.time} |`)
-  const content = [header, sep, ...lines, ''].join('\n')
-  try {
-    await fetch('/api/config/jobs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content })
-    })
-    appendAgentLog({ type: 'info', message: '批量操作已保存。', agentName: 'System' })
-    fetchJobs()
-  } catch {
-    appendAgentLog({ type: 'error', message: '批量操作失败，请稍后重试。', agentName: 'System' })
+async function submitJobMutation(url, payload) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const json = await res.json()
+  if (!res.ok || !json.ok) {
+    throw new Error(json.error || '操作失败')
   }
+  return json
 }
 
 async function batchUpdateStatus(status) {
@@ -110,8 +105,27 @@ async function batchUpdateStatus(status) {
     appendAgentLog({ type: 'warn', message: '请先选择要操作的职位。', agentName: 'System' })
     return
   }
-  const rows = selected.rows.map((row, idx) => indices.includes(idx) ? { ...row, status } : row)
-  await persistJobs(rows)
+  const updates = indices.map((idx) => {
+    const row = selected.rows[idx]
+    return { url: row.url, status }
+  }).filter((item) => item.url)
+
+  if (!updates.length) {
+    appendAgentLog({ type: 'warn', message: '选中的职位缺少可用链接，无法更新。', agentName: 'System' })
+    return
+  }
+
+  try {
+    const result = await submitJobMutation('/api/jobs/status', { updates })
+    appendAgentLog({
+      type: 'info',
+      message: `已更新 ${result.changed} 条职位状态为 ${status}。`,
+      agentName: 'System',
+    })
+    await fetchJobs()
+  } catch (err) {
+    appendAgentLog({ type: 'error', message: `批量状态更新失败：${err.message || '未知错误'}`, agentName: 'System' })
+  }
 }
 
 async function batchDelete() {
@@ -122,8 +136,26 @@ async function batchDelete() {
     appendAgentLog({ type: 'warn', message: '请先选择要删除的职位。', agentName: 'System' })
     return
   }
-  const rows = selected.rows.filter((_, idx) => !indices.includes(idx))
-  await persistJobs(rows)
+  const urls = indices.map((idx) => selected.rows[idx]?.url).filter(Boolean)
+  if (!urls.length) {
+    appendAgentLog({ type: 'warn', message: '选中的职位缺少可用链接，无法删除。', agentName: 'System' })
+    return
+  }
+  if (!window.confirm(`确定删除选中的 ${urls.length} 条职位记录吗？`)) {
+    return
+  }
+
+  try {
+    const result = await submitJobMutation('/api/jobs/delete', { urls })
+    appendAgentLog({
+      type: 'info',
+      message: `已删除 ${result.deleted} 条职位记录。`,
+      agentName: 'System',
+    })
+    await fetchJobs()
+  } catch (err) {
+    appendAgentLog({ type: 'error', message: `批量删除失败：${err.message || '未知错误'}`, agentName: 'System' })
+  }
 }
 
 // 排序事件绑定

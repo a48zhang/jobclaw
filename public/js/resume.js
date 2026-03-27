@@ -152,4 +152,31 @@ function showResumeReady(path) {
   if (previewEmpty) previewEmpty.classList.add('hidden')
 }
 
+function showResumeEmpty() {
+  const preview = document.getElementById('resume-preview')
+  const previewEmpty = document.getElementById('resume-preview-empty')
+  if (preview) preview.classList.add('hidden')
+  if (previewEmpty) previewEmpty.classList.remove('hidden')
+}
+
+async function loadResumeStatus() {
+  try {
+    const res = await fetch('/api/resume/status')
+    const json = await res.json()
+    if (!json.ok) {
+      showResumeEmpty()
+      return
+    }
+    if (json.exists) {
+      showResumeReady(json.path || '/workspace/output/resume.pdf')
+    } else {
+      showResumeEmpty()
+    }
+  } catch {
+    showResumeEmpty()
+  }
+}
+
 window.showResumeReady = showResumeReady
+window.showResumeEmpty = showResumeEmpty
+window.loadResumeStatus = loadResumeStatus

@@ -106,23 +106,153 @@ describe('/api/resume/review', () => {
     fs.mkdirSync(path.dirname(UPLOAD_PATH), { recursive: true })
     fs.writeFileSync(UPLOAD_PATH, 'dummy pdf bytes')
 
-    const run = vi.fn(() => Promise.resolve('review started'))
-    const factory = {
-      createAgent: vi.fn(() => ({ run })),
+    const submit = vi.fn(() => ({ queued: true, queueLength: 1 }))
+    const runtime = {
+      getMainAgent: () => ({ submit }),
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
     }
 
-    const app = createApp(TEST_WORKSPACE, factory as any)
+    const app = createApp(TEST_WORKSPACE, runtime as any)
     const res = await app.request('/api/resume/review', { method: 'POST' })
 
     expect(res.status).toBe(200)
     const json = await res.json() as { ok: boolean; path: string }
     expect(json.ok).toBe(true)
     expect(json.path).toBe('data/uploads/resume-upload.pdf')
-    expect(factory.createAgent).toHaveBeenCalledTimes(1)
-    expect(run).toHaveBeenCalledTimes(1)
-    expect(run.mock.calls[0]?.[0]).toContain('resume-upload.pdf')
-    expect(run.mock.calls[0]?.[0]).toContain('resume-clinic')
-    expect(run.mock.calls[0]?.[0]).toContain('read_pdf')
+    expect(submit).toHaveBeenCalledTimes(1)
+    expect(submit.mock.calls[0]?.[0]).toContain('resume-upload.pdf')
+    expect(submit.mock.calls[0]?.[0]).toContain('resume-clinic')
+    expect(submit.mock.calls[0]?.[0]).toContain('read_pdf')
+  })
+})
+
+describe('/api/resume/status', () => {
+  test('returns exists=false when resume output does not exist', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-resume-status-'))
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/resume/status')
+      expect(res.status).toBe(200)
+      const json = await res.json() as { ok: boolean; exists: boolean; path: string; mtime: string | null }
+      expect(json.ok).toBe(true)
+      expect(json.exists).toBe(false)
+      expect(json.path).toBe('/workspace/output/resume.pdf')
+      expect(json.mtime).toBeNull()
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('returns exists=true when resume output exists', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-resume-status-'))
+    fs.mkdirSync(path.join(workspace, 'output'), { recursive: true })
+    fs.writeFileSync(path.join(workspace, 'output/resume.pdf'), 'pdf')
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/resume/status')
+      expect(res.status).toBe(200)
+      const json = await res.json() as { ok: boolean; exists: boolean; path: string; mtime: string | null }
+      expect(json.ok).toBe(true)
+      expect(json.exists).toBe(true)
+      expect(json.path).toBe('/workspace/output/resume.pdf')
+      expect(typeof json.mtime).toBe('string')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('/api/jobs/*', () => {
+  test('updates selected job statuses without rewriting unrelated rows', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-jobs-status-'))
+    fs.mkdirSync(path.join(workspace, 'data'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'data/jobs.md'),
+      [
+        '| 公司 | 职位 | 链接 | 状态 | 时间 |',
+        '| --- | --- | --- | --- | --- |',
+        '| A | Frontend | https://example.com/a | discovered | 2026-03-20 |',
+        '| B | Backend | https://example.com/b | discovered | 2026-03-21 |',
+        '',
+      ].join('\n'),
+      'utf-8'
+    )
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/jobs/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          updates: [{ url: 'https://example.com/a', status: 'applied' }],
+        }),
+      })
+
+      expect(res.status).toBe(200)
+      const json = await res.json() as { ok: boolean; changed: number; total: number }
+      expect(json.ok).toBe(true)
+      expect(json.changed).toBe(1)
+      expect(json.total).toBe(2)
+
+      const content = fs.readFileSync(path.join(workspace, 'data/jobs.md'), 'utf-8')
+      expect(content).toContain('| A | Frontend | https://example.com/a | applied | 2026-03-20 |')
+      expect(content).toContain('| B | Backend | https://example.com/b | discovered | 2026-03-21 |')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('deletes selected jobs by url and keeps other rows intact', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-jobs-delete-'))
+    fs.mkdirSync(path.join(workspace, 'data'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'data/jobs.md'),
+      [
+        '| 公司 | 职位 | 链接 | 状态 | 时间 |',
+        '| --- | --- | --- | --- | --- |',
+        '| A | Frontend | https://example.com/a | discovered | 2026-03-20 |',
+        '| B | Backend | https://example.com/b | discovered | 2026-03-21 |',
+        '',
+      ].join('\n'),
+      'utf-8'
+    )
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/jobs/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          urls: ['https://example.com/a'],
+        }),
+      })
+
+      expect(res.status).toBe(200)
+      const json = await res.json() as { ok: boolean; deleted: number; total: number }
+      expect(json.ok).toBe(true)
+      expect(json.deleted).toBe(1)
+      expect(json.total).toBe(1)
+
+      const content = fs.readFileSync(path.join(workspace, 'data/jobs.md'), 'utf-8')
+      expect(content).not.toContain('https://example.com/a')
+      expect(content).toContain('https://example.com/b')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
   })
 })
 
