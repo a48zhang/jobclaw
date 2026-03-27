@@ -6,12 +6,13 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { eventBus } from '../eventBus.js'
 import type { EventBusMap } from '../eventBus.js'
-import { parseJobsMd } from './tui.js'
+import { JobsService } from '../domain/jobs-service.js'
 import { lockFile, unlockFile } from '../tools/lockFile.js'
 import type { BaseAgent } from '../agents/base/agent.js'
 import type { AgentFactory } from '../agents/factory.js'
 import type { Config, ConfigStatus } from '../config.js'
 import { getConfigStatus as readConfigStatus, readConfigFile, saveConfigFile } from '../config.js'
+import type { JobStatus } from '../runtime/contracts.js'
 
 const agentRegistry = new Map<string, BaseAgent>()
 
@@ -35,17 +36,6 @@ export function clearAgentRegistryForTests(): void {
 }
 
 const wsClients = new Set<WebSocket>()
-const JOBS_HEADER = '| 公司 | 职位 | 链接 | 状态 | 时间 |'
-const JOBS_SEPARATOR = '| --- | --- | --- | --- | --- |'
-
-interface JobMutationRow {
-  company: string
-  title: string
-  url: string
-  status: string
-  time: string
-}
-
 function broadcast(type: string, data: unknown): void {
   const msg = JSON.stringify({ event: type, data })
   for (const ws of wsClients) {
@@ -69,27 +59,14 @@ function ensureFileExists(filePath: string): void {
   }
 }
 
-function ensureJobsFileExists(workspaceRoot: string): string {
-  const jobsPath = path.resolve(workspaceRoot, 'data/jobs.md')
-  const dir = path.dirname(jobsPath)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  if (!fs.existsSync(jobsPath)) {
-    fs.writeFileSync(jobsPath, `${JOBS_HEADER}\n${JOBS_SEPARATOR}\n`, 'utf-8')
-  }
-  return jobsPath
-}
-
-function serializeJobsMd(rows: JobMutationRow[]): string {
-  const lines = rows.map((row) => `| ${row.company} | ${row.title} | ${row.url} | ${row.status} | ${row.time} |`)
-  return [JOBS_HEADER, JOBS_SEPARATOR, ...lines, ''].join('\n')
-}
-
-function readJobsRows(workspaceRoot: string): JobMutationRow[] {
-  const jobsPath = ensureJobsFileExists(workspaceRoot)
-  const content = fs.readFileSync(jobsPath, 'utf-8')
-  return parseJobsMd(content)
+function isJobStatus(value: string): value is JobStatus {
+  return (
+    value === 'discovered' ||
+    value === 'favorite' ||
+    value === 'applied' ||
+    value === 'failed' ||
+    value === 'login_required'
+  )
 }
 
 const BUS_EVENTS: (keyof EventBusMap)[] = [
@@ -147,6 +124,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
       }
 
   const app = new Hono()
+  const jobs = new JobsService(workspaceRoot, 'web-server')
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
   const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
 
@@ -174,27 +152,17 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     }
   })
 
-  app.get('/api/jobs', (c) => {
+  app.get('/api/jobs', async (c) => {
     try {
-      const jobsPath = path.resolve(workspaceRoot, 'data/jobs.md')
-      const content = fs.existsSync(jobsPath) ? fs.readFileSync(jobsPath, 'utf-8') : ''
-      return c.json(parseJobsMd(content))
+      return c.json(await jobs.listRows())
     } catch {
       return c.json([], 500)
     }
   })
 
-  app.get('/api/stats', (c) => {
+  app.get('/api/stats', async (c) => {
     try {
-      const jobsPath = path.resolve(workspaceRoot, 'data/jobs.md')
-      const content = fs.existsSync(jobsPath) ? fs.readFileSync(jobsPath, 'utf-8') : ''
-      const jobs = parseJobsMd(content)
-      const stats: Record<string, number> = {}
-      for (const job of jobs) {
-        const status = job.status || 'unknown'
-        stats[status] = (stats[status] ?? 0) + 1
-      }
-      return c.json({ total: jobs.length, byStatus: stats })
+      return c.json(await jobs.getStats())
     } catch {
       return c.json({ total: 0, byStatus: {} })
     }
@@ -375,32 +343,17 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
           url: typeof item.url === 'string' ? item.url.trim() : '',
           status: typeof item.status === 'string' ? item.status.trim() : '',
         }))
-        .filter((item) => item.url && item.status)
+        .filter((item): item is { url: string; status: JobStatus } => isJobStatus(item.status) && Boolean(item.url))
 
       if (normalizedUpdates.length === 0) {
         return c.json({ ok: false, error: 'No valid updates provided' }, 400)
       }
 
-      ensureJobsFileExists(workspaceRoot)
-      await lockFile('data/jobs.md', 'web-server', workspaceRoot)
-      try {
-        const rows = readJobsRows(workspaceRoot)
-        const statusByUrl = new Map(normalizedUpdates.map((item) => [item.url, item.status]))
-        let changed = 0
-        const nextRows = rows.map((row) => {
-          const nextStatus = statusByUrl.get(row.url)
-          if (!nextStatus || nextStatus === row.status) {
-            return row
-          }
-          changed += 1
-          return { ...row, status: nextStatus }
-        })
-        fs.writeFileSync(path.resolve(workspaceRoot, 'data/jobs.md'), serializeJobsMd(nextRows), 'utf-8')
+      const result = await jobs.updateStatuses(normalizedUpdates, { lockHolder: 'web-server' })
+      if (result.changed > 0) {
         eventBus.emit('job:updated', { company: 'system', title: 'jobs', status: 'updated' })
-        return c.json({ ok: true, changed, requested: normalizedUpdates.length, total: nextRows.length })
-      } finally {
-        await unlockFile('data/jobs.md', 'web-server', workspaceRoot)
       }
+      return c.json({ ok: true, ...result })
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }
@@ -417,32 +370,27 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         return c.json({ ok: false, error: 'No valid urls provided' }, 400)
       }
 
-      ensureJobsFileExists(workspaceRoot)
-      await lockFile('data/jobs.md', 'web-server', workspaceRoot)
-      try {
-        const rows = readJobsRows(workspaceRoot)
-        const urlSet = new Set(urls)
-        const nextRows = rows.filter((row) => !urlSet.has(row.url))
-        const deleted = rows.length - nextRows.length
-        fs.writeFileSync(path.resolve(workspaceRoot, 'data/jobs.md'), serializeJobsMd(nextRows), 'utf-8')
+      const result = await jobs.deleteByUrls(urls, { lockHolder: 'web-server' })
+      if (result.deleted > 0) {
         eventBus.emit('job:updated', { company: 'system', title: 'jobs', status: 'updated' })
-        return c.json({ ok: true, deleted, requested: urls.length, total: nextRows.length })
-      } finally {
-        await unlockFile('data/jobs.md', 'web-server', workspaceRoot)
       }
+      return c.json({ ok: true, ...result })
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }
   })
 
-  app.get('/api/config/:name', (c) => {
+  app.get('/api/config/:name', async (c) => {
     let name = c.req.param('name')
     if (!name.endsWith('.md')) name += '.md'
     if (name !== 'targets.md' && name !== 'userinfo.md' && name !== 'jobs.md') {
       return c.json({ ok: false, error: 'Unknown config name' }, 400)
     }
-    const filePath = path.resolve(workspaceRoot, 'data', name)
     try {
+      if (name === 'jobs.md') {
+        return c.json({ ok: true, content: await jobs.readMarkdownSource() })
+      }
+      const filePath = path.resolve(workspaceRoot, 'data', name)
       const content = fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf-8') : ''
       return c.json({ ok: true, content })
     } catch (err) {
@@ -460,13 +408,17 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     try {
       const body = await c.req.json<{ content?: string }>()
       const content = typeof body.content === 'string' ? body.content : ''
-      const filePath = path.resolve(workspaceRoot, relPath)
-      ensureFileExists(filePath)
-      await lockFile(relPath, 'web-server', workspaceRoot)
-      try {
-        fs.writeFileSync(filePath, content, 'utf-8')
-      } finally {
-        await unlockFile(relPath, 'web-server', workspaceRoot)
+      if (name === 'jobs.md') {
+        await jobs.importMarkdown(content, { lockHolder: 'web-server', mode: 'replace' })
+      } else {
+        const filePath = path.resolve(workspaceRoot, relPath)
+        ensureFileExists(filePath)
+        await lockFile(relPath, 'web-server', workspaceRoot)
+        try {
+          fs.writeFileSync(filePath, content, 'utf-8')
+        } finally {
+          await unlockFile(relPath, 'web-server', workspaceRoot)
+        }
       }
       if (name === 'jobs.md') {
         eventBus.emit('job:updated', { company: 'system', title: 'jobs', status: 'updated' })

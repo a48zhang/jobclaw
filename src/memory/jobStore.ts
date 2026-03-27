@@ -1,7 +1,7 @@
 import type { JobRecord } from '../runtime/contracts.js'
 import { JsonFileStore } from '../infra/store/json-store.js'
 import { getJobsStatePath, getJobsDataPath, ensureWorkspaceData } from '../infra/workspace/paths.js'
-import { writeFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 import * as crypto from 'node:crypto'
 
 const JOBS_HEADER = '| 公司 | 职位 | 链接 | 状态 | 时间 |'
@@ -10,16 +10,19 @@ type JobStatus = JobRecord['status']
 
 export class JobStore {
   private store: JsonFileStore<JobRecord[]>
+  private bootstrapPromise?: Promise<void>
 
   constructor(private workspaceRoot: string) {
     this.store = new JsonFileStore(getJobsStatePath(workspaceRoot), [])
   }
 
   async list(): Promise<JobRecord[]> {
+    await this.ensureInitialized()
     return this.store.read()
   }
 
   async upsert(job: Omit<JobRecord, 'id' | 'discoveredAt' | 'updatedAt'> & Partial<JobRecord>): Promise<JobRecord> {
+    await this.ensureInitialized()
     const now = new Date().toISOString()
     const existing = await this.store.read()
 
@@ -54,6 +57,47 @@ export class JobStore {
     return newRecord
   }
 
+  async updateStatuses(updates: Array<{ url: string; status: JobStatus }>): Promise<{ changed: number; total: number }> {
+    await this.ensureInitialized()
+    const existing = await this.store.read()
+    const statusByUrl = new Map(updates.map((item) => [item.url, item.status]))
+    let changed = 0
+    const now = new Date().toISOString()
+
+    const next = existing.map((record) => {
+      const status = statusByUrl.get(record.url)
+      if (!status || status === record.status) {
+        return record
+      }
+      changed += 1
+      return {
+        ...record,
+        status,
+        updatedAt: now,
+      }
+    })
+
+    if (changed > 0) {
+      await this.store.write(next)
+    }
+
+    return { changed, total: next.length }
+  }
+
+  async deleteByUrls(urls: string[]): Promise<{ deleted: number; total: number }> {
+    await this.ensureInitialized()
+    const existing = await this.store.read()
+    const urlSet = new Set(urls)
+    const next = existing.filter((record) => !urlSet.has(record.url))
+    const deleted = existing.length - next.length
+
+    if (deleted > 0) {
+      await this.store.write(next)
+    }
+
+    return { deleted, total: next.length }
+  }
+
   async exportToMarkdown(): Promise<void> {
     const records = await this.list()
     await ensureWorkspaceData(this.workspaceRoot)
@@ -73,12 +117,57 @@ export class JobStore {
     await writeFile(getJobsDataPath(this.workspaceRoot), content, 'utf-8')
   }
 
-  async importFromMarkdown(content: string): Promise<JobRecord[]> {
+  async importFromMarkdown(
+    content: string,
+    options: { mode?: 'merge' | 'replace' } = {}
+  ): Promise<JobRecord[]> {
+    await this.ensureInitialized()
     const records = parseJobsMarkdown(content)
-    const stored = await this.list()
-    const merged = mergeJobs(stored, records)
-    await this.store.write(merged)
-    return merged
+    if (options.mode === 'merge') {
+      const stored = await this.store.read()
+      const merged = mergeImportedJobs(stored, records)
+      await this.store.write(merged)
+      return merged
+    }
+
+    const stored = await this.store.read()
+    const replaced = replaceImportedJobs(stored, records)
+    await this.store.write(replaced)
+    return replaced
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (!this.bootstrapPromise) {
+      this.bootstrapPromise = this.bootstrapFromMarkdownIfNeeded()
+    }
+    await this.bootstrapPromise
+  }
+
+  private async bootstrapFromMarkdownIfNeeded(): Promise<void> {
+    const current = await this.store.read()
+    if (current.length > 0) {
+      return
+    }
+
+    const content = await this.readMarkdownSource()
+    if (!content.trim()) {
+      return
+    }
+
+    const imported = parseJobsMarkdown(content)
+    if (imported.length === 0) {
+      return
+    }
+
+    await this.store.write(imported)
+  }
+
+  private async readMarkdownSource(): Promise<string> {
+    try {
+      return await readFile(getJobsDataPath(this.workspaceRoot), 'utf-8')
+    } catch {
+      return ''
+    }
   }
 }
 
@@ -106,17 +195,29 @@ function parseJobsMarkdown(content: string): JobRecord[] {
   return parsed
 }
 
-function mergeJobs(existing: JobRecord[], incoming: JobRecord[]): JobRecord[] {
-  const map = new Map(existing.map((record) => [record.id, record]))
-  for (const incomingRecord of incoming) {
-    const stored = map.get(incomingRecord.id)
+function replaceImportedJobs(existing: JobRecord[], incoming: JobRecord[]): JobRecord[] {
+  const existingByUrl = new Map(existing.map((record) => [record.url, record]))
+  return incoming.map((record) => {
+    const stored = existingByUrl.get(record.url)
     if (!stored) {
-      map.set(incomingRecord.id, incomingRecord)
-    } else {
-      map.set(incomingRecord.id, { ...stored, ...incomingRecord, updatedAt: incomingRecord.updatedAt })
+      return record
     }
+    return {
+      ...stored,
+      ...record,
+      id: stored.id,
+      fitSummary: stored.fitSummary,
+      notes: stored.notes,
+    }
+  })
+}
+
+function mergeImportedJobs(existing: JobRecord[], incoming: JobRecord[]): JobRecord[] {
+  const mergedByUrl = new Map(existing.map((record) => [record.url, record]))
+  for (const record of replaceImportedJobs(existing, incoming)) {
+    mergedByUrl.set(record.url, record)
   }
-  return Array.from(map.values())
+  return Array.from(mergedByUrl.values())
 }
 
 function normalizeStatus(value: string): JobStatus | undefined {
