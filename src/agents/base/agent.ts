@@ -849,7 +849,10 @@ export abstract class BaseAgent extends EventEmitter {
   private isToolRetryable(toolName: string): boolean {
     if (toolName === REQUEST_TOOL_NAME || toolName === TOOL_NAMES.RUN_AGENT) return false
     if (!LOCAL_TOOL_NAMES.includes(toolName as (typeof LOCAL_TOOL_NAMES)[number])) {
-      return isBrowserToolName(toolName) && !NON_RETRYABLE_BROWSER_TOOLS.has(toolName)
+      if (isBrowserToolName(toolName)) {
+        return !NON_RETRYABLE_BROWSER_TOOLS.has(toolName)
+      }
+      return true
     }
     return TOOL_RETRYABLE_LOCAL_TOOLS.has(toolName)
   }
@@ -927,7 +930,8 @@ export abstract class BaseAgent extends EventEmitter {
     if (this.messages.length === 0) return []
 
     const tokenCount = this.compressor.calculateTokens(this.messages)
-    if (tokenCount < 20_000) {
+    const nonSystemCount = this.messages.filter((message) => message.role !== 'system').length
+    if (tokenCount < 20_000 && nonSystemCount < 16) {
       return this.messages
     }
 
