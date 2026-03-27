@@ -7,18 +7,41 @@ import * as path from 'node:path'
 import { eventBus } from '../eventBus.js'
 import type { EventBusMap } from '../eventBus.js'
 import { JobsService } from '../domain/jobs-service.js'
+import { ConversationStore } from '../memory/conversationStore.js'
+import { DelegationStore } from '../memory/delegationStore.js'
+import { InterventionStore } from '../memory/interventionStore.js'
+import { SessionStore } from '../memory/sessionStore.js'
 import { lockFile, unlockFile } from '../tools/lockFile.js'
 import type { BaseAgent } from '../agents/base/agent.js'
 import type { AgentFactory } from '../agents/factory.js'
 import type { Config, ConfigStatus } from '../config.js'
 import { getConfigStatus as readConfigStatus, readConfigFile, saveConfigFile } from '../config.js'
 import type { MCPClientStatus } from '../mcp.js'
-import type { JobStatus } from '../runtime/contracts.js'
+import type { AgentSession, DelegatedRun, InterventionRecord, JobStatus } from '../runtime/contracts.js'
 
 const agentRegistry = new Map<string, BaseAgent>()
 
 interface RuntimeStatusPayload {
   mcp: MCPClientStatus
+}
+
+interface RuntimeSessionStore {
+  list(): Promise<AgentSession[]>
+  get(sessionId: string): Promise<AgentSession | null>
+}
+
+interface RuntimeDelegationStore {
+  listByParent(parentSessionId: string): Promise<DelegatedRun[]>
+  list(): Promise<DelegatedRun[]>
+}
+
+interface RuntimeInterventionManager {
+  list(): Promise<InterventionRecord[]>
+  listPending(ownerId?: string): Promise<InterventionRecord[]>
+  resolve(
+    input: { ownerId: string; requestId?: string; input: string },
+    options?: { emitEvent?: boolean; sessionId?: string; agentName?: string; delegatedRunId?: string }
+  ): Promise<InterventionRecord | null>
 }
 
 export interface ServerRuntime {
@@ -27,6 +50,10 @@ export interface ServerRuntime {
   getConfigStatus(): ConfigStatus
   reloadFromConfig(): Promise<void>
   getRuntimeStatus?(): RuntimeStatusPayload
+  getSessionStore?(): RuntimeSessionStore | undefined
+  getDelegationStore?(): RuntimeDelegationStore | undefined
+  getInterventionManager?(): RuntimeInterventionManager | undefined
+  getConversationStore?(): ConversationStore | undefined
 }
 
 export function registerAgent(agent: BaseAgent): void {
@@ -73,6 +100,70 @@ function isJobStatus(value: string): value is JobStatus {
     value === 'failed' ||
     value === 'login_required'
   )
+}
+
+function normalizeAgentState(state: string): AgentSession['state'] {
+  if (state === 'waiting') return 'waiting_input'
+  if (state === 'running') return 'running'
+  if (state === 'error') return 'error'
+  return 'idle'
+}
+
+function toConversationMessages(agent: BaseAgent): Array<{ role: 'user' | 'assistant'; content: string }> {
+  return agent.getMessages()
+    .filter(
+      (
+        message
+      ): message is typeof message & {
+        role: 'user' | 'assistant'
+      } => message.role === 'user' || message.role === 'assistant'
+    )
+    .map((message) => ({
+      role: message.role,
+      content: typeof message.content === 'string'
+        ? message.content
+        : Array.isArray(message.content)
+          ? message.content
+          .map((part) => ('type' in part && part.type === 'text' && 'text' in part ? part.text : ''))
+          .filter(Boolean)
+          .join('\n')
+          : '',
+    }))
+    .filter((message) => {
+      const content = message.content.trim()
+      return content.length > 0 && !content.startsWith('SYSTEM_SUMMARY:')
+    })
+}
+
+function toConversationSummary(agent: BaseAgent): string {
+  const summaryMessage = agent.getMessages().find(
+    (message) =>
+      message.role === 'user' &&
+      typeof message.content === 'string' &&
+      message.content.startsWith('SYSTEM_SUMMARY:')
+  )
+  return typeof summaryMessage?.content === 'string' ? summaryMessage.content : ''
+}
+
+function buildLiveSession(agent: BaseAgent): AgentSession {
+  const snapshot = agent.getState()
+  const now = new Date().toISOString()
+  return {
+    id: agent.agentName,
+    agentName: agent.agentName,
+    profile: 'main',
+    createdAt: now,
+    updatedAt: now,
+    state: normalizeAgentState(snapshot.state),
+  }
+}
+
+function resolveLiveAgent(runtime: ServerRuntime, agentName: string): BaseAgent | undefined {
+  const registered = agentRegistry.get(agentName)
+  if (registered) return registered
+  const mainAgent = runtime.getMainAgent()
+  if (mainAgent?.agentName === agentName) return mainAgent
+  return undefined
 }
 
 const BUS_EVENTS: (keyof EventBusMap)[] = [
@@ -143,10 +234,18 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
             message: 'Runtime status unavailable',
           },
         }),
+        getSessionStore: () => undefined,
+        getDelegationStore: () => undefined,
+        getInterventionManager: () => undefined,
+        getConversationStore: () => undefined,
       }
 
   const app = new Hono()
   const jobs = new JobsService(workspaceRoot, 'web-server')
+  const conversationStore = new ConversationStore(workspaceRoot)
+  const sessionStore = new SessionStore(workspaceRoot)
+  const delegationStore = new DelegationStore(workspaceRoot)
+  const interventionStore = new InterventionStore(workspaceRoot)
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
   const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
 
@@ -192,10 +291,22 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
 
   app.post('/api/intervention', async (c) => {
     try {
-      const body = await c.req.json<{ input?: string; agentName?: string; requestId?: string }>()
+      const body = await c.req.json<{ input?: string; agentName?: string; ownerId?: string; requestId?: string }>()
       const input = typeof body.input === 'string' ? body.input : ''
       const agentName = typeof body.agentName === 'string' ? body.agentName : ([...agentRegistry.keys()][0] ?? 'main')
+      const ownerId = typeof body.ownerId === 'string' ? body.ownerId : agentName
       const requestId = typeof body.requestId === 'string' ? body.requestId : undefined
+      const interventionManager = runtime.getInterventionManager?.()
+      if (interventionManager) {
+        const record = await interventionManager.resolve(
+          { ownerId, input, requestId },
+          {
+            sessionId: agentName,
+            agentName,
+          }
+        )
+        return c.json({ ok: Boolean(record), resolved: Boolean(record) }, record ? 200 : 404)
+      }
       eventBus.emit('intervention:resolved', { agentName, input, requestId })
       return c.json({ ok: true })
     } catch {
@@ -203,25 +314,110 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     }
   })
 
-  app.get('/api/session/:agentName', (c) => {
+  app.get('/api/runtime/sessions', async (c) => {
+    try {
+      const activeSessionStore = runtime.getSessionStore?.() ?? sessionStore
+      const sessions = await activeSessionStore.list()
+      return c.json({ ok: true, sessions })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/delegations/:sessionId', async (c) => {
+    try {
+      const sessionId = c.req.param('sessionId')
+      const activeDelegationStore = runtime.getDelegationStore?.() ?? delegationStore
+      const delegations = await activeDelegationStore.listByParent(sessionId)
+      return c.json({ ok: true, runs: delegations, delegations })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/delegations', async (c) => {
+    try {
+      const sessionId = c.req.query('parentSessionId')
+      if (!sessionId) {
+        const activeDelegationStore = runtime.getDelegationStore?.() ?? delegationStore
+        const delegations = await activeDelegationStore.list()
+        return c.json({ ok: true, runs: delegations, delegations })
+      }
+      const activeDelegationStore = runtime.getDelegationStore?.() ?? delegationStore
+      const delegations = await activeDelegationStore.listByParent(sessionId)
+      return c.json({ ok: true, runs: delegations, delegations })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/interventions/:ownerId', async (c) => {
+    try {
+      const ownerId = c.req.param('ownerId')
+      const status = c.req.query('status') || undefined
+      const activeInterventionManager = runtime.getInterventionManager?.()
+      const interventions = activeInterventionManager
+        ? status && status !== 'pending'
+          ? (await activeInterventionManager.list()).filter(
+            (record) => record.ownerId === ownerId && record.status === status
+          )
+          : await activeInterventionManager.listPending(ownerId)
+        : (await interventionStore.list()).filter(
+          (record) => record.ownerId === ownerId && (!status || record.status === status)
+        )
+      return c.json({ ok: true, interventions })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/interventions', async (c) => {
+    try {
+      const ownerId = c.req.query('ownerId') || undefined
+      const status = c.req.query('status') || undefined
+      const activeInterventionManager = runtime.getInterventionManager?.()
+      const interventions = activeInterventionManager
+        ? status && status !== 'pending'
+          ? (await activeInterventionManager.list()).filter(
+            (record) =>
+              (!ownerId || record.ownerId === ownerId) &&
+              record.status === status
+          )
+          : await activeInterventionManager.listPending(ownerId)
+        : (await interventionStore.list()).filter(
+          (record) =>
+            (!ownerId || record.ownerId === ownerId) &&
+            (!status || record.status === status)
+        )
+      return c.json({ ok: true, interventions })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/session/:agentName', async (c) => {
     const agentName = c.req.param('agentName')
-    const agent = agentRegistry.get(agentName)
-    if (!agent) {
+    const activeSessionStore = runtime.getSessionStore?.() ?? sessionStore
+    const activeConversationStore = runtime.getConversationStore?.() ?? conversationStore
+    const liveAgent = resolveLiveAgent(runtime, agentName)
+    const [session, conversation] = await Promise.all([
+      activeSessionStore.get(agentName),
+      activeConversationStore.get(agentName),
+    ])
+    const liveSummary = liveAgent ? toConversationSummary(liveAgent) : ''
+    const liveMessages = liveAgent ? toConversationMessages(liveAgent) : []
+    const fallbackSession = liveAgent ? buildLiveSession(liveAgent) : null
+
+    if (!session && !fallbackSession && (!conversation.recentMessages.length && !conversation.summary) && !liveMessages.length) {
       return c.json({ ok: false, error: 'Agent not found' }, 404)
     }
 
-    const history = agent.getMessages()
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({
-        role: m.role,
-        content: typeof m.content === 'string' ? m.content : '',
-        toolCalls: (m as any).tool_calls?.map((tc: any) => ({
-          name: tc.function?.name,
-          args: tc.function?.arguments,
-        })),
-      }))
-
-    return c.json({ ok: true, messages: history })
+    return c.json({
+      ok: true,
+      session: session ?? fallbackSession,
+      summary: conversation.summary || liveSummary,
+      messages: conversation.recentMessages.length > 0 ? conversation.recentMessages : liveMessages,
+    })
   })
 
   app.post('/api/chat', async (c) => {

@@ -41,4 +41,37 @@ export class ConversationStore {
       lastActivityAt: new Date().toISOString(),
     }))
   }
+
+  async saveSnapshot(
+    sessionId: string,
+    snapshot: Pick<ConversationMemory, 'summary' | 'recentMessages' | 'lastActivityAt'>
+  ): Promise<ConversationMemory> {
+    const nextMemory: ConversationMemory = {
+      sessionId,
+      summary: snapshot.summary,
+      recentMessages: snapshot.recentMessages,
+      lastActivityAt: snapshot.lastActivityAt ?? new Date().toISOString(),
+    }
+    await this.createStore(sessionId).write(nextMemory)
+    return nextMemory
+  }
+
+  async clear(sessionId: string): Promise<ConversationMemory> {
+    return this.saveSnapshot(sessionId, {
+      summary: '',
+      recentMessages: [],
+      lastActivityAt: new Date().toISOString(),
+    })
+  }
+
+  clearSync(sessionId: string): ConversationMemory {
+    const snapshot: ConversationMemory = {
+      sessionId,
+      summary: '',
+      recentMessages: [],
+      lastActivityAt: new Date().toISOString(),
+    }
+    this.createStore(sessionId).writeSync(snapshot)
+    return snapshot
+  }
 }

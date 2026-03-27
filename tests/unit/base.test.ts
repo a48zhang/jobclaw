@@ -6,6 +6,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { eventBus } from '../../src/eventBus'
 import { fileURLToPath } from 'node:url'
+import { ConversationStore } from '../../src/memory/conversationStore'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // 测试用的具体 Agent 实现
@@ -116,6 +117,14 @@ describe('BaseAgent', () => {
     if (fs.existsSync(sessionPath)) {
       fs.unlinkSync(sessionPath)
     }
+    const conversationDir = path.join(TEST_WORKSPACE, 'state', 'conversation')
+    if (fs.existsSync(conversationDir)) {
+      for (const entry of fs.readdirSync(conversationDir)) {
+        if (entry.startsWith('test') && entry.endsWith('.json')) {
+          fs.unlinkSync(path.join(conversationDir, entry))
+        }
+      }
+    }
   })
 
   describe('构造函数', () => {
@@ -209,9 +218,9 @@ describe('BaseAgent', () => {
 
       persistentAgent.testSetMessages([
         { role: 'system', content: 'system' },
-        ...Array.from({ length: 16 }, (_, index) => ({
+        ...Array.from({ length: 24 }, (_, index) => ({
           role: index % 2 === 0 ? 'user' : 'assistant',
-          content: `消息 ${index} ` + 'x'.repeat(4000),
+          content: `消息 ${index} ` + 'x'.repeat(12000),
         })),
       ] as any)
       ;(persistentAgent as any).state = 'running'
@@ -220,8 +229,31 @@ describe('BaseAgent', () => {
 
       const sessionPath = path.join(TEST_AGENT_DIR, 'session.json')
       const session = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'))
-      expect(session.messages.length).toBeLessThan(16)
+      expect(session.messages.length).toBeLessThan(24)
       expect(session.messages[0]?.content).toContain('SYSTEM_SUMMARY')
+    })
+
+    test('saveSession 会同步写入 conversation store 摘要与最近消息', async () => {
+      const persistentAgent = new TestAgent({
+        openai: mockOpenAI,
+        agentName: 'test',
+        model: 'test-model',
+        workspaceRoot: TEST_WORKSPACE,
+        persistent: true,
+      })
+
+      persistentAgent.testSetMessages([
+        { role: 'system', content: 'system' },
+        { role: 'user', content: 'SYSTEM_SUMMARY: 已完成搜索，等待下一步。' },
+        { role: 'assistant', content: '已记录 3 个职位。' },
+      ] as any)
+
+      await persistentAgent.testSaveSession()
+
+      const conversation = await new ConversationStore(TEST_WORKSPACE).get('test')
+      expect(conversation.summary).toContain('SYSTEM_SUMMARY')
+      expect(conversation.recentMessages.some((message) => message.content.startsWith('SYSTEM_SUMMARY:'))).toBe(false)
+      expect(conversation.recentMessages.at(-1)?.content).toContain('已记录 3 个职位')
     })
   })
 
@@ -657,55 +689,43 @@ describe('executeToolCall()', () => {
   })
 
   test('MCP 工具遇到瞬时错误时会自动重试', async () => {
-    const mockMCPClient: MCPClient = {
-      listTools: vi.fn(() => Promise.resolve([
-        { name: 'custom_tool', description: 'Custom Tool', inputSchema: { type: 'object' } },
-      ])),
-      callTool: vi
-        .fn()
-        .mockRejectedValueOnce(new Error('socket hang up'))
-        .mockResolvedValueOnce('MCP tool result after retry'),
-    }
+    vi.useFakeTimers()
+    try {
+      const mockMCPClient: MCPClient = {
+        listTools: vi.fn(() => Promise.resolve([
+          { name: 'custom_tool', description: 'Custom Tool', inputSchema: { type: 'object' } },
+        ])),
+        callTool: vi
+          .fn()
+          .mockRejectedValueOnce(new Error('socket hang up'))
+          .mockResolvedValueOnce('MCP tool result after retry'),
+      }
 
-    let llmCallCount = 0
-    const mockOpenAI = {
-      chat: {
-        completions: {
-          create: vi.fn((params: any) => {
-            llmCallCount++
-            if (llmCallCount === 1) {
-              return formatResponse(params, {
-                content: null,
-                tool_calls: [{
-                  id: 'call_retry',
-                  type: 'function',
-                  function: {
-                    name: 'custom_tool',
-                    arguments: '{"param": "value"}',
-                  },
-                }],
-              })
-            }
-            return formatResponse(params, {
-              content: 'MCP tool executed after retry',
-            })
-          }),
+      const agent = new TestAgent({
+        openai: createMockOpenAI(),
+        agentName: 'test_retry',
+        model: 'test-model',
+        workspaceRoot: TEST_WORKSPACE,
+        mcpClient: mockMCPClient,
+      })
+
+      const resultPromise = agent.testExecuteToolCall({
+        id: 'call_retry',
+        type: 'function',
+        function: {
+          name: 'custom_tool',
+          arguments: '{"param": "value"}',
         },
-      },
-    } as unknown as OpenAI
+      } as any)
 
-    const agent = new TestAgent({
-      openai: mockOpenAI,
-      agentName: 'test_retry',
-      model: 'test-model',
-      workspaceRoot: TEST_WORKSPACE,
-      mcpClient: mockMCPClient,
-    })
+      await vi.runAllTimersAsync()
+      const result = await resultPromise
 
-    const result = await agent.run('调用会重试的 MCP 工具')
-
-    expect(result).toBe('MCP tool executed after retry')
-    expect(mockMCPClient.callTool).toHaveBeenCalledTimes(2)
+      expect((result as { content: string }).content).toBe('MCP tool result after retry')
+      expect(mockMCPClient.callTool).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   test('run_agent 在 MCP 存在时也走本地工具分支', async () => {
@@ -833,6 +853,26 @@ describe('executeToolCall()', () => {
 
     expect(contents).toContain('SYSTEM_SUMMARY: 会话进行中，持久化快照已截断')
     expect(session.messages.length).toBeLessThan(20)
+  })
+
+  test('resetSession 会清空 conversation 快照，避免旧对话残留', async () => {
+    const conversationPath = path.join(TEST_WORKSPACE, 'state', 'conversation', 'test_reset_conversation.json')
+    const localMockOpenAI = createMockOpenAI()
+
+    const persistentAgent = new TestAgent({
+      openai: localMockOpenAI,
+      agentName: 'test_reset_conversation',
+      model: 'test-model',
+      workspaceRoot: TEST_WORKSPACE,
+      persistent: true,
+    })
+
+    await persistentAgent.run('请记录这条消息')
+    persistentAgent.resetSession()
+
+    const snapshot = JSON.parse(fs.readFileSync(conversationPath, 'utf-8'))
+    expect(snapshot.summary).toBe('')
+    expect(snapshot.recentMessages).toEqual([])
   })
 })
 

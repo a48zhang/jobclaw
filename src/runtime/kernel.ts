@@ -5,6 +5,7 @@ import { MainAgent } from '../agents/main/index.js'
 import { getConfigStatus, loadConfig, type ConfigStatus } from '../config.js'
 import { createMCPClient, type MCPClientStatus } from '../mcp.js'
 import { bindRuntimeEventStream } from '../eventBus.js'
+import { ConversationStore } from '../memory/conversationStore.js'
 import { DelegationStore } from '../memory/delegationStore.js'
 import { InMemoryEventStream } from './event-stream.js'
 import { InterventionManager } from './intervention-manager.js'
@@ -38,6 +39,7 @@ export class RuntimeKernel {
   private readonly sessionStore: JsonSessionStore
   private readonly interventionManager: InterventionManager
   private readonly delegationStore: DelegationStore
+  private readonly conversationStore: ConversationStore
 
   private mcpClient: ClosableMCPClient = null
   private mcpStatus: MCPClientStatus = {
@@ -61,6 +63,7 @@ export class RuntimeKernel {
     this.sessionStore = new JsonSessionStore(this.workspaceRoot)
     this.interventionManager = new InterventionManager(this.workspaceRoot, this.eventStream)
     this.delegationStore = new DelegationStore(this.workspaceRoot)
+    this.conversationStore = new ConversationStore(this.workspaceRoot)
   }
 
   async start(): Promise<void> {
@@ -214,6 +217,10 @@ export class RuntimeKernel {
 
   getDelegationStore(): DelegationStore {
     return this.delegationStore
+  }
+
+  getConversationStore(): ConversationStore {
+    return this.conversationStore
   }
 
   private installRuntimeObservers(): void {

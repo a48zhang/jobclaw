@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises'
+import * as syncFs from 'node:fs'
 import * as path from 'node:path'
 
 export class JsonFileStore<T> {
@@ -29,6 +30,12 @@ export class JsonFileStore<T> {
     const dir = path.dirname(this.filePath)
     await fs.mkdir(dir, { recursive: true })
     await fs.writeFile(this.filePath, JSON.stringify(value, null, 2), 'utf-8')
+  }
+
+  writeSync(value: T): void {
+    const dir = path.dirname(this.filePath)
+    syncFs.mkdirSync(dir, { recursive: true })
+    syncFs.writeFileSync(this.filePath, JSON.stringify(value, null, 2), 'utf-8')
   }
 
   async mutate(mutator: (current: T) => T | Promise<T>): Promise<T> {

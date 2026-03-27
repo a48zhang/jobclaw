@@ -42,6 +42,208 @@ describe('/api/intervention', () => {
       requestId: 'req-123',
     })
   })
+
+  test('prefers runtime intervention manager when available', async () => {
+    const resolve = vi.fn(async () => ({
+      id: 'req-1',
+      ownerType: 'session',
+      ownerId: 'main',
+      kind: 'text',
+      prompt: 'need input',
+      status: 'resolved',
+      createdAt: '2026-03-27T00:00:00.000Z',
+      updatedAt: '2026-03-27T00:00:01.000Z',
+      input: 'backend',
+    }))
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getInterventionManager: () => ({ resolve }),
+    }
+
+    const app = createApp(TEST_WORKSPACE, runtime as any)
+    const res = await app.request('/api/intervention', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentName: 'main',
+        ownerId: 'main',
+        input: 'backend',
+        requestId: 'req-1',
+      }),
+    })
+
+    expect(res.status).toBe(200)
+    expect(resolve).toHaveBeenCalledWith(
+      { ownerId: 'main', input: 'backend', requestId: 'req-1' },
+      { sessionId: 'main', agentName: 'main' }
+    )
+  })
+})
+
+describe('/api/session/:agentName', () => {
+  test('reads session state and recent conversation from structured stores', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-session-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'session'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'conversation'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'session', 'main.json'),
+      JSON.stringify({
+        id: 'main',
+        agentName: 'main',
+        profile: 'main',
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+        state: 'idle',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'conversation', 'main.json'),
+      JSON.stringify({
+        sessionId: 'main',
+        summary: 'SYSTEM_SUMMARY: 已完成阶段一。',
+        recentMessages: [
+          { role: 'user', content: '下一步做什么？', timestamp: '2026-03-27T00:00:00.000Z' },
+          { role: 'assistant', content: '继续执行阶段二。', timestamp: '2026-03-27T00:00:01.000Z' },
+        ],
+        lastActivityAt: '2026-03-27T00:00:01.000Z',
+      }),
+      'utf-8'
+    )
+
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/session/main')
+      expect(res.status).toBe(200)
+      const json = await res.json() as {
+        ok: boolean
+        summary: string
+        messages: Array<{ role: string; content: string }>
+        session: { id: string; state: string }
+      }
+      expect(json.ok).toBe(true)
+      expect(json.session.id).toBe('main')
+      expect(json.summary).toContain('SYSTEM_SUMMARY')
+      expect(json.messages).toHaveLength(2)
+      expect(json.messages[1]?.content).toContain('阶段二')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('prefers runtime-provided session and conversation stores when available', async () => {
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getSessionStore: () => ({
+        list: async () => [],
+        get: async () => ({
+          id: 'main',
+          agentName: 'main',
+          profile: 'main',
+          createdAt: '2026-03-27T00:00:00.000Z',
+          updatedAt: '2026-03-27T00:00:01.000Z',
+          state: 'running',
+        }),
+      }),
+      getConversationStore: () => ({
+        get: async () => ({
+          sessionId: 'main',
+          summary: 'SYSTEM_SUMMARY: runtime store',
+          recentMessages: [
+            { role: 'user', content: 'hello', timestamp: '2026-03-27T00:00:00.000Z' },
+            { role: 'assistant', content: 'world', timestamp: '2026-03-27T00:00:01.000Z' },
+          ],
+          lastActivityAt: '2026-03-27T00:00:01.000Z',
+        }),
+      }),
+    }
+
+    const app = createApp(TEST_WORKSPACE, runtime as any)
+    const res = await app.request('/api/session/main')
+
+    expect(res.status).toBe(200)
+    const json = await res.json() as {
+      ok: boolean
+      summary: string
+      session: { state: string }
+      messages: Array<{ content: string }>
+    }
+    expect(json.ok).toBe(true)
+    expect(json.summary).toContain('runtime store')
+    expect(json.session.state).toBe('running')
+    expect(json.messages[1]?.content).toBe('world')
+  })
+
+  test('falls back to the live registered agent when structured stores are empty', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-live-session-'))
+    registerAgent({
+      agentName: 'main',
+      getState: () => ({
+        agentName: 'main',
+        state: 'running',
+        iterations: 1,
+        tokenCount: 10,
+        lastAction: 'streaming',
+        currentTask: null,
+      }),
+      getMessages: () => ([
+        { role: 'system', content: 'system' },
+        { role: 'user', content: 'SYSTEM_SUMMARY: 已完成阶段一。' },
+        { role: 'user', content: '下一步做什么？' },
+        { role: 'assistant', content: '继续执行阶段二。' },
+      ]),
+    } as any)
+
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/session/main')
+
+      expect(res.status).toBe(200)
+      const json = await res.json() as {
+        ok: boolean
+        summary: string
+        session: { state: string }
+        messages: Array<{ role: string; content: string }>
+      }
+      expect(json.ok).toBe(true)
+      expect(json.summary).toContain('SYSTEM_SUMMARY')
+      expect(json.session.state).toBe('running')
+      expect(json.messages.map((message) => message.content)).toEqual([
+        '下一步做什么？',
+        '继续执行阶段二。',
+      ])
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('/api/settings', () => {
@@ -89,6 +291,106 @@ describe('/api/settings', () => {
       connected: false,
       message: 'MCP 连接失败: timeout',
     })
+  })
+})
+
+describe('/api/runtime/*', () => {
+  test('returns runtime sessions when the store is available', async () => {
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getSessionStore: () => ({
+        list: async () => [
+          {
+            id: 'main',
+            agentName: 'main',
+            profile: 'main',
+            createdAt: '2026-03-27T00:00:00.000Z',
+            updatedAt: '2026-03-27T00:00:01.000Z',
+            state: 'idle',
+          },
+        ],
+      }),
+    }
+
+    const app = createApp(TEST_WORKSPACE, runtime as any)
+    const res = await app.request('/api/runtime/sessions')
+    expect(res.status).toBe(200)
+    const json = await res.json() as { ok: boolean; sessions: Array<{ id: string }> }
+    expect(json.ok).toBe(true)
+    expect(json.sessions.map((session) => session.id)).toEqual(['main'])
+  })
+
+  test('returns delegation runs and pending interventions from runtime stores', async () => {
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getDelegationStore: () => ({
+        listByParent: async () => [
+          {
+            id: 'run-1',
+            parentSessionId: 'main',
+            profile: 'search',
+            state: 'running',
+            instruction: 'search jobs',
+            createdAt: '2026-03-27T00:00:00.000Z',
+            updatedAt: '2026-03-27T00:00:01.000Z',
+          },
+        ],
+      }),
+      getInterventionManager: () => ({
+        listPending: async () => [
+          {
+            id: 'ivr-1',
+            ownerType: 'session',
+            ownerId: 'main',
+            kind: 'text',
+            prompt: 'need confirmation',
+            status: 'pending',
+            createdAt: '2026-03-27T00:00:00.000Z',
+            updatedAt: '2026-03-27T00:00:01.000Z',
+          },
+        ],
+      }),
+    }
+
+    const app = createApp(TEST_WORKSPACE, runtime as any)
+
+    const delegationRes = await app.request('/api/delegations/main')
+    expect(delegationRes.status).toBe(200)
+    const delegationJson = await delegationRes.json() as { ok: boolean; runs: Array<{ id: string }> }
+    expect(delegationJson.ok).toBe(true)
+    expect(delegationJson.runs.map((run) => run.id)).toEqual(['run-1'])
+
+    const interventionRes = await app.request('/api/interventions/main')
+    expect(interventionRes.status).toBe(200)
+    const interventionJson = await interventionRes.json() as { ok: boolean; interventions: Array<{ id: string }> }
+    expect(interventionJson.ok).toBe(true)
+    expect(interventionJson.interventions.map((record) => record.id)).toEqual(['ivr-1'])
   })
 })
 
@@ -369,6 +671,81 @@ describe('/api/config/:name', () => {
       const json = await res.json() as { ok: boolean }
       expect(json.ok).toBe(true)
       expect(fs.readFileSync(path.join(workspace, 'data/targets.md'), 'utf-8')).toBe('# targets')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('/api/runtime adapters', () => {
+  test('lists structured delegations and interventions', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-runtime-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'delegation'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'interventions'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'delegation', 'run-1.json'),
+      JSON.stringify({
+        id: 'run-1',
+        parentSessionId: 'main',
+        profile: 'search',
+        state: 'running',
+        instruction: 'search jobs',
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'interventions', 'ivr-1.json'),
+      JSON.stringify({
+        id: 'ivr-1',
+        ownerType: 'session',
+        ownerId: 'main',
+        kind: 'text',
+        prompt: 'Need input',
+        status: 'pending',
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'interventions', 'ivr-2.json'),
+      JSON.stringify({
+        id: 'ivr-2',
+        ownerType: 'session',
+        ownerId: 'main',
+        kind: 'text',
+        prompt: 'Already handled',
+        status: 'resolved',
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+      }),
+      'utf-8'
+    )
+
+    const app = createApp(workspace)
+
+    try {
+      const [delegationsRes, allDelegationsRes, interventionsRes] = await Promise.all([
+        app.request('/api/delegations?parentSessionId=main'),
+        app.request('/api/delegations'),
+        app.request('/api/interventions?ownerId=main&status=pending'),
+      ])
+      expect(delegationsRes.status).toBe(200)
+      expect(allDelegationsRes.status).toBe(200)
+      expect(interventionsRes.status).toBe(200)
+
+      const delegationsJson = await delegationsRes.json() as { ok: boolean; delegations: Array<{ id: string }> }
+      const allDelegationsJson = await allDelegationsRes.json() as { ok: boolean; delegations: Array<{ id: string }> }
+      const interventionsJson = await interventionsRes.json() as { ok: boolean; interventions: Array<{ id: string }> }
+
+      expect(delegationsJson.ok).toBe(true)
+      expect(delegationsJson.delegations.map((item) => item.id)).toEqual(['run-1'])
+      expect(allDelegationsJson.ok).toBe(true)
+      expect(allDelegationsJson.delegations.map((item) => item.id)).toEqual(['run-1'])
+      expect(interventionsJson.ok).toBe(true)
+      expect(interventionsJson.interventions.map((item) => item.id)).toEqual(['ivr-1'])
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
     }

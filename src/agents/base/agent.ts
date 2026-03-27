@@ -22,6 +22,7 @@ import { DelegationManager, type DelegatedRun } from '../delegation-manager.js'
 import { inferProfileFromSkill } from '../profiles.js'
 import { defaultCapabilityPolicy } from '../../tools/capability-policy.js'
 import { isBrowserToolName } from '../../tools/names.js'
+import { ConversationStore } from '../../memory/conversationStore.js'
 
 const TOOL_CALL_TIMEOUT_MS = 120_000
 const TOOL_RETRY_LIMIT = 2
@@ -131,6 +132,7 @@ export abstract class BaseAgent extends EventEmitter {
   protected readonly profile?: AgentProfile
   protected readonly sessionId: string
   protected readonly delegationManager: DelegationManager
+  protected readonly conversationStore: ConversationStore
 
   private interventionResolve?: (value: string) => void
 
@@ -158,6 +160,7 @@ export abstract class BaseAgent extends EventEmitter {
     const agentIdentity = this.agentName ?? 'main'
     this.sessionId = config.sessionId ?? agentIdentity
     this.delegationManager = new DelegationManager(this.sessionId, agentIdentity)
+    this.conversationStore = new ConversationStore(this.workspaceRoot)
 
     this.compressor = new ContextCompressor({
       openai: this.openai,
@@ -891,6 +894,7 @@ export abstract class BaseAgent extends EventEmitter {
       this.messages = s.messages || []
       if (s.context) this.restoreContext(s.context)
       if (s.finishReason) this.lastFinishReason = s.finishReason
+      await this.syncConversationSnapshot(s.messages || [])
     }
   }
 
@@ -908,6 +912,7 @@ export abstract class BaseAgent extends EventEmitter {
     this.iterations = 0
     this.state = 'idle'
     this.lastAction = ''
+    this.conversationStore.clearSync(this.sessionId)
     return archivePath
   }
 
@@ -924,6 +929,7 @@ export abstract class BaseAgent extends EventEmitter {
       finishReason: this.lastFinishReason,
     }
     utils.saveSession(this.getSessionPath(), session)
+    await this.persistConversationSnapshot(session.messages)
   }
 
   private async buildPersistedMessageSnapshot(): Promise<ChatCompletionMessageParam[]> {
@@ -957,6 +963,97 @@ export abstract class BaseAgent extends EventEmitter {
     }
 
     return [systemMessage, summaryMessage, ...recentMessages]
+  }
+
+  private async persistConversationSnapshot(messages: ChatCompletionMessageParam[]): Promise<void> {
+    const summarySource = messages.find(
+      (message) =>
+        message.role === 'user' &&
+        typeof message.content === 'string' &&
+        message.content.startsWith('SYSTEM_SUMMARY:')
+    )
+    const summary = typeof summarySource?.content === 'string' ? summarySource.content : ''
+    const recentMessages = messages
+      .filter(
+        (
+          message
+        ): message is ChatCompletionMessageParam & {
+          role: 'user' | 'assistant'
+        } => message.role === 'user' || message.role === 'assistant'
+      )
+      .map((message) => ({
+        role: message.role,
+        content: this.stringifyMessageContent(message.content),
+        timestamp: new Date().toISOString(),
+      }))
+      .filter((message) => {
+        const content = message.content.trim()
+        return content.length > 0 && !content.startsWith('SYSTEM_SUMMARY:')
+      })
+      .slice(-20)
+
+    await this.conversationStore.saveSnapshot(this.sessionId, {
+      summary,
+      recentMessages,
+      lastActivityAt: new Date().toISOString(),
+    })
+  }
+
+  private async syncConversationSnapshot(messages: ChatCompletionMessageParam[]): Promise<void> {
+    const existing = await this.conversationStore.get(this.sessionId)
+    const summarySource = messages.find(
+      (message) =>
+        message.role === 'user' &&
+        typeof message.content === 'string' &&
+        message.content.startsWith('SYSTEM_SUMMARY:')
+    )
+    const expectedSummary = typeof summarySource?.content === 'string' ? summarySource.content : ''
+    const expectedRecentMessages = messages
+      .filter(
+        (
+          message
+        ): message is ChatCompletionMessageParam & {
+          role: 'user' | 'assistant'
+        } => message.role === 'user' || message.role === 'assistant'
+      )
+      .map((message) => ({
+        role: message.role,
+        content: this.stringifyMessageContent(message.content),
+      }))
+      .filter((message) => {
+        const content = message.content.trim()
+        return content.length > 0 && !content.startsWith('SYSTEM_SUMMARY:')
+      })
+      .slice(-20)
+
+    const matchesExisting =
+      existing.summary === expectedSummary &&
+      existing.recentMessages.length === expectedRecentMessages.length &&
+      existing.recentMessages.every(
+        (message, index) =>
+          message.role === expectedRecentMessages[index]?.role &&
+          message.content === expectedRecentMessages[index]?.content
+      )
+    if (matchesExisting) return
+    await this.persistConversationSnapshot(messages)
+  }
+
+  private stringifyMessageContent(content: ChatCompletionMessageParam['content']): string {
+    if (typeof content === 'string') {
+      return content
+    }
+    if (Array.isArray(content)) {
+      return content
+        .map((part) => {
+          if ('type' in part && part.type === 'text' && 'text' in part) {
+            return part.text
+          }
+          return ''
+        })
+        .filter(Boolean)
+        .join('\n')
+    }
+    return ''
   }
 
   protected getSessionPath(): string { return utils.getSessionPath(this.workspaceRoot, this.agentName) }
