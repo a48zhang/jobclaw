@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import OpenAI from 'openai'
 import { MainAgent } from '../../../src/agents/main/index'
+import { ProfileAgent } from '../../../src/agents/profile-agent'
 
 const TEST_WORKSPACE = '/tmp/jobclaw-main-test'
 
@@ -41,5 +42,30 @@ describe('MainAgent', () => {
         })
 
         expect(agent).toBeDefined()
+    })
+
+    test('主 Agent 在 allowBrowser=true 时允许 MCP 浏览器工具', () => {
+        const agent = new MainAgent({
+            openai: createMockOpenAI(),
+            agentName: 'main-test',
+            model: 'test-model',
+            workspaceRoot: TEST_WORKSPACE,
+            persistent: false,
+        })
+
+        expect((agent as any).isToolAllowed('browser_navigate')).toBe(true)
+    })
+
+    test('非浏览器 profile 不允许未白名单的 MCP 工具', () => {
+        const agent = new ProfileAgent({
+            openai: createMockOpenAI(),
+            agentName: 'review-test',
+            model: 'test-model',
+            workspaceRoot: TEST_WORKSPACE,
+            persistent: false,
+            profileName: 'review',
+        })
+
+        expect((agent as any).isToolAllowed('browser_navigate')).toBe(false)
     })
 })

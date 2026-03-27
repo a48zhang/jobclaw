@@ -1,7 +1,13 @@
 import type OpenAI from 'openai'
 import type { MCPClient } from './base/types.js'
 import type { Channel } from '../channel/base.js'
+import type { BaseAgent } from './base/agent.js'
 import { MainAgent } from './main/index.js'
+import { ProfileAgent } from './profile-agent.js'
+import type { ProfileName } from './profiles.js'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export interface AgentFactoryConfig {
   openai: OpenAI
@@ -15,27 +21,59 @@ export interface CreateAgentOptions {
   agentName?: string
   persistent?: boolean
   channel?: Channel
+  profileName?: ProfileName
+  skillName?: string
+  sessionId?: string
 }
 
 export class AgentFactory {
   constructor(private config: AgentFactoryConfig) { }
 
-  createAgent(options: CreateAgentOptions = {}): MainAgent {
-    return new MainAgent({
+  createAgent(options: CreateAgentOptions = {}): BaseAgent {
+    const profileName = options.profileName ?? 'main'
+    const agentName = options.agentName ?? this.generateAgentName(profileName)
+    const baseConfig = {
       openai: this.config.openai,
       mcpClient: this.config.mcpClient,
       workspaceRoot: this.config.workspaceRoot,
       model: this.config.model,
       lightModel: this.config.lightModel,
-      agentName: options.agentName ?? this.generateAgentName(),
+      agentName,
       channel: options.channel,
       persistent: options.persistent ?? false,
       factory: this,
+      sessionId: options.sessionId,
+    }
+
+    if (profileName === 'main') {
+      return new MainAgent(baseConfig)
+    }
+
+    return new ProfileAgent({
+      ...baseConfig,
+      profileName,
+      skillSections: this.loadSkillSections(options.skillName),
     })
   }
 
-  private generateAgentName(): string {
+  private generateAgentName(profileName: ProfileName): string {
     const timestamp = Date.now().toString(36)
-    return `agent-${timestamp}`
+    return `${profileName}-agent-${timestamp}`
+  }
+
+  private loadSkillSections(skillName?: string): string[] {
+    if (!skillName) return []
+
+    const candidatePaths = [
+      path.resolve(this.config.workspaceRoot, 'skills', `${skillName}.md`),
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'skills', `${skillName}.md`),
+    ]
+
+    for (const candidatePath of candidatePaths) {
+      if (!fs.existsSync(candidatePath)) continue
+      return [fs.readFileSync(candidatePath, 'utf-8')]
+    }
+
+    return []
   }
 }

@@ -7,7 +7,7 @@ import type {
 } from 'openai/resources/chat/completions'
 import { EventEmitter } from 'node:events'
 import * as path from 'node:path'
-import { executeTool, LOCAL_TOOL_NAMES, TOOLS, type ToolContext, type ToolResult } from '../../tools/index.js'
+import { executeTool, LOCAL_TOOL_NAMES, TOOLS, type ToolContext, type ToolResult, TOOL_NAMES } from '../../tools/index.js'
 import type { AgentState, Session, Task } from '../../types.js'
 import { DEFAULT_MAX_ITERATIONS, DEFAULT_KEEP_RECENT_MESSAGES } from './constants.js'
 import { ContextCompressor } from './context-compressor.js'
@@ -17,6 +17,10 @@ import type { Channel } from '../../channel/base.js'
 import { eventBus } from '../../eventBus.js'
 import type { InterventionResolvedPayload, RequestKind } from '../../eventBus.js'
 import * as utils from './agent-utils.js'
+import type { AgentProfile } from '../profiles.js'
+import { DelegationManager, type DelegatedRun } from '../delegation-manager.js'
+import { inferProfileFromSkill } from '../profiles.js'
+import { defaultCapabilityPolicy } from '../../tools/capability-policy.js'
 
 const TOOL_CALL_TIMEOUT_MS = 120_000
 const REQUEST_TOOL_NAME = 'request'
@@ -84,6 +88,9 @@ export abstract class BaseAgent extends EventEmitter {
   protected lastFinishReason?: string
   protected persistent: boolean
   protected factory?: AgentFactory
+  protected readonly profile?: AgentProfile
+  protected readonly sessionId: string
+  protected readonly delegationManager: DelegationManager
 
   private interventionResolve?: (value: string) => void
 
@@ -107,6 +114,10 @@ export abstract class BaseAgent extends EventEmitter {
     this.lightModel = config.lightModel || config.model
     this.persistent = config.persistent ?? false
     this.factory = config.factory
+    this.profile = config.profile
+    const agentIdentity = this.agentName ?? 'main'
+    this.sessionId = config.sessionId ?? agentIdentity
+    this.delegationManager = new DelegationManager(this.sessionId, agentIdentity)
 
     this.compressor = new ContextCompressor({
       openai: this.openai,
@@ -534,18 +545,28 @@ export abstract class BaseAgent extends EventEmitter {
     if (this.mcpClient) {
       try {
         const mcpTools = await this.mcpClient.listTools()
-        for (const t of mcpTools) tools.push({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } })
-      } catch (e) { console.error('获取 MCP 工具失败:', e) }
+        for (const t of mcpTools) {
+          tools.push({
+            type: 'function',
+            function: { name: t.name, description: t.description, parameters: t.inputSchema },
+          })
+        }
+      } catch (e) {
+        console.error('获取 MCP 工具失败:', e)
+      }
     }
-    this.availableTools = tools
-    return tools
+    const filtered = tools.filter((tool) => tool.function?.name && this.isToolAllowed(tool.function.name))
+    this.availableTools = filtered
+    return filtered
   }
 
   protected async executeToolCall(toolCall: ChatCompletionMessageToolCall): Promise<ChatCompletionMessageParam> {
     this.throwIfAborted()
     const toolName = toolCall.function.name
     let args: Record<string, unknown> = {}
-    try { args = JSON.parse(toolCall.function.arguments) } catch {
+    try {
+      args = JSON.parse(toolCall.function.arguments)
+    } catch {
       return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify({ error: '无法解析工具参数' }) }
     }
 
@@ -553,24 +574,85 @@ export abstract class BaseAgent extends EventEmitter {
       return this.executeRequestToolCall(toolCall, args)
     }
 
-    let result: ToolResult
-    if (LOCAL_TOOL_NAMES.includes(toolName as (typeof LOCAL_TOOL_NAMES)[number])) {
-      const ctx: ToolContext = {
-        workspaceRoot: this.workspaceRoot, agentName: this.agentName,
-        logger: (line) => { if (this.channel) this.channel.send({ type: 'tool_output', payload: { message: line, toolName }, timestamp: new Date() }) },
-        factory: this.factory,
-        signal: this.abortController.signal,
+    if (!toolName) {
+      return {
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({ error: '工具名称缺失' }),
       }
-      result = await executeTool(toolName, args, ctx)
-    } else if (this.mcpClient) {
-      try {
-        const r = await this.mcpClient.callTool(toolName, args)
-        result = { success: true, content: typeof r === 'string' ? r : JSON.stringify(r) }
-      } catch (e) { result = { success: false, content: '', error: (e as Error).message } }
-    } else { result = { success: false, content: '', error: `未知工具: ${toolName}` } }
+    }
+
+    if (!this.isToolAllowed(toolName)) {
+      return {
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({ error: `未授权调用工具: ${toolName}` }),
+      }
+    }
+
+    const decoratedArgs = { ...args }
+    const runRecord = this.prepareDelegatedRun(toolName, decoratedArgs)
+    if (runRecord) {
+      this.delegationManager.updateState(runRecord.id, 'running')
+    }
+
+    const ctx: ToolContext = {
+      workspaceRoot: this.workspaceRoot,
+      agentName: this.agentName,
+      profile: this.profile,
+      capabilityPolicy: defaultCapabilityPolicy,
+      logger: (line) => {
+        if (this.channel) {
+          this.channel.send({
+            type: 'tool_output',
+            payload: { message: line, toolName },
+            timestamp: new Date(),
+          })
+        }
+      },
+      factory: this.factory,
+      signal: this.abortController.signal,
+    }
+
+    const invokeTool = async (): Promise<ToolResult> => {
+      if (LOCAL_TOOL_NAMES.includes(toolName as (typeof LOCAL_TOOL_NAMES)[number])) {
+        return executeTool(toolName, decoratedArgs, ctx)
+      }
+      if (this.mcpClient) {
+        try {
+          const r = await this.mcpClient.callTool(toolName, decoratedArgs)
+          return { success: true, content: typeof r === 'string' ? r : JSON.stringify(r) }
+        } catch (error) {
+          return { success: false, content: '', error: (error as Error).message }
+        }
+      }
+      return { success: false, content: '', error: `未知工具: ${toolName}` }
+    }
+
+    let result: ToolResult
+    try {
+      result = await invokeTool()
+      if (runRecord) {
+        if (result.success) {
+          this.delegationManager.completeRun(runRecord.id, result.content ?? '')
+        } else {
+          this.delegationManager.failRun(runRecord.id, result.error ?? result.content ?? '子 Agent 执行失败')
+        }
+      }
+    } catch (error) {
+      if (runRecord) {
+        this.delegationManager.failRun(runRecord.id, (error as Error).message)
+      }
+      throw error
+    }
+
     this.throwIfAborted()
     await this.onToolResult(toolName, result)
-    return { role: 'tool', tool_call_id: toolCall.id, content: result.success ? result.content : `错误: ${result.error}` }
+    return {
+      role: 'tool',
+      tool_call_id: toolCall.id,
+      content: result.success ? result.content : `错误: ${result.error}`,
+    }
   }
 
   private async executeRequestToolCall(
@@ -669,6 +751,27 @@ export abstract class BaseAgent extends EventEmitter {
       results.push(result)
     }
     return results
+  }
+
+  protected isToolAllowed(toolName: string): boolean {
+    if (toolName === REQUEST_TOOL_NAME) return true
+    if (!this.profile) return true
+    return defaultCapabilityPolicy.canUseTool(this.profile, toolName).allowed
+  }
+
+  private prepareDelegatedRun(toolName: string, args: Record<string, unknown>): DelegatedRun | undefined {
+    if (toolName !== TOOL_NAMES.RUN_AGENT) return undefined
+    const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : ''
+    if (!instruction) return undefined
+    const skill = typeof args.skill === 'string' ? args.skill : undefined
+    const profileName = inferProfileFromSkill(skill)
+    if (this.profile && !defaultCapabilityPolicy.canDelegate(this.profile, profileName).allowed) {
+      throw new Error(`当前 profile 不允许委派到 ${profileName}`)
+    }
+    args.profile = profileName
+    const runRecord = this.delegationManager.createDelegatedRun(profileName, instruction)
+    args.delegated_run_id = runRecord.id
+    return runRecord
   }
 
   protected async onToolResult(_name: string, _res: ToolResult): Promise<void> { }

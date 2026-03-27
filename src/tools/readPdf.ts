@@ -62,7 +62,7 @@ export async function executeReadPdf(
     return { success: false, content: '', error: '路径不安全，拒绝访问' }
   }
 
-  const permission = checkPathPermission(normalizedPath, context.agentName, 'read', context.workspaceRoot)
+  const permission = checkPathPermission(normalizedPath, context.agentName, 'read', context.workspaceRoot, context)
   if (!permission.allowed) {
     return { success: false, content: '', error: permission.reason }
   }

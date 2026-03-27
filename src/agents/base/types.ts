@@ -3,6 +3,7 @@ import type OpenAI from 'openai'
 import type { Task } from '../../types.js'
 import type { Channel } from '../../channel/base.js'
 import type { AgentFactory } from '../factory.js'
+import type { AgentProfile } from '../profiles.js'
 
 /** MCP Client 接口 */
 export interface MCPClient {
@@ -33,6 +34,8 @@ export interface BaseAgentConfig {
   lightModel?: string
   persistent?: boolean
   factory?: AgentFactory
+  profile?: AgentProfile
+  sessionId?: string
 }
 
 /** ContextCompressor 配置 */

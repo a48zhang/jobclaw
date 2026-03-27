@@ -273,7 +273,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     const factory = runtime.getFactory()
     if (!factory) return c.json({ ok: false, error: 'Main agent not found' }, 500)
 
-    const taskAgent = factory.createAgent({ persistent: false })
+    const taskAgent = factory.createAgent({ persistent: false, profileName: 'resume' })
     taskAgent.run('生成简历').catch((err) => console.error('[Server] Resume build failed:', err))
     return c.json({ ok: true })
   })
@@ -316,7 +316,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     const factory = runtime.getFactory()
     if (!factory) return c.json({ ok: false, error: 'Main agent not found' }, 500)
 
-    const taskAgent = factory.createAgent({ persistent: false })
+    const taskAgent = factory.createAgent({ persistent: false, profileName: 'review' })
     taskAgent.run(prompt).catch((err) => console.error('[Server] Resume review failed:', err))
     return c.json({ ok: true, path: uploadedResumeRelPath })
   })

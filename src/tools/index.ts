@@ -11,43 +11,15 @@ import { executeGrep } from './grep.js'
 import { executeGetTime, GET_TIME_TOOL } from './getTime.js'
 import { executeRunAgent, RUN_AGENT_TOOL } from './runAgent.js'
 import { getLockFilePath } from './utils.js'
+import { TOOL_NAME_LIST, TOOL_NAMES } from './names.js'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
-import type { AgentFactory } from '../agents/factory.js'
+import type { ToolContext, ToolResult } from './types.js'
 
 export { getLockFilePath }
+export { TOOL_NAMES }
+export type { ToolContext, ToolResult }
 
-export interface ToolContext {
-  workspaceRoot: string
-  agentName: string
-  logger: (line: string) => void
-  factory?: AgentFactory
-  signal?: AbortSignal
-}
-
-export interface ToolResult {
-  success: boolean
-  content: string
-  error?: string
-}
-
-export const TOOL_NAMES = {
-  READ_FILE: 'read_file',
-  WRITE_FILE: 'write_file',
-  APPEND_FILE: 'append_file',
-  LIST_DIRECTORY: 'list_directory',
-  LOCK_FILE: 'lock_file',
-  UNLOCK_FILE: 'unlock_file',
-  UPSERT_JOB: 'upsert_job',
-  TYPST_COMPILE: 'typst_compile',
-  INSTALL_TYPST: 'install_typst',
-  RUN_SHELL_COMMAND: 'run_shell_command',
-  READ_PDF: 'read_pdf',
-  GREP: 'grep',
-  GET_TIME: 'get_time',
-  RUN_AGENT: 'run_agent',
-} as const
-
-export const LOCAL_TOOL_NAMES = Object.values(TOOL_NAMES)
+export const LOCAL_TOOL_NAMES = TOOL_NAME_LIST
 
 // 动态检测系统与 Shell 环境
 const CURRENT_OS = detectOS()
@@ -254,39 +226,82 @@ export async function executeTool(
   context: ToolContext
 ): Promise<ToolResult> {
   if (context.signal?.aborted) {
-    return { success: false, content: '', error: '工具调用已取消' }
+    return normalizeToolResult({ success: false, content: '', error: '工具调用已取消' })
+  }
+  if (context.profile && context.capabilityPolicy) {
+    const capabilityDecision = context.capabilityPolicy.canUseTool(context.profile, name)
+    if (!capabilityDecision.allowed) {
+      return normalizeToolResult({
+        success: false,
+        content: '',
+        error: capabilityDecision.reason ?? `未授权调用工具: ${name}`,
+      })
+    }
   }
 
+  let result: ToolResult
   switch (name) {
     case TOOL_NAMES.READ_FILE:
-      return executeReadFile(args, context)
+      result = await executeReadFile(args, context)
+      break
     case TOOL_NAMES.WRITE_FILE:
-      return executeWriteFile(args, context)
+      result = await executeWriteFile(args, context)
+      break
     case TOOL_NAMES.APPEND_FILE:
-      return executeAppendFile(args, context)
+      result = await executeAppendFile(args, context)
+      break
     case TOOL_NAMES.LIST_DIRECTORY:
-      return executeListDirectory(args, context)
+      result = await executeListDirectory(args, context)
+      break
     case TOOL_NAMES.LOCK_FILE:
-      return executeLockFile(args, context)
+      result = await executeLockFile(args, context)
+      break
     case TOOL_NAMES.UNLOCK_FILE:
-      return executeUnlockFile(args, context)
+      result = await executeUnlockFile(args, context)
+      break
     case TOOL_NAMES.UPSERT_JOB:
-      return executeUpsertJob(args, context)
+      result = await executeUpsertJob(args, context)
+      break
     case TOOL_NAMES.TYPST_COMPILE:
-      return executeTypstCompile(args, context)
+      result = await executeTypstCompile(args, context)
+      break
     case TOOL_NAMES.INSTALL_TYPST:
-      return executeInstallTypst(args, context)
+      result = await executeInstallTypst(args, context)
+      break
     case TOOL_NAMES.RUN_SHELL_COMMAND:
-      return executeShellCommand(args, context)
+      result = await executeShellCommand(args, context)
+      break
     case TOOL_NAMES.READ_PDF:
-      return executeReadPdf(args, context)
+      result = await executeReadPdf(args, context)
+      break
     case TOOL_NAMES.GREP:
-      return executeGrep(args, context)
+      result = await executeGrep(args, context)
+      break
     case TOOL_NAMES.GET_TIME:
-      return executeGetTime(args, context)
+      result = await executeGetTime(args, context)
+      break
     case TOOL_NAMES.RUN_AGENT:
-      return executeRunAgent(args, context)
+      result = await executeRunAgent(args, context)
+      break
     default:
-      return { success: false, content: '', error: `未知工具: ${name}` }
+      result = { success: false, content: '', error: `未知工具: ${name}` }
+  }
+
+  return normalizeToolResult(result)
+}
+
+function normalizeToolResult(result: ToolResult): ToolResult {
+  const success = result.success ?? result.ok ?? false
+  const content = result.content ?? result.summary ?? ''
+  const error = result.error ?? result.errorMessage
+
+  return {
+    ...result,
+    success,
+    content,
+    error,
+    ok: result.ok ?? success,
+    summary: result.summary ?? content,
+    errorMessage: result.errorMessage ?? error,
   }
 }

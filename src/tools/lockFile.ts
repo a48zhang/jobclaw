@@ -2,7 +2,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { ToolContext, ToolResult } from './index.js'
-import { normalizeAndValidatePath, getLocksDir, ensureLocksDirExists, getLockFilePath, LOCK_TIMEOUT_MS, type LockFileContent } from './utils.js'
+import { normalizeAndValidatePath, getLocksDir, ensureLocksDirExists, getLockFilePath, LOCK_TIMEOUT_MS, type LockFileContent, checkPathPermission } from './utils.js'
 
 /**
  * 底层加锁函数 (Core)
@@ -85,6 +85,17 @@ export async function executeLockFile(args: Record<string, unknown>, context: To
   if (!normalizedPath) {
     return { success: false, content: '', error: '路径不安全' }
   }
+  const permission = checkPathPermission(
+    normalizedPath,
+    context.agentName,
+    'write',
+    context.workspaceRoot,
+    context,
+    { requireSharedWriteLock: false }
+  )
+  if (!permission.allowed) {
+    return { success: false, content: '', error: permission.reason }
+  }
 
   try {
     await lockFile(inputPath, holder, context.workspaceRoot)
@@ -108,6 +119,17 @@ export async function executeUnlockFile(args: Record<string, unknown>, context: 
   const normalizedPath = normalizeAndValidatePath(inputPath, context.workspaceRoot)
   if (!normalizedPath) {
     return { success: false, content: '', error: '路径不安全' }
+  }
+  const permission = checkPathPermission(
+    normalizedPath,
+    context.agentName,
+    'write',
+    context.workspaceRoot,
+    context,
+    { requireSharedWriteLock: false }
+  )
+  if (!permission.allowed) {
+    return { success: false, content: '', error: permission.reason }
   }
 
   try {

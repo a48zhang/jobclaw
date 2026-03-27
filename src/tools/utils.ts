@@ -1,6 +1,7 @@
 // 工具层共享工具函数
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import type { ToolContext } from './types.js'
 
 /**
  * 最大 token 数（用于文件截断检测）
@@ -28,6 +29,10 @@ export interface LockFileContent {
 export interface PermissionResult {
   allowed: boolean
   reason: string
+}
+
+export interface PathPermissionOptions {
+  requireSharedWriteLock?: boolean
 }
 
 /**
@@ -130,38 +135,45 @@ export function checkPathPermission(
   normalizedPath: string,
   agentName: string,
   operation: 'read' | 'write',
-  workspaceRoot: string
+  workspaceRoot: string,
+  context?: Pick<ToolContext, 'profile' | 'capabilityPolicy'>,
+  options: PathPermissionOptions = {}
 ): PermissionResult {
+  const { requireSharedWriteLock = true } = options
   const absoluteWorkspace = path.resolve(workspaceRoot)
   const relativePath = path.relative(absoluteWorkspace, normalizedPath).replace(/\\/g, '/')
 
-  // 检查系统路径 .locks/
+  if (context?.profile && context.capabilityPolicy) {
+    const capabilityDecision =
+      operation === 'read'
+        ? context.capabilityPolicy.canReadPath(context.profile, relativePath)
+        : context.capabilityPolicy.canWritePath(context.profile, relativePath)
+
+    if (!capabilityDecision.allowed) {
+      return { allowed: false, reason: capabilityDecision.reason ?? `Profile 不允许${operation} ${relativePath}` }
+    }
+  }
+
   if (relativePath.startsWith('.locks/') || relativePath === '.locks') {
     return { allowed: false, reason: '系统路径禁止直接访问' }
   }
 
-  // 检查私有路径 agents/{name}/
   const agentsMatch = relativePath.match(/^agents\/([^/]+)(\/|$)/)
   if (agentsMatch) {
     const ownerAgent = agentsMatch[1]
     if (ownerAgent !== agentName) {
       return { allowed: false, reason: `私有路径禁止访问：agents/${ownerAgent}/` }
     }
-    // 私有路径的读写都允许
     return { allowed: true, reason: '' }
   }
 
-  // 检查共享路径 data/
-  if (relativePath.startsWith('data/') || relativePath === 'data') {
-    if (operation === 'write') {
-      // 写入操作需要持有锁
-      if (!hasValidLock(relativePath, agentName, workspaceRoot)) {
-        return { allowed: false, reason: '共享路径写入需要文件锁' }
-      }
+  const dataMatch = relativePath === 'data' || relativePath.startsWith('data/')
+  if (dataMatch) {
+    if (operation === 'write' && requireSharedWriteLock && !hasValidLock(relativePath, agentName, workspaceRoot)) {
+      return { allowed: false, reason: '共享路径写入需要文件锁' }
     }
     return { allowed: true, reason: '' }
   }
 
-  // 其他路径允许访问
   return { allowed: true, reason: '' }
 }

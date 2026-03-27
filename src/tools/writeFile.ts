@@ -32,7 +32,7 @@ export async function executeWriteFile(args: Record<string, unknown>, context: T
   }
 
   // 权限检查
-  const permission = checkPathPermission(normalizedPath, context.agentName, 'write', context.workspaceRoot)
+  const permission = checkPathPermission(normalizedPath, context.agentName, 'write', context.workspaceRoot, context)
   if (!permission.allowed) {
     return { success: false, content: '', error: permission.reason }
   }

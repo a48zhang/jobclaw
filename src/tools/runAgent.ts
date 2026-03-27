@@ -38,10 +38,12 @@ export async function executeRunAgent(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<ToolResult> {
-  const { instruction, skill, timeout_ms } = args as {
+  const { instruction, skill, timeout_ms, profile, delegated_run_id } = args as {
     instruction: string
     skill?: string
     timeout_ms?: number
+    profile?: 'search' | 'delivery' | 'resume' | 'review'
+    delegated_run_id?: string
   }
 
   const factory = context.factory
@@ -61,11 +63,15 @@ export async function executeRunAgent(
       : instruction
 
     // 子 Agent 静默执行（无 channel）
-    const subAgent = factory.createAgent()
+    const subAgent = factory.createAgent({
+      profileName: profile,
+      skillName: skill,
+      sessionId: delegated_run_id,
+    })
 
     const timeout = timeout_ms ?? 300_000
     let timedOut = false
-    const runPromise = subAgent.run(fullInstruction).then((value) => {
+    const runPromise = subAgent.run(fullInstruction).then((value: string) => {
       if (timedOut) {
         throw new Error('Agent finished after timeout and result was discarded')
       }

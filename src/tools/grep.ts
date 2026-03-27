@@ -146,7 +146,7 @@ export async function executeGrep(args: Record<string, unknown>, context: ToolCo
   }
 
   // 权限检查
-  const permission = checkPathPermission(searchPath, context.agentName, 'read', context.workspaceRoot)
+  const permission = checkPathPermission(searchPath, context.agentName, 'read', context.workspaceRoot, context)
   if (!permission.allowed) {
     return { success: false, content: '', error: permission.reason }
   }

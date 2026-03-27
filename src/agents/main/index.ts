@@ -1,7 +1,7 @@
 // MainAgent - Phase 3 实现
 import type { ChatCompletionTool, ChatCompletionMessageParam } from 'openai/resources/chat/completions'
-import { BaseAgent } from '../base/index.js'
-import type { BaseAgentConfig } from '../base/types.js'
+import { ProfileAgent } from '../profile-agent.js'
+import type { ProfileAgentConfig } from '../profile-agent.js'
 import type { ToolResult } from '../../tools/index.js'
 import type { Channel } from '../../channel/base.js'
 import { eventBus } from '../../eventBus.js'
@@ -10,7 +10,7 @@ import { eventBus } from '../../eventBus.js'
 // 接口定义
 // ============================================================================
 
-export interface MainAgentConfig extends BaseAgentConfig {
+export interface MainAgentConfig extends Omit<ProfileAgentConfig, 'profileName'> {
   channel?: Channel
 }
 
@@ -39,11 +39,12 @@ const INTERVIEW_AND_RESUME_PROMPT = [
   '- Do not score the mock interview mid-session. Only output the final score, section scores, analysis, recommended answers, and improvement advice when the interview ends.',
 ].join('\n')
 
-export class MainAgent extends BaseAgent {
+export class MainAgent extends ProfileAgent {
   private lastCronAt: string | null = null
 
   constructor(config: MainAgentConfig) {
-    super({ ...config, agentName: config.agentName ?? 'main' })
+    const agentName = config.agentName ?? 'main'
+    super({ ...config, agentName, profileName: 'main' })
 
     if (!config.mcpClient) {
       console.warn(
@@ -52,10 +53,9 @@ export class MainAgent extends BaseAgent {
     }
   }
 
-  /** 系统提示词，内嵌 skills index SOP */
-  protected get systemPrompt(): string {
+  protected getAdditionalSections(): string[] {
     const skills = this.loadSkill('index')
-    return `你是 JobClaw 的主 Agent（MainAgent），负责用户交互、职位搜索与任务调度。
+    return [`你是 JobClaw 的主 Agent（MainAgent），负责用户交互、职位搜索与任务调度。
 ${this.mcpClient ? '' : '\n> ⚠️ **注意：MCP 未连接**。当前不可用 Playwright 浏览器工具，无法执行自动化网页搜索。\n'}
 ## 角色职责
 - 与用户进行自然语言交互，持续保持对话。
@@ -87,7 +87,7 @@ ${INTERVIEW_AND_RESUME_PROMPT}
 - **data/targets.md**: 监测目标列表。
 - **data/jobs.md**: 职位列表（由 upsert_job 维护）。
 - **data/userinfo.md**: 用户简历信息（只读）。
-`
+`]
   }
 
   /**

@@ -23,7 +23,7 @@ export async function executeReadFile(args: Record<string, unknown>, context: To
   }
 
   // 权限检查
-  const permission = checkPathPermission(normalizedPath, context.agentName, 'read', context.workspaceRoot)
+  const permission = checkPathPermission(normalizedPath, context.agentName, 'read', context.workspaceRoot, context)
   if (!permission.allowed) {
     return { success: false, content: '', error: permission.reason }
   }
