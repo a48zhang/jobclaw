@@ -17,9 +17,6 @@ export const CHANNEL_LOG_TYPE_MAP: Record<string, 'info' | 'warn' | 'error'> = {
  * 将 Channel 包装为同步 emit agent:log 的版本
  */
 export function wrapChannel(channel: Channel, agentName: string): Channel {
-  // 用于累积流式内容
-  let streamingContent = ''
-
   return {
     send: async (message: ChannelMessage): Promise<void> => {
       const logType: 'info' | 'warn' | 'error' = CHANNEL_LOG_TYPE_MAP[message.type] ?? 'info'
@@ -27,20 +24,8 @@ export function wrapChannel(channel: Channel, agentName: string): Channel {
       // 处理 agent_response 类型（流式和非流式）
       if (message.type === 'agent_response') {
         if (message.streaming) {
-          // 流式模式：累积内容
-          if (message.streaming.chunk) {
-            streamingContent += message.streaming.chunk
-          }
-          // 只在 isFinal 时发送完整的日志
-          if (message.streaming.isFinal && streamingContent) {
-            eventBus.emit('agent:log', {
-              agentName,
-              type: logType,
-              message: streamingContent,
-              timestamp: new Date().toISOString(),
-            })
-            streamingContent = ''
-          }
+          // 聊天回答的唯一用户可见事实源是 agent:stream；
+          // 不要在流结束时再镜像成 agent:log，否则前端会把同一回复显示两次。
         } else {
           // 非流式：直接发送
           const msg = typeof message.payload['message'] === 'string' ? message.payload['message'] : ''

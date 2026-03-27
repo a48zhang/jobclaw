@@ -1,33 +1,16 @@
 import * as crypto from 'node:crypto'
 import { eventBus } from '../eventBus.js'
-import type { ProfileName } from './profiles.js'
+import type { DelegatedRun as RuntimeDelegatedRun, DelegatedRunState as RuntimeDelegatedRunState } from '../runtime/contracts.js'
 
-export type DelegatedRunState =
-  | 'queued'
-  | 'running'
-  | 'waiting_input'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-
-export interface DelegatedRun {
-  id: string
-  parentSessionId: string
-  profile: ProfileName
-  state: DelegatedRunState
-  instruction: string
-  createdAt: string
-  updatedAt: string
-  resultSummary?: string
-  error?: string
-}
+export type DelegatedRunState = RuntimeDelegatedRunState
+export type DelegatedRun = RuntimeDelegatedRun
 
 export class DelegationManager {
   private runs = new Map<string, DelegatedRun>()
 
   constructor(private parentSessionId: string, private agentName: string) {}
 
-  createDelegatedRun(profile: ProfileName, instruction: string): DelegatedRun {
+  createDelegatedRun(profile: DelegatedRun['profile'], instruction: string): DelegatedRun {
     const now = new Date().toISOString()
     const run: DelegatedRun = {
       id: crypto.randomUUID(),

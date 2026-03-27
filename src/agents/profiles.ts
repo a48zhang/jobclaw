@@ -1,16 +1,7 @@
-export type ProfileName = 'main' | 'search' | 'delivery' | 'resume' | 'review'
+import type { AgentProfile, AgentProfileName } from '../runtime/capability-types.js'
 
-export interface AgentProfile {
-  name: ProfileName
-  systemPromptSections: string[]
-  allowedTools: string[]
-  readableRoots: string[]
-  writableRoots: string[]
-  allowBrowser: boolean
-  allowNotifications: boolean
-  allowAdminTools: boolean
-  allowDelegationTo: ProfileName[]
-}
+export type ProfileName = AgentProfileName
+export type { AgentProfile }
 
 const ALL_TOOLS = [
   'read_file',
@@ -168,10 +159,11 @@ const SKILL_TO_PROFILE_MAP: Record<string, ProfileName> = {
   search: 'search',
 }
 
-export function inferProfileFromSkill(skill?: string): ProfileName {
+export function inferProfileFromSkill(skill?: string): Exclude<ProfileName, 'main'> {
   if (!skill) return 'search'
   const normalized = skill.toLowerCase().trim()
-  return SKILL_TO_PROFILE_MAP[normalized] ?? 'search'
+  const inferred = SKILL_TO_PROFILE_MAP[normalized]
+  return inferred && inferred !== 'main' ? inferred : 'search'
 }
 
 export function getProfileByName(name: ProfileName): AgentProfile {
