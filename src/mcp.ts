@@ -14,13 +14,26 @@ import type { MCPClient } from './agents/base/types.js'
  * 呼び出し元は不要になった時点で `close()` すること。
  */
 export interface MCPClientStatus {
+  enabled: boolean
   connected: boolean
-  error?: string
+  message?: string
 }
 
-export async function createMCPClient(): Promise<(MCPClient & { close(): Promise<void> }) | null> {
+export interface MCPClientConnection {
+  client: (MCPClient & { close(): Promise<void> }) | null
+  status: MCPClientStatus
+}
+
+export async function createMCPClient(): Promise<MCPClientConnection> {
   if (process.env.MCP_DISABLED === '1') {
-    return null
+    return {
+      client: null,
+      status: {
+        enabled: false,
+        connected: false,
+        message: 'MCP 已通过 MCP_DISABLED=1 禁用',
+      },
+    }
   }
   const transport = new StdioClientTransport({
     command: 'npx',
@@ -36,34 +49,48 @@ export async function createMCPClient(): Promise<(MCPClient & { close(): Promise
     } catch {
       // ignore
     }
-    return null
+    return {
+      client: null,
+      status: {
+        enabled: true,
+        connected: false,
+        message: `MCP 连接失败: ${(err as Error).message || 'Failed to connect to MCP server'}`,
+      },
+    }
   }
 
   return {
-    async listTools() {
-      const { tools } = await client.listTools()
-      return tools.map((t) => ({
-        name: t.name,
-        description: t.description ?? '',
-        inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
-      }))
+    status: {
+      enabled: true,
+      connected: true,
+      message: 'MCP 已连接',
     },
+    client: {
+      async listTools() {
+        const { tools } = await client.listTools()
+        return tools.map((t) => ({
+          name: t.name,
+          description: t.description ?? '',
+          inputSchema: (t.inputSchema as Record<string, unknown>) ?? {},
+        }))
+      },
 
-    async callTool(name: string, args: Record<string, unknown>) {
-      const result = await client.callTool({ name, arguments: args })
-      const textParts = (result.content as any[])
-        .filter((c) => c.type === 'text')
-        .map((c) => c.text)
+      async callTool(name: string, args: Record<string, unknown>) {
+        const result = await client.callTool({ name, arguments: args })
+        const textParts = (result.content as any[])
+          .filter((c) => c.type === 'text')
+          .map((c) => c.text)
 
-      if (textParts.length > 0) {
-        return textParts.join('\n')
-      }
+        if (textParts.length > 0) {
+          return textParts.join('\n')
+        }
 
-      return JSON.stringify(result.content)
-    },
+        return JSON.stringify(result.content)
+      },
 
-    async close() {
-      await client.close()
+      async close() {
+        await client.close()
+      },
     },
   }
 }

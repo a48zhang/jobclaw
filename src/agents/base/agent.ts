@@ -21,8 +21,48 @@ import type { AgentProfile } from '../profiles.js'
 import { DelegationManager, type DelegatedRun } from '../delegation-manager.js'
 import { inferProfileFromSkill } from '../profiles.js'
 import { defaultCapabilityPolicy } from '../../tools/capability-policy.js'
+import { isBrowserToolName } from '../../tools/names.js'
 
 const TOOL_CALL_TIMEOUT_MS = 120_000
+const TOOL_RETRY_LIMIT = 2
+const TOOL_RETRY_BASE_DELAY_MS = 750
+const TOOL_RETRYABLE_LOCAL_TOOLS = new Set<string>([
+  TOOL_NAMES.READ_FILE,
+  TOOL_NAMES.LIST_DIRECTORY,
+  TOOL_NAMES.GREP,
+  TOOL_NAMES.READ_PDF,
+  TOOL_NAMES.TYPST_COMPILE,
+  TOOL_NAMES.GET_TIME,
+])
+const NON_RETRYABLE_BROWSER_TOOLS = new Set<string>([
+  'browser_click',
+  'browser_type',
+  'browser_fill_form',
+  'browser_select_option',
+  'browser_press_key',
+  'browser_handle_dialog',
+  'browser_drag',
+  'browser_file_upload',
+  'browser_run_code',
+])
+const RETRYABLE_TOOL_ERROR_PATTERNS = [
+  'timeout',
+  'timed out',
+  '429',
+  '500',
+  '502',
+  '503',
+  '504',
+  'rate limit',
+  'temporarily unavailable',
+  'connection reset',
+  'socket hang up',
+  'network',
+  'econnreset',
+  'econnrefused',
+  'enotfound',
+  'eai_again',
+]
 const REQUEST_TOOL_NAME = 'request'
 
 class AgentAbortedError extends Error {
@@ -631,7 +671,7 @@ export abstract class BaseAgent extends EventEmitter {
 
     let result: ToolResult
     try {
-      result = await invokeTool()
+      result = await this.executeToolWithRetry(toolName, invokeTool)
       if (runRecord) {
         if (result.success) {
           this.delegationManager.completeRun(runRecord.id, result.content ?? '')
@@ -776,6 +816,71 @@ export abstract class BaseAgent extends EventEmitter {
 
   protected async onToolResult(_name: string, _res: ToolResult): Promise<void> { }
 
+  private async executeToolWithRetry(
+    toolName: string,
+    invokeTool: () => Promise<ToolResult>
+  ): Promise<ToolResult> {
+    let attempt = 0
+    let lastResult: ToolResult | undefined
+
+    while (attempt <= TOOL_RETRY_LIMIT) {
+      const result = await invokeTool()
+      lastResult = result
+
+      if (!this.shouldRetryToolResult(toolName, result, attempt)) {
+        return result
+      }
+
+      const reason = result.error ?? result.content ?? `工具 ${toolName} 调用失败`
+      await this.waitForToolRetry(toolName, attempt + 1, reason)
+      attempt += 1
+    }
+
+    return lastResult ?? { success: false, content: '', error: `工具 ${toolName} 调用失败` }
+  }
+
+  private shouldRetryToolResult(toolName: string, result: ToolResult, attempt: number): boolean {
+    if (result.success || attempt >= TOOL_RETRY_LIMIT) return false
+    if (!this.isToolRetryable(toolName)) return false
+    const reason = (result.error ?? result.content ?? '').toLowerCase()
+    return RETRYABLE_TOOL_ERROR_PATTERNS.some((pattern) => reason.includes(pattern))
+  }
+
+  private isToolRetryable(toolName: string): boolean {
+    if (toolName === REQUEST_TOOL_NAME || toolName === TOOL_NAMES.RUN_AGENT) return false
+    if (!LOCAL_TOOL_NAMES.includes(toolName as (typeof LOCAL_TOOL_NAMES)[number])) {
+      return isBrowserToolName(toolName) && !NON_RETRYABLE_BROWSER_TOOLS.has(toolName)
+    }
+    return TOOL_RETRYABLE_LOCAL_TOOLS.has(toolName)
+  }
+
+  private async waitForToolRetry(toolName: string, retryNumber: number, reason: string): Promise<void> {
+    const delayMs = TOOL_RETRY_BASE_DELAY_MS * Math.pow(2, retryNumber - 1)
+
+    if (this.channel) {
+      await this.channel.send({
+        type: 'tool_warn',
+        payload: {
+          toolName,
+          message: `工具 ${toolName} 第 ${retryNumber} 次重试前等待 ${delayMs}ms：${reason}`,
+        },
+        timestamp: new Date(),
+      })
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.abortController.signal.removeEventListener('abort', onAbort)
+        resolve()
+      }, delayMs)
+      const onAbort = () => {
+        clearTimeout(timeoutId)
+        reject(new AgentAbortedError(this.abortReason ?? 'Agent aborted'))
+      }
+      this.abortController.signal.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+
   public async loadSession(): Promise<void> {
     const s = utils.loadSession(this.getSessionPath())
     if (s) {
@@ -806,14 +911,48 @@ export abstract class BaseAgent extends EventEmitter {
   protected async saveSession(): Promise<void> {
     if (!this.persistent) return
 
+    const snapshotMessages = await this.buildPersistedMessageSnapshot()
+
     const session: Session = {
       currentTask: this.currentTask,
       context: this.extractContext(),
-      messages: this.messages.filter((m) => m.role !== 'system'),
+      messages: snapshotMessages.filter((m) => m.role !== 'system'),
       todos: [],
       finishReason: this.lastFinishReason,
     }
     utils.saveSession(this.getSessionPath(), session)
+  }
+
+  private async buildPersistedMessageSnapshot(): Promise<ChatCompletionMessageParam[]> {
+    if (this.messages.length === 0) return []
+
+    const tokenCount = this.compressor.calculateTokens(this.messages)
+    if (tokenCount < 20_000) {
+      return this.messages
+    }
+
+    if (this.state === 'running') {
+      return this.buildTrimmedPersistenceSnapshot()
+    }
+
+    return this.compressor.checkAndCompress([...this.messages])
+  }
+
+  private buildTrimmedPersistenceSnapshot(): ChatCompletionMessageParam[] {
+    const systemMessage = this.messages.find((message) => message.role === 'system')
+    const nonSystemMessages = this.messages.filter((message) => message.role !== 'system')
+    const recentLimit = Math.max(6, Math.min(this.keepRecentMessages, 12))
+    const recentMessages = nonSystemMessages.slice(-recentLimit)
+    const summaryMessage: ChatCompletionMessageParam = {
+      role: 'user',
+      content: `SYSTEM_SUMMARY: 会话进行中，持久化快照已截断；仅保留最近 ${recentMessages.length} 条消息。`,
+    }
+
+    if (!systemMessage) {
+      return [summaryMessage, ...recentMessages]
+    }
+
+    return [systemMessage, summaryMessage, ...recentMessages]
   }
 
   protected getSessionPath(): string { return utils.getSessionPath(this.workspaceRoot, this.agentName) }

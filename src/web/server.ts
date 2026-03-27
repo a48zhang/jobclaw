@@ -12,15 +12,21 @@ import type { BaseAgent } from '../agents/base/agent.js'
 import type { AgentFactory } from '../agents/factory.js'
 import type { Config, ConfigStatus } from '../config.js'
 import { getConfigStatus as readConfigStatus, readConfigFile, saveConfigFile } from '../config.js'
+import type { MCPClientStatus } from '../mcp.js'
 import type { JobStatus } from '../runtime/contracts.js'
 
 const agentRegistry = new Map<string, BaseAgent>()
+
+interface RuntimeStatusPayload {
+  mcp: MCPClientStatus
+}
 
 export interface ServerRuntime {
   getMainAgent(): BaseAgent | undefined
   getFactory(): AgentFactory | undefined
   getConfigStatus(): ConfigStatus
   reloadFromConfig(): Promise<void>
+  getRuntimeStatus?(): RuntimeStatusPayload
 }
 
 export function registerAgent(agent: BaseAgent): void {
@@ -83,7 +89,11 @@ for (const event of BUS_EVENTS) {
   eventBus.on(event, (payload) => broadcast(event, payload))
 }
 
-function buildConfigPayload(workspaceRoot: string, status: ConfigStatus) {
+function buildConfigPayload(
+  workspaceRoot: string,
+  status: ConfigStatus,
+  runtimeStatus?: RuntimeStatusPayload
+) {
   const stored = readConfigFile(workspaceRoot)
   return {
     ok: true,
@@ -97,6 +107,11 @@ function buildConfigPayload(workspaceRoot: string, status: ConfigStatus) {
     status: {
       ready: status.ready,
       missingFields: status.missingFields,
+      mcp: runtimeStatus?.mcp ?? {
+        enabled: process.env.MCP_DISABLED !== '1',
+        connected: false,
+        message: 'Runtime status unavailable',
+      },
     },
   }
 }
@@ -121,6 +136,13 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         getFactory: () => runtimeOrFactory as AgentFactory | undefined,
         getConfigStatus: () => readConfigStatus(workspaceRoot),
         reloadFromConfig: async () => {},
+        getRuntimeStatus: () => ({
+          mcp: {
+            enabled: process.env.MCP_DISABLED !== '1',
+            connected: false,
+            message: 'Runtime status unavailable',
+          },
+        }),
       }
 
   const app = new Hono()
@@ -130,7 +152,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
 
   app.get('/api/settings', (c) => {
     const status = runtime.getConfigStatus()
-    return c.json(buildConfigPayload(workspaceRoot, status))
+    return c.json(buildConfigPayload(workspaceRoot, status, runtime.getRuntimeStatus?.()))
   })
 
   app.post('/api/settings', async (c) => {
@@ -146,7 +168,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
 
       saveConfigFile(workspaceRoot, updates)
       await runtime.reloadFromConfig()
-      return c.json(buildConfigPayload(workspaceRoot, runtime.getConfigStatus()))
+      return c.json(buildConfigPayload(workspaceRoot, runtime.getConfigStatus(), runtime.getRuntimeStatus?.()))
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }

@@ -40,6 +40,14 @@ class TestAgent extends BaseAgent {
   public async testGetAvailableTools(): Promise<import('openai/resources/chat/completions').ChatCompletionTool[]> {
     return this.getAvailableTools()
   }
+
+  public async testExecuteToolCall(toolCall: import('openai/resources/chat/completions').ChatCompletionMessageToolCall) {
+    return this.executeToolCall(toolCall)
+  }
+
+  public async testSaveSession(): Promise<void> {
+    await this.saveSession()
+  }
 }
 
 /**
@@ -188,6 +196,72 @@ describe('BaseAgent', () => {
       expect(session).toHaveProperty('messages')
       expect(session).toHaveProperty('currentTask')
       expect(session).toHaveProperty('context')
+    })
+
+    test('saveSession 在运行中会截断过大的持久化快照', async () => {
+      const persistentAgent = new TestAgent({
+        openai: mockOpenAI,
+        agentName: 'test',
+        model: 'test-model',
+        workspaceRoot: TEST_WORKSPACE,
+        persistent: true,
+      })
+
+      persistentAgent.testSetMessages([
+        { role: 'system', content: 'system' },
+        ...Array.from({ length: 16 }, (_, index) => ({
+          role: index % 2 === 0 ? 'user' : 'assistant',
+          content: `消息 ${index} ` + 'x'.repeat(4000),
+        })),
+      ] as any)
+      ;(persistentAgent as any).state = 'running'
+
+      await persistentAgent.testSaveSession()
+
+      const sessionPath = path.join(TEST_AGENT_DIR, 'session.json')
+      const session = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'))
+      expect(session.messages.length).toBeLessThan(16)
+      expect(session.messages[0]?.content).toContain('SYSTEM_SUMMARY')
+    })
+  })
+
+  describe('工具重试', () => {
+    test('对可重试的 MCP 工具失败执行指数退避重试', async () => {
+      vi.useFakeTimers()
+      try {
+        const mcpClient: MCPClient = {
+          listTools: vi.fn(async () => []),
+          callTool: vi.fn()
+            .mockRejectedValueOnce(new Error('timeout while calling tool'))
+            .mockRejectedValueOnce(new Error('socket hang up'))
+            .mockResolvedValue('最终成功'),
+        }
+
+        const retryAgent = new TestAgent({
+          openai: mockOpenAI,
+          agentName: 'test',
+          model: 'test-model',
+          workspaceRoot: TEST_WORKSPACE,
+          mcpClient,
+        })
+
+        const callPromise = retryAgent.testExecuteToolCall({
+          id: 'call-1',
+          type: 'function',
+          function: {
+            name: 'browser_navigate',
+            arguments: JSON.stringify({ url: 'https://example.com' }),
+          },
+        } as any)
+
+        await vi.runAllTimersAsync()
+        const result = await callPromise
+
+        expect(mcpClient.callTool).toHaveBeenCalledTimes(3)
+        expect((result as { content: string }).content).toBe('最终成功')
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 
@@ -582,6 +656,58 @@ describe('executeToolCall()', () => {
     expect(mockMCPClient.callTool).toHaveBeenCalled()
   })
 
+  test('MCP 工具遇到瞬时错误时会自动重试', async () => {
+    const mockMCPClient: MCPClient = {
+      listTools: vi.fn(() => Promise.resolve([
+        { name: 'custom_tool', description: 'Custom Tool', inputSchema: { type: 'object' } },
+      ])),
+      callTool: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('socket hang up'))
+        .mockResolvedValueOnce('MCP tool result after retry'),
+    }
+
+    let llmCallCount = 0
+    const mockOpenAI = {
+      chat: {
+        completions: {
+          create: vi.fn((params: any) => {
+            llmCallCount++
+            if (llmCallCount === 1) {
+              return formatResponse(params, {
+                content: null,
+                tool_calls: [{
+                  id: 'call_retry',
+                  type: 'function',
+                  function: {
+                    name: 'custom_tool',
+                    arguments: '{"param": "value"}',
+                  },
+                }],
+              })
+            }
+            return formatResponse(params, {
+              content: 'MCP tool executed after retry',
+            })
+          }),
+        },
+      },
+    } as unknown as OpenAI
+
+    const agent = new TestAgent({
+      openai: mockOpenAI,
+      agentName: 'test_retry',
+      model: 'test-model',
+      workspaceRoot: TEST_WORKSPACE,
+      mcpClient: mockMCPClient,
+    })
+
+    const result = await agent.run('调用会重试的 MCP 工具')
+
+    expect(result).toBe('MCP tool executed after retry')
+    expect(mockMCPClient.callTool).toHaveBeenCalledTimes(2)
+  })
+
   test('run_agent 在 MCP 存在时也走本地工具分支', async () => {
     const mockMCPClient: MCPClient = {
       listTools: vi.fn(() => Promise.resolve([
@@ -674,6 +800,39 @@ describe('executeToolCall()', () => {
     // 不应抛出异常
     const result = await agent.run('测试')
     expect(result).toBeDefined()
+  })
+
+  test('持久化 session 在长会话运行中会截断快照，避免 session.json 持续膨胀', async () => {
+    const sessionPath = path.join(TEST_WORKSPACE, 'agents', 'test_long_session', 'session.json')
+    const localMockOpenAI = createMockOpenAI()
+
+    const persistentAgent = new TestAgent({
+      openai: localMockOpenAI,
+      agentName: 'test_long_session',
+      model: 'test-model',
+      workspaceRoot: TEST_WORKSPACE,
+      persistent: true,
+    })
+
+    const longMessage = '上下文'.repeat(5000)
+    persistentAgent.testSetMessages([
+      { role: 'system', content: 'system prompt' },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        content: `${index}:${longMessage}`,
+      })) as import('openai/resources/chat/completions').ChatCompletionMessageParam[],
+    ])
+
+    ;(persistentAgent as any).state = 'running'
+    await (persistentAgent as any).saveSession()
+
+    const session = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'))
+    const contents = session.messages
+      .map((message: { content?: unknown }) => typeof message.content === 'string' ? message.content : '')
+      .join('\n')
+
+    expect(contents).toContain('SYSTEM_SUMMARY: 会话进行中，持久化快照已截断')
+    expect(session.messages.length).toBeLessThan(20)
   })
 })
 

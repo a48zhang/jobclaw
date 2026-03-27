@@ -44,6 +44,103 @@ describe('/api/intervention', () => {
   })
 })
 
+describe('/api/settings', () => {
+  test('includes MCP runtime status in the settings payload', async () => {
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getRuntimeStatus: () => ({
+        mcp: {
+          enabled: true,
+          connected: false,
+          message: 'MCP 连接失败: timeout',
+        },
+      }),
+    }
+
+    const app = createApp(TEST_WORKSPACE, runtime as any)
+    const res = await app.request('/api/settings')
+    expect(res.status).toBe(200)
+    const json = await res.json() as {
+      status: {
+        ready: boolean
+        mcp: {
+          enabled: boolean
+          connected: boolean
+          message: string
+        }
+      }
+    }
+    expect(json.status.ready).toBe(true)
+    expect(json.status.mcp).toEqual({
+      enabled: true,
+      connected: false,
+      message: 'MCP 连接失败: timeout',
+    })
+  })
+})
+
+describe('/api/settings', () => {
+  test('returns runtime MCP degradation status when available', async () => {
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      getRuntimeStatus: () => ({
+        mcp: {
+          enabled: false,
+          connected: false,
+          message: 'MCP disabled by environment',
+        },
+      }),
+      reloadFromConfig: async () => {},
+    }
+
+    const app = createApp(TEST_WORKSPACE, runtime as any)
+    const res = await app.request('/api/settings')
+
+    expect(res.status).toBe(200)
+    const json = await res.json() as {
+      ok: boolean
+      status: {
+        ready: boolean
+        mcp: {
+          enabled: boolean
+          connected: boolean
+          message?: string
+        }
+      }
+    }
+    expect(json.ok).toBe(true)
+    expect(json.status.ready).toBe(true)
+    expect(json.status.mcp.enabled).toBe(false)
+    expect(json.status.mcp.connected).toBe(false)
+    expect(json.status.mcp.message).toContain('MCP disabled')
+  })
+})
+
 describe('/api/resume/upload', () => {
   test('accepts a PDF upload and writes it into the workspace', async () => {
     const app = createApp(TEST_WORKSPACE)

@@ -3,7 +3,7 @@ import type { Channel } from '../channel/base.js'
 import { AgentFactory } from '../agents/factory.js'
 import { MainAgent } from '../agents/main/index.js'
 import { getConfigStatus, loadConfig, type ConfigStatus } from '../config.js'
-import { createMCPClient } from '../mcp.js'
+import { createMCPClient, type MCPClientStatus } from '../mcp.js'
 import { bindRuntimeEventStream } from '../eventBus.js'
 import { DelegationStore } from '../memory/delegationStore.js'
 import { InMemoryEventStream } from './event-stream.js'
@@ -12,7 +12,11 @@ import { JsonSessionStore } from './session-store.js'
 import { ensureRuntimeStateDirs, nowIso } from './utils.js'
 import type { AgentSession, DelegatedRun, DelegatedRunState, EventStream } from './contracts.js'
 
-type ClosableMCPClient = Awaited<ReturnType<typeof createMCPClient>>
+type ClosableMCPClient = Awaited<ReturnType<typeof createMCPClient>>['client']
+
+export interface RuntimeStatus {
+  mcp: MCPClientStatus
+}
 
 export interface RuntimeKernelConfig {
   workspaceRoot: string
@@ -36,6 +40,11 @@ export class RuntimeKernel {
   private readonly delegationStore: DelegationStore
 
   private mcpClient: ClosableMCPClient = null
+  private mcpStatus: MCPClientStatus = {
+    enabled: process.env.MCP_DISABLED !== '1',
+    connected: false,
+    message: 'MCP 尚未初始化',
+  }
   private mainAgent?: MainAgent
   private factory?: AgentFactory
   private started = false
@@ -76,6 +85,11 @@ export class RuntimeKernel {
       await this.mcpClient.close()
       this.mcpClient = null
     }
+    this.mcpStatus = {
+      enabled: process.env.MCP_DISABLED !== '1',
+      connected: false,
+      message: 'Runtime 已关闭',
+    }
 
     this.started = false
   }
@@ -106,7 +120,26 @@ export class RuntimeKernel {
     }
 
     if (!this.mcpClient) {
-      this.mcpClient = await createMCPClient()
+      const mcpConnection = await createMCPClient()
+      this.mcpClient = mcpConnection.client
+      this.mcpStatus = mcpConnection.status
+    } else {
+      this.mcpStatus = { enabled: true, connected: true, message: 'MCP 已连接' }
+    }
+
+    if (!this.mcpStatus.connected) {
+      this.eventStream.publish({
+        type: 'runtime.warning',
+        sessionId: this.mainAgentName,
+        agentName: 'system',
+        payload: {
+          message: `Playwright MCP 不可用：${this.mcpStatus.message ?? '连接失败'}`,
+          subsystem: 'mcp',
+          mcpConnected: false,
+          mcpEnabled: this.mcpStatus.enabled,
+          mcpMessage: this.mcpStatus.message,
+        },
+      })
     }
 
     const config = loadConfig(this.workspaceRoot)
@@ -159,6 +192,12 @@ export class RuntimeKernel {
 
   getConfigStatus(): ConfigStatus {
     return getConfigStatus(this.workspaceRoot)
+  }
+
+  getRuntimeStatus(): RuntimeStatus {
+    return {
+      mcp: { ...this.mcpStatus },
+    }
   }
 
   getEventStream(): EventStream {
