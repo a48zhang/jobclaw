@@ -205,10 +205,11 @@ function showConfirm(options = {}) {
   })
 }
 
-function showModal({ agentName, prompt, kind, options, requestId }) {
+function showModal({ agentName, prompt, kind, options, requestId, ownerId }) {
   ensureInterventionModalSemantics()
   window.appState.interventionAgentName = agentName ?? 'main'
   window.appState.interventionRequestId = requestId ?? null
+  window.appState.interventionOwnerId = ownerId ?? agentName ?? 'main'
   window.appState.interventionKind = kind ?? 'text'
   const normalizedOptions = Array.isArray(options) ? options.filter(v => typeof v === 'string') : []
   window.appState.interventionOptions = normalizedOptions
@@ -287,6 +288,7 @@ function hideModal() {
   optionsContainer.innerHTML = ''
   optionsContainer.classList.add('hidden')
   window.appState.interventionRequestId = null
+  window.appState.interventionOwnerId = null
   window.appState.interventionKind = 'text'
   window.appState.interventionOptions = []
 
@@ -313,6 +315,7 @@ async function submitIntervention() {
   const payload = {
     input,
     agentName: window.appState.interventionAgentName,
+    ownerId: window.appState.interventionOwnerId,
     requestId: window.appState.interventionRequestId
   }
   hideModal()
@@ -331,6 +334,7 @@ document.getElementById('modal-cancel').addEventListener('click', () => {
   const payload = {
     input: '',
     agentName: window.appState.interventionAgentName,
+    ownerId: window.appState.interventionOwnerId,
     requestId: window.appState.interventionRequestId
   }
   hideModal()

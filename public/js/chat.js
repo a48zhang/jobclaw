@@ -58,6 +58,20 @@ const CHAT_INPUT_MIN_HEIGHT = 56
 const CHAT_INPUT_MAX_HEIGHT = 164
 
 let chatRuntimeStatus = null
+let chatRuntimeBoard = null
+let runtimeWorkboardTimer = null
+let runtimeWorkboardPoller = null
+let runtimeWorkboardInFlight = false
+let runtimeWorkboardQueued = false
+
+const RUNTIME_STATUS_TONES = {
+  running: 'text-sky-300',
+  waiting: 'text-amber-300',
+  failed: 'text-rose-300',
+  completed: 'text-emerald-300',
+  queued: 'text-slate-300',
+  idle: 'text-slate-300',
+}
 
 function ensureChatStatusCard() {
   if (chatRuntimeStatus) return chatRuntimeStatus
@@ -67,16 +81,131 @@ function ensureChatStatusCard() {
   const legacyCard = document.getElementById('chat-status-card')
   if (legacyCard) legacyCard.remove()
 
+  const wrapper = document.createElement('div')
+  wrapper.className = 'runtime-status-stack'
   const statusLine = document.createElement('p')
   statusLine.id = 'chat-runtime-status'
   statusLine.className = 'text-xs text-slate-300'
   statusLine.textContent = `${CHAT_STATE_METADATA.idle.label}：${CHAT_STATE_METADATA.idle.detail}`
-  container.replaceChildren(statusLine)
+  wrapper.appendChild(statusLine)
+  container.replaceChildren(wrapper)
 
   chatRuntimeStatus = statusLine
   setUnifiedPlaceholder()
   ensureApplyFeatureWrapper()
+  ensureRuntimeWorkboard()
   return statusLine
+}
+
+function formatTimestampLabel(value) {
+  if (!value) return '刚刚'
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return '刚刚'
+  return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function renderRuntimeList(items, emptyMessage, formatter) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return `<li class="runtime-inline-empty">${escHtml(emptyMessage)}</li>`
+  }
+  return items.map(formatter).join('')
+}
+
+function renderRuntimeTaskList(tasks) {
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return `
+      <div class="runtime-task-empty">
+        <p class="text-sm text-slate-300">当前没有活动中的结构化任务。</p>
+        <p class="text-xs text-slate-500">继续在聊天区下达任务后，这里会显示当前运行、等待输入和最近完成的任务。</p>
+      </div>
+    `
+  }
+
+  return tasks.slice(0, 4).map((task) => {
+    const tone = RUNTIME_STATUS_TONES[task.state] || 'text-slate-300'
+    const reason = task.nextAction?.reason || task.resultSummary || task.summary || '暂无更多说明'
+    return `
+      <article class="runtime-task-item">
+        <div class="runtime-task-head">
+          <div class="min-w-0">
+            <p class="runtime-task-title">${escHtml(task.title || task.id)}</p>
+            <p class="runtime-task-meta">${escHtml(task.profile || 'main')} · ${escHtml(task.statusLabel || task.state || 'unknown')}</p>
+          </div>
+          <span class="runtime-task-badge ${tone}">${escHtml(task.state || 'idle')}</span>
+        </div>
+        <p class="runtime-task-summary">${escHtml(reason)}</p>
+      </article>
+    `
+  }).join('')
+}
+
+function ensureRuntimeWorkboard() {
+  if (chatRuntimeBoard) return chatRuntimeBoard
+  const statusLine = ensureChatStatusCard()
+  if (!statusLine) return null
+  const container = statusLine.parentElement
+  if (!container) return null
+
+  const board = document.createElement('section')
+  board.id = 'runtime-workboard'
+  board.className = 'runtime-workboard'
+  board.setAttribute('aria-live', 'polite')
+  board.innerHTML = `
+    <div class="runtime-workboard-head">
+      <div class="min-w-0">
+        <p class="runtime-workboard-kicker">任务视图</p>
+        <h4 class="runtime-workboard-title">当前自动化状态</h4>
+      </div>
+      <div class="runtime-workboard-actions">
+        <span id="runtime-workboard-generated" class="runtime-generated-at">尚未加载</span>
+        <button id="runtime-workboard-refresh" type="button" class="runtime-refresh-btn">刷新</button>
+      </div>
+    </div>
+    <div class="runtime-workboard-grid">
+      <section class="runtime-focus-card">
+        <p class="runtime-card-kicker">当前焦点</p>
+        <h5 id="runtime-focus-title" class="runtime-focus-title">正在读取任务状态…</h5>
+        <p id="runtime-focus-summary" class="runtime-focus-summary">连接成功后这里会显示当前最需要关注的任务。</p>
+      </section>
+      <section class="runtime-mini-card">
+        <p class="runtime-card-kicker">任务总览</p>
+        <div id="runtime-count-strip" class="runtime-count-strip"></div>
+      </section>
+      <section class="runtime-mini-card">
+        <p class="runtime-card-kicker">待授权</p>
+        <ul id="runtime-pending-list" class="runtime-list"></ul>
+      </section>
+      <section class="runtime-mini-card">
+        <p class="runtime-card-kicker">最近失败</p>
+        <ul id="runtime-failure-list" class="runtime-list"></ul>
+      </section>
+    </div>
+    <section class="runtime-next-step-card">
+      <div class="runtime-next-step-head">
+        <p class="runtime-card-kicker">建议下一步</p>
+        <span id="runtime-next-step-count" class="runtime-next-step-count">0 项</span>
+      </div>
+      <ol id="runtime-next-step-list" class="runtime-next-step-list"></ol>
+    </section>
+    <section class="runtime-task-list-card">
+      <div class="runtime-next-step-head">
+        <p class="runtime-card-kicker">任务队列</p>
+        <span id="runtime-task-count" class="runtime-next-step-count">0 项</span>
+      </div>
+      <div id="runtime-task-list" class="runtime-task-list"></div>
+    </section>
+  `
+  container.appendChild(board)
+
+  const refreshButton = board.querySelector('#runtime-workboard-refresh')
+  if (refreshButton) {
+    refreshButton.addEventListener('click', () => {
+      refreshRuntimeWorkboard({ force: true })
+    })
+  }
+
+  chatRuntimeBoard = board
+  return board
 }
 
 function setUnifiedPlaceholder() {
@@ -117,6 +246,7 @@ function ensureApplyFeatureWrapper() {
     const result = original.apply(this, args)
     setUnifiedPlaceholder()
     resizeChatInput()
+    scheduleRuntimeWorkboardRefresh(120)
     return result
   }
   window.applyFeatureAvailability.__chatWrapped = true
@@ -131,12 +261,143 @@ function renderChatStatus(state = window.appState.chatTask.state, detailMessage 
   statusLine.className = `text-xs ${meta.tone}`
 }
 
+function renderRuntimeWorkboard({ insights, tasks }) {
+  const board = ensureRuntimeWorkboard()
+  if (!board) return
+
+  const generatedAt = board.querySelector('#runtime-workboard-generated')
+  const focusTitle = board.querySelector('#runtime-focus-title')
+  const focusSummary = board.querySelector('#runtime-focus-summary')
+  const countStrip = board.querySelector('#runtime-count-strip')
+  const pendingList = board.querySelector('#runtime-pending-list')
+  const failureList = board.querySelector('#runtime-failure-list')
+  const nextStepList = board.querySelector('#runtime-next-step-list')
+  const nextStepCount = board.querySelector('#runtime-next-step-count')
+  const taskCount = board.querySelector('#runtime-task-count')
+  const taskList = board.querySelector('#runtime-task-list')
+
+  const safeTasks = Array.isArray(tasks) ? tasks : []
+  const counts = {
+    running: safeTasks.filter((task) => task.state === 'running').length,
+    waiting: safeTasks.filter((task) => task.state === 'waiting').length,
+    failed: safeTasks.filter((task) => task.state === 'failed').length,
+    completed: safeTasks.filter((task) => task.state === 'completed').length,
+  }
+
+  if (generatedAt) generatedAt.textContent = `更新于 ${formatTimestampLabel(insights?.generatedAt)}`
+  if (focusTitle) focusTitle.textContent = insights?.currentFocus?.title || '当前没有进行中的核心任务'
+  if (focusSummary) {
+    focusSummary.textContent =
+      insights?.currentFocus?.summary || '发送新任务后，这里会显示当前最需要关注的自动化焦点。'
+  }
+  if (countStrip) {
+    countStrip.innerHTML = `
+      <div class="runtime-count-item"><span>执行中</span><strong>${counts.running}</strong></div>
+      <div class="runtime-count-item"><span>待输入</span><strong>${counts.waiting}</strong></div>
+      <div class="runtime-count-item"><span>失败</span><strong>${counts.failed}</strong></div>
+      <div class="runtime-count-item"><span>完成</span><strong>${counts.completed}</strong></div>
+    `
+  }
+  if (pendingList) {
+    pendingList.innerHTML = renderRuntimeList(
+      insights?.pendingAuthorizations || [],
+      '当前没有阻塞任务继续执行的人工输入。',
+      (item) => `<li><strong>${escHtml(item.title || item.taskId)}</strong><span>${escHtml(item.prompt || '等待输入')}</span></li>`
+    )
+  }
+  if (failureList) {
+    failureList.innerHTML = renderRuntimeList(
+      insights?.attentionRequired || [],
+      '最近没有新的失败记录。',
+      (item) => `<li><strong>${escHtml(item.title || item.id)}</strong><span>${escHtml(item.reason || '无失败摘要')}</span></li>`
+    )
+  }
+  if (nextStepList) {
+    const steps = Array.isArray(insights?.nextSteps) ? insights.nextSteps : []
+    nextStepList.innerHTML = steps.length
+      ? steps.map((step) => `<li>${escHtml(step)}</li>`).join('')
+      : '<li class="runtime-inline-empty">当前没有额外建议，继续沿主任务推进即可。</li>'
+  }
+  if (nextStepCount) nextStepCount.textContent = `${Array.isArray(insights?.nextSteps) ? insights.nextSteps.length : 0} 项`
+  if (taskCount) taskCount.textContent = `${safeTasks.length} 项`
+  if (taskList) taskList.innerHTML = renderRuntimeTaskList(safeTasks)
+}
+
+function renderRuntimeWorkboardError(message) {
+  renderRuntimeWorkboard({
+    insights: {
+      generatedAt: new Date().toISOString(),
+      currentFocus: {
+        title: '任务视图暂不可用',
+        summary: message,
+      },
+      pendingAuthorizations: [],
+      attentionRequired: [],
+      nextSteps: ['稍后重试，或检查后端 runtime 接口是否正常响应。'],
+    },
+    tasks: [],
+  })
+}
+
+async function loadRuntimeWorkboardSnapshot() {
+  const [insightsRes, tasksRes] = await Promise.all([
+    fetch('/api/runtime/automation-insights?sessionId=main'),
+    fetch('/api/runtime/tasks?sessionId=main'),
+  ])
+  const [insightsJson, tasksJson] = await Promise.all([insightsRes.json(), tasksRes.json()])
+  if (!insightsRes.ok || insightsJson?.ok === false) {
+    throw new Error(insightsJson?.error || 'automation insights unavailable')
+  }
+  if (!tasksRes.ok || tasksJson?.ok === false) {
+    throw new Error(tasksJson?.error || 'runtime tasks unavailable')
+  }
+  return {
+    insights: insightsJson,
+    tasks: tasksJson.tasks || [],
+  }
+}
+
+async function refreshRuntimeWorkboard(options = {}) {
+  if (!ensureRuntimeWorkboard()) return
+  if (runtimeWorkboardInFlight && !options.force) {
+    runtimeWorkboardQueued = true
+    return
+  }
+  runtimeWorkboardInFlight = true
+  try {
+    renderRuntimeWorkboard(await loadRuntimeWorkboardSnapshot())
+  } catch (error) {
+    renderRuntimeWorkboardError((error && error.message) || '读取 runtime 状态失败')
+  } finally {
+    runtimeWorkboardInFlight = false
+    if (runtimeWorkboardQueued) {
+      runtimeWorkboardQueued = false
+      refreshRuntimeWorkboard()
+    }
+  }
+}
+
+function scheduleRuntimeWorkboardRefresh(delay = 250) {
+  if (runtimeWorkboardTimer) clearTimeout(runtimeWorkboardTimer)
+  runtimeWorkboardTimer = window.setTimeout(() => {
+    runtimeWorkboardTimer = null
+    refreshRuntimeWorkboard()
+  }, delay)
+}
+
 function bootstrapChatStatusCard() {
   ensureChatStatusCard()
   ensureApplyFeatureWrapper()
   bindChatShortcuts()
   resizeChatInput()
   renderChatStatus(CHAT_TASK_STATE.IDLE, CHAT_STATE_METADATA.idle.detail)
+  refreshRuntimeWorkboard({ force: true })
+  if (!runtimeWorkboardPoller) {
+    runtimeWorkboardPoller = window.setInterval(() => {
+      if (document.hidden) return
+      refreshRuntimeWorkboard()
+    }, 10000)
+  }
 }
 
 if (document.readyState === 'loading') {
@@ -267,6 +528,7 @@ function appendStreamingChunk({ agentName, chunk, isFirst, isFinal }) {
     window.appState.streamingState = { active: false, messageId: null }
     setQueueStatus(null)
     setChatTaskState(CHAT_TASK_STATE.COMPLETED, '回复已完成')
+    scheduleRuntimeWorkboardRefresh(100)
   }
   scrollToBottom()
 }
@@ -356,6 +618,7 @@ async function sendChatMessage() {
     chatSend.disabled = !window.appState.appReady
     chatSend.classList.toggle('opacity-50', !window.appState.appReady)
     chatSend.classList.toggle('cursor-not-allowed', !window.appState.appReady)
+    scheduleRuntimeWorkboardRefresh(150)
   }
 }
 
@@ -374,6 +637,8 @@ window.scrollToBottom = scrollToBottom
 window.appendStreamingChunk = appendStreamingChunk
 window.setQueueStatus = setQueueStatus
 window.setChatTaskState = setChatTaskState
+window.refreshRuntimeWorkboard = refreshRuntimeWorkboard
+window.scheduleRuntimeWorkboardRefresh = scheduleRuntimeWorkboardRefresh
 
 function addToolLogEntry({ type, message, agentName, timestamp }) {
   const list = document.getElementById('tool-log-list')

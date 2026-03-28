@@ -40,7 +40,8 @@ export async function runCron(workspaceRoot: string, mode: 'search' | 'digest' =
   try {
     if (mode === 'search') {
       console.log('[cron] 正在启动搜索任务...')
-      await mainAgent.run(
+      await runtime.runProfileTask(
+        'search',
         '搜索 targets.md 中所有公司的最新职位，使用 upsert_job 将发现的新职位写入 jobs.md。此过程无需发送邮件通知。'
       )
       console.log('[cron] 搜索任务完成。')

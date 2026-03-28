@@ -10,6 +10,7 @@ let sortAsc = false
 let donutChart = null
 let interventionAgentName = 'main'
 let interventionRequestId = null
+let interventionOwnerId = null
 let interventionKind = 'text'
 let interventionOptions = []
 let ws = null
@@ -51,6 +52,7 @@ window.appState = {
   get donutChart() { return donutChart },
   get interventionAgentName() { return interventionAgentName },
   get interventionRequestId() { return interventionRequestId },
+  get interventionOwnerId() { return interventionOwnerId },
   get interventionKind() { return interventionKind },
   get interventionOptions() { return interventionOptions },
   get ws() { return ws },
@@ -76,6 +78,7 @@ window.appState = {
   set donutChart(v) { donutChart = v },
   set interventionAgentName(v) { interventionAgentName = v },
   set interventionRequestId(v) { interventionRequestId = v },
+  set interventionOwnerId(v) { interventionOwnerId = v },
   set interventionKind(v) { interventionKind = v },
   set interventionOptions(v) { interventionOptions = v },
   set ws(v) { ws = v },

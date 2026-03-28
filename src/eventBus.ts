@@ -51,6 +51,7 @@ export interface InterventionRequiredPayload {
   agentName: string
   prompt: string
   requestId?: string
+  ownerId?: string
   kind?: RequestKind
   options?: string[]
   timeoutMs?: number
@@ -61,6 +62,7 @@ export interface InterventionResolvedPayload {
   agentName: string
   input: string
   requestId?: string
+  ownerId?: string
 }
 
 export interface ContextUsagePayload {
@@ -161,10 +163,12 @@ function toRuntimeEvent(
       return {
         type: 'intervention.requested',
         sessionId: value.agentName,
+        delegatedRunId: value.ownerId && value.ownerId !== value.agentName ? value.ownerId : undefined,
         agentName: value.agentName,
         payload: {
           prompt: value.prompt,
           requestId: value.requestId,
+          ownerId: value.ownerId,
           kind: value.kind,
           options: value.options ?? [],
           timeoutMs: value.timeoutMs,
@@ -177,10 +181,12 @@ function toRuntimeEvent(
       return {
         type: 'intervention.resolved',
         sessionId: value.agentName,
+        delegatedRunId: value.ownerId && value.ownerId !== value.agentName ? value.ownerId : undefined,
         agentName: value.agentName,
         payload: {
           input: value.input,
           requestId: value.requestId,
+          ownerId: value.ownerId,
         },
       }
     }
@@ -283,6 +289,7 @@ function toLegacyEvent(
         name: 'intervention:required',
         payload: {
           agentName: event.agentName ?? event.sessionId ?? 'main',
+          ownerId: event.delegatedRunId ?? event.sessionId ?? event.agentName ?? 'main',
           prompt: String(event.payload.prompt ?? ''),
           requestId: typeof event.payload.requestId === 'string' ? event.payload.requestId : undefined,
           kind: event.payload.kind as RequestKind | undefined,
@@ -300,6 +307,7 @@ function toLegacyEvent(
           agentName: event.agentName ?? event.sessionId ?? 'main',
           input: String(event.payload.input ?? ''),
           requestId: typeof event.payload.requestId === 'string' ? event.payload.requestId : undefined,
+          ownerId: event.delegatedRunId ?? event.sessionId ?? event.agentName ?? 'main',
         },
       }
     case 'memory.updated':

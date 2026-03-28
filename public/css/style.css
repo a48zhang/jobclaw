@@ -616,6 +616,203 @@ input:focus-visible {
   line-height: 1.4;
 }
 
+.runtime-status-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.runtime-workboard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.72rem;
+  padding: 0.78rem 0.86rem;
+  border-radius: 0.94rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 82%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--surface-1) 82%, transparent), color-mix(in srgb, var(--surface-2) 72%, transparent));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 4%, transparent);
+}
+
+.runtime-workboard-head,
+.runtime-next-step-head,
+.runtime-task-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.runtime-workboard-kicker,
+.runtime-card-kicker {
+  margin: 0;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.runtime-workboard-title,
+.runtime-focus-title,
+.runtime-task-title {
+  margin: 0.12rem 0 0;
+  color: var(--text-primary);
+}
+
+.runtime-workboard-title {
+  font-size: 0.98rem;
+}
+
+.runtime-focus-title,
+.runtime-task-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.runtime-focus-summary,
+.runtime-task-summary,
+.runtime-task-meta,
+.runtime-generated-at,
+.runtime-next-step-count,
+.runtime-inline-empty {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.runtime-workboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.runtime-refresh-btn {
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 80%, transparent);
+  background: color-mix(in srgb, var(--surface-0) 92%, transparent);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 0.34rem 0.8rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.runtime-workboard-grid {
+  display: grid;
+  gap: 0.72rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.runtime-focus-card,
+.runtime-mini-card,
+.runtime-next-step-card,
+.runtime-task-list-card {
+  padding: 0.78rem;
+  border-radius: 0.84rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 74%, transparent);
+  background: color-mix(in srgb, var(--surface-0) 76%, transparent);
+}
+
+.runtime-focus-card {
+  grid-column: span 2;
+}
+
+.runtime-count-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.58rem;
+  margin-top: 0.45rem;
+}
+
+.runtime-count-item {
+  padding: 0.56rem 0.64rem;
+  border-radius: 0.72rem;
+  background: color-mix(in srgb, var(--surface-1) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 62%, transparent);
+}
+
+.runtime-count-item span {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.runtime-count-item strong {
+  display: block;
+  margin-top: 0.16rem;
+  font-size: 1.05rem;
+  color: var(--text-primary);
+}
+
+.runtime-list,
+.runtime-next-step-list {
+  margin: 0.5rem 0 0;
+  padding-left: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.runtime-list li,
+.runtime-next-step-list li {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.runtime-list li strong {
+  display: block;
+  margin-bottom: 0.1rem;
+  color: var(--text-primary);
+  font-size: 0.79rem;
+}
+
+.runtime-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.56rem;
+  margin-top: 0.48rem;
+}
+
+.runtime-task-item {
+  padding: 0.66rem 0.72rem;
+  border-radius: 0.76rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 72%, transparent);
+}
+
+.runtime-task-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.runtime-task-empty {
+  padding: 0.68rem 0;
+}
+
+@media (max-width: 720px) {
+  .runtime-workboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-focus-card {
+    grid-column: span 1;
+  }
+
+  .runtime-workboard-head,
+  .runtime-next-step-head,
+  .runtime-task-head {
+    flex-direction: column;
+  }
+
+  .runtime-workboard-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 .chat-composer-card {
   display: flex;
   flex-direction: column;

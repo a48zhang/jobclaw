@@ -4,6 +4,7 @@ import * as path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { Config, ConfigStatus } from '../config.js'
+import { getConfigPath } from '../config.js'
 import { getDataPath } from '../infra/workspace/paths.js'
 import type { MCPClientStatus } from '../mcp.js'
 import type {
@@ -498,7 +499,7 @@ async function readOptionalTextFile(filePath: string): Promise<{ exists: boolean
 }
 
 function readConfigStatusSnapshot(workspaceRoot: string): ConfigStatus {
-  const filePath = path.join(workspaceRoot, 'config.json')
+  const filePath = getConfigPath(workspaceRoot)
   let parsed: Partial<Config> = {}
 
   try {

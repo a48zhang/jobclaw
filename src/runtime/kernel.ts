@@ -258,6 +258,36 @@ export class RuntimeKernel {
   ): { runId: string; dispatch: 'profile_agent' } | null {
     if (!this.factory) return null
 
+    const task = this.createProfileTaskRun(profile, instruction, options)
+    void task.completion.catch(() => {})
+    return { runId: task.runId, dispatch: 'profile_agent' }
+  }
+
+  async runProfileTask(
+    profile: Exclude<DelegatedRun['profile'], 'main'>,
+    instruction: string,
+    options: { parentSessionId?: string } = {}
+  ): Promise<{ runId: string; result: string }> {
+    if (!this.factory) {
+      throw new Error('Runtime factory unavailable')
+    }
+
+    const task = this.createProfileTaskRun(profile, instruction, options)
+    return {
+      runId: task.runId,
+      result: await task.completion,
+    }
+  }
+
+  private createProfileTaskRun(
+    profile: Exclude<DelegatedRun['profile'], 'main'>,
+    instruction: string,
+    options: { parentSessionId?: string } = {}
+  ): { runId: string; completion: Promise<string> } {
+    if (!this.factory) {
+      throw new Error('Runtime factory unavailable')
+    }
+
     const parentSessionId = options.parentSessionId ?? this.mainAgentName
     const taskAgent = this.factory.createAgent({ persistent: false, profileName: profile })
     const createdAt = nowIso()
@@ -280,7 +310,7 @@ export class RuntimeKernel {
       },
     })
 
-    void (async () => {
+    const completion = (async () => {
       const runningAt = nowIso()
       this.eventStream.publish({
         type: 'delegation.state_changed',
@@ -308,6 +338,7 @@ export class RuntimeKernel {
             resultSummary: summarizeDelegatedResult(result),
           },
         })
+        return result
       } catch (error) {
         this.eventStream.publish({
           type: 'delegation.failed',
@@ -321,10 +352,11 @@ export class RuntimeKernel {
             error: (error as Error).message,
           },
         })
+        throw error
       }
     })()
 
-    return { runId, dispatch: 'profile_agent' }
+    return { runId, completion }
   }
 
   private startMaintenanceLoop(): void {

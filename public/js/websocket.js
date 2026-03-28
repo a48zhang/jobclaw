@@ -18,6 +18,9 @@ function connectWS() {
     if (!hasVisibleChatHistory()) {
       loadSessionHistory()
     }
+    if (typeof window.refreshRuntimeWorkboard === 'function') {
+      window.refreshRuntimeWorkboard({ force: true })
+    }
   })
 
   window.appState.ws.addEventListener('message', (ev) => {
@@ -97,10 +100,16 @@ function handleWsEvent(event, data) {
   switch (event) {
     case 'snapshot':
       if (Array.isArray(data)) data.forEach(d => updateAgentState(d))
+      if (typeof window.scheduleRuntimeWorkboardRefresh === 'function') {
+        window.scheduleRuntimeWorkboardRefresh(150)
+      }
       break
     case 'agent:stream':
       setQueueStatus(null)
       appendStreamingChunk(data)
+      if (data?.isFinal && typeof window.scheduleRuntimeWorkboardRefresh === 'function') {
+        window.scheduleRuntimeWorkboardRefresh(150)
+      }
       break
     case 'agent:tool':
       appendAgentLog({ type: 'info', message: `[${data.toolType}] ${data.message}`, agentName: data.agentName })
@@ -115,6 +124,9 @@ function handleWsEvent(event, data) {
       break
     case 'agent:state':
       updateAgentState(data)
+      if (typeof window.scheduleRuntimeWorkboardRefresh === 'function') {
+        window.scheduleRuntimeWorkboardRefresh(150)
+      }
       break
     case 'agent:log':
       appendAgentLog(data)
@@ -124,15 +136,24 @@ function handleWsEvent(event, data) {
         showResumeReady('/workspace/output/resume.pdf')
       }
       fetchJobs()
+      if (typeof window.scheduleRuntimeWorkboardRefresh === 'function') {
+        window.scheduleRuntimeWorkboardRefresh(150)
+      }
       break
     case 'context:usage':
       updateTokenUsage(data)
       break
     case 'intervention:required':
       showModal(data)
+      if (typeof window.scheduleRuntimeWorkboardRefresh === 'function') {
+        window.scheduleRuntimeWorkboardRefresh(80)
+      }
       break
     case 'intervention:resolved':
       hideModal()
+      if (typeof window.scheduleRuntimeWorkboardRefresh === 'function') {
+        window.scheduleRuntimeWorkboardRefresh(80)
+      }
       break
   }
 }

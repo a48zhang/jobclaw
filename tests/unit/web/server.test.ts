@@ -269,6 +269,58 @@ describe('/api/session/:agentName', () => {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
   })
+
+  test('does not fall back to live agent when runtime-owned stores are available but empty', async () => {
+    registerAgent({
+      agentName: 'main',
+      getState: () => ({
+        agentName: 'main',
+        state: 'running',
+        iterations: 1,
+        tokenCount: 10,
+        lastAction: 'streaming',
+        currentTask: null,
+      }),
+      getMessages: () => ([
+        { role: 'system', content: 'system' },
+        { role: 'assistant', content: 'live fallback should stay disabled' },
+      ]),
+    } as any)
+
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getSessionStore: () => ({
+        list: async () => [],
+        get: async () => null,
+      }),
+      getConversationStore: () => ({
+        get: async () => ({
+          sessionId: 'main',
+          summary: '',
+          recentMessages: [],
+          lastActivityAt: '2026-03-27T00:00:01.000Z',
+        }),
+      }),
+    }
+
+    const app = createApp(TEST_WORKSPACE, runtime as any)
+    const res = await app.request('/api/session/main')
+
+    expect(res.status).toBe(404)
+  })
 })
 
 describe('/api/settings', () => {
@@ -2408,6 +2460,7 @@ describe('websocket runtime adapters', () => {
       type: 'intervention.timed_out',
       timestamp: '2026-03-27T00:00:01.000Z',
       sessionId: 'main',
+      delegatedRunId: 'run-1',
       agentName: 'main',
       payload: {
         requestId: 'ivr-1',
@@ -2419,6 +2472,7 @@ describe('websocket runtime adapters', () => {
         event: 'intervention:resolved',
         data: {
           agentName: 'main',
+          ownerId: 'run-1',
           input: '',
           requestId: 'ivr-1',
         },
@@ -2475,12 +2529,64 @@ describe('websocket runtime adapters', () => {
         event: 'intervention:required',
         data: {
           agentName: 'main',
+          ownerId: 'main',
           prompt: 'Need input',
           requestId: 'ivr-1',
           kind: 'text',
           options: undefined,
           timeoutMs: 30_000,
           allowEmpty: false,
+        },
+      },
+    ])
+  })
+
+  test('replays delegated-run interventions with explicit owner ids on reconnect', async () => {
+    const messages = await getPendingInterventionMessages({
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getInterventionManager: () => ({
+        list: async () => [],
+        listPending: async () => [
+          {
+            id: 'ivr-run-1',
+            ownerType: 'delegated_run',
+            ownerId: 'delegation-run-1',
+            kind: 'confirm',
+            prompt: 'Need verification code',
+            status: 'pending',
+            createdAt: '2026-03-27T00:00:00.000Z',
+            updatedAt: '2026-03-27T00:00:01.000Z',
+          },
+        ],
+        resolve: async () => null,
+      }),
+    } as any)
+
+    expect(messages).toEqual([
+      {
+        event: 'intervention:required',
+        data: {
+          agentName: 'main',
+          ownerId: 'delegation-run-1',
+          prompt: 'Need verification code',
+          requestId: 'ivr-run-1',
+          kind: 'confirm',
+          options: undefined,
+          timeoutMs: undefined,
+          allowEmpty: undefined,
         },
       },
     ])

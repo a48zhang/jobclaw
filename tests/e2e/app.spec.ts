@@ -86,12 +86,19 @@ test.describe('JobClaw Web UI', () => {
     await expect(page.locator('.config-tab-btn[data-file="userinfo"]')).toHaveClass(/font-bold/)
   })
 
-  test('chat status card and onboarding apply trusted entry narrative', async ({ page }) => {
-    await expect(page.locator('#chat-status-card')).toBeVisible()
-    await expect(page.locator('#chat-status-card')).toContainText(/主任务/)
+  test('chat status line and onboarding apply trusted entry narrative', async ({ page }) => {
+    await expect(page.locator('#chat-runtime-status')).toBeVisible()
+    await expect(page.locator('#chat-runtime-status')).toContainText(/等待指令|提交中|排队中|执行中|已完成|失败/)
     await expect(page.locator('#first-run-banner')).toBeVisible()
     await expect(page.locator('#first-run-banner')).toContainText('基础配置完成度')
     await expect(page.locator('#first-run-banner')).toContainText('targets.md')
+  })
+
+  test('chat tab exposes runtime workboard with task-first overview', async ({ page }) => {
+    await expect(page.locator('#runtime-workboard')).toBeVisible()
+    await expect(page.locator('#runtime-workboard')).toContainText('当前自动化状态')
+    await expect(page.locator('#runtime-workboard')).toContainText('当前焦点')
+    await expect(page.locator('#runtime-workboard')).toContainText('任务队列')
   })
 
   test('jobs tab differentiates empty state from filtered no-results while detail panel baseline renders', async ({ page }) => {

@@ -6,6 +6,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import type { Session } from '../../types.js'
 import type { Channel, ChannelMessage } from '../../channel/base.js'
 import { eventBus } from '../../eventBus.js'
+import { resolveWorkspaceRoot } from '../../infra/workspace/paths.js'
 
 /** Channel 消息类型 → 日志级别映射 */
 export const CHANNEL_LOG_TYPE_MAP: Record<string, 'info' | 'warn' | 'error'> = {
@@ -62,7 +63,7 @@ export function wrapChannel(channel: Channel, agentName: string): Channel {
  * 获取会话路径
  */
 export function getSessionPath(workspaceRoot: string, agentName: string): string {
-  return path.resolve(workspaceRoot, 'agents', agentName, 'session.json')
+  return path.resolve(resolveWorkspaceRoot(workspaceRoot), 'agents', agentName, 'session.json')
 }
 
 /**
@@ -119,7 +120,7 @@ export function archiveSession(sessionPath: string): string | null {
  * 加载 Skill 文件（SOP）
  */
 export function loadSkill(workspaceRoot: string, name: string): string {
-  const userPath = path.join(workspaceRoot, 'skills', `${name}.md`)
+  const userPath = path.join(resolveWorkspaceRoot(workspaceRoot), 'skills', `${name}.md`)
   const codePath = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
     '../skills',

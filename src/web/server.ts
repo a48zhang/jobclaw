@@ -42,6 +42,7 @@ import { ResumeWorkflowService } from '../runtime/resume-workflow-service.js'
 import { buildSetupCapabilitySummary } from '../runtime/setup-summary.js'
 import { RuntimeTaskResultsService } from '../runtime/task-results-service.js'
 import { createRuntimeId, nowIso } from '../runtime/utils.js'
+import { getJobsStatePath, resolveWorkspaceRoot } from '../infra/workspace/paths.js'
 
 const agentRegistry = new Map<string, BaseAgent>()
 
@@ -505,7 +506,7 @@ function buildJobsStats(records: JobRecord[]) {
 }
 
 async function readJobsForApi(workspaceRoot: string, jobs: JobsService): Promise<JobRecord[]> {
-  const jobsStatePath = path.resolve(workspaceRoot, 'state/jobs/jobs.json')
+  const jobsStatePath = getJobsStatePath(workspaceRoot)
   if (!fs.existsSync(jobsStatePath)) {
     const rows = await jobs.listRows()
     return rows.map((row, index) => ({
@@ -721,6 +722,7 @@ export async function getPendingInterventionMessages(runtime: ServerRuntime): Pr
     event: 'intervention:required',
     data: {
       agentName: record.ownerType === 'session' ? record.ownerId : 'main',
+      ownerId: record.ownerId,
       prompt: record.prompt,
       requestId: record.id,
       kind: record.kind,
@@ -735,11 +737,13 @@ export function mapRuntimeEventToWebSocketMessages(event: RuntimeEvent): WebSock
   if (event.type === 'intervention.timed_out' || event.type === 'intervention.cancelled') {
     const agentName = event.agentName ?? event.sessionId ?? 'main'
     const requestId = typeof event.payload.requestId === 'string' ? event.payload.requestId : undefined
+    const ownerId = event.delegatedRunId ?? event.sessionId ?? event.agentName ?? 'main'
     return [
       {
         event: 'intervention:resolved',
         data: {
           agentName,
+          ownerId,
           input: '',
           requestId,
         },
@@ -835,6 +839,7 @@ function isServerRuntime(value: unknown): value is ServerRuntime {
 }
 
 export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntime | AgentFactory): Hono {
+  workspaceRoot = resolveWorkspaceRoot(workspaceRoot)
   const runtime: ServerRuntime = isServerRuntime(runtimeOrFactory)
     ? runtimeOrFactory
     : {
@@ -1847,9 +1852,12 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
 
   app.get('/api/session/:agentName', async (c) => {
     const agentName = c.req.param('agentName')
-    const activeSessionStore = runtime.getSessionStore?.() ?? sessionStore
-    const activeConversationStore = runtime.getConversationStore?.() ?? conversationStore
-    const liveAgent = resolveLiveAgent(runtime, agentName)
+    const runtimeSessionStore = runtime.getSessionStore?.()
+    const runtimeConversationStore = runtime.getConversationStore?.()
+    const activeSessionStore = runtimeSessionStore ?? sessionStore
+    const activeConversationStore = runtimeConversationStore ?? conversationStore
+    const allowLiveFallback = !runtimeSessionStore && !runtimeConversationStore
+    const liveAgent = allowLiveFallback ? resolveLiveAgent(runtime, agentName) : undefined
     const [session, conversation] = await Promise.all([
       activeSessionStore.get(agentName),
       activeConversationStore.get(agentName),

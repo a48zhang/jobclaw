@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { migrateLegacyStateDirSync, resolveWorkspaceRoot } from './infra/workspace/paths.js'
 
 export interface Config {
   API_KEY: string
@@ -60,6 +61,7 @@ const DEFAULT_TARGETS_MD = `# 监测目标
 `
 
 function ensureWorkspaceDirs(workspaceRoot: string): void {
+  workspaceRoot = resolveWorkspaceRoot(workspaceRoot)
   const subdirs = ['agents', 'data', 'skills', 'output']
   if (!fs.existsSync(workspaceRoot)) {
     fs.mkdirSync(workspaceRoot, { recursive: true })
@@ -73,6 +75,7 @@ function ensureWorkspaceDirs(workspaceRoot: string): void {
 }
 
 function ensureDefaultMarkdowns(workspaceRoot: string): void {
+  workspaceRoot = resolveWorkspaceRoot(workspaceRoot)
   const userinfoPath = path.join(workspaceRoot, 'data', 'userinfo.md')
   if (!fs.existsSync(userinfoPath)) {
     fs.writeFileSync(userinfoPath, DEFAULT_USERINFO_MD, 'utf-8')
@@ -85,6 +88,7 @@ function ensureDefaultMarkdowns(workspaceRoot: string): void {
 }
 
 function ensureDefaultSkills(workspaceRoot: string): void {
+  workspaceRoot = resolveWorkspaceRoot(workspaceRoot)
   const workspaceSkillsPath = path.join(workspaceRoot, 'skills')
   try {
     const existingSkills = fs.readdirSync(workspaceSkillsPath)
@@ -101,13 +105,15 @@ function ensureDefaultSkills(workspaceRoot: string): void {
 }
 
 export function ensureWorkspaceSetup(workspaceRoot: string): void {
+  workspaceRoot = resolveWorkspaceRoot(workspaceRoot)
   ensureWorkspaceDirs(workspaceRoot)
+  migrateLegacyStateDirSync(workspaceRoot)
   ensureDefaultMarkdowns(workspaceRoot)
   ensureDefaultSkills(workspaceRoot)
 }
 
 export function getConfigPath(workspaceRoot: string): string {
-  return path.join(workspaceRoot, 'config.json')
+  return path.join(resolveWorkspaceRoot(workspaceRoot), 'config.json')
 }
 
 function ensureConfigTemplate(workspaceRoot: string): void {
