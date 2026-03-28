@@ -526,10 +526,10 @@ input:focus-visible {
 .msg {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.22rem;
   position: relative;
   max-width: min(78%, 760px);
-  padding: 0.78rem 0.96rem;
+  padding: 0.5rem 0.82rem;
   border-radius: 1rem;
   border: 1px solid transparent;
   box-shadow: var(--shadow-sm);
@@ -577,10 +577,22 @@ input:focus-visible {
 
 .msg-body {
   font-size: 0.95rem;
-  line-height: 1.7;
+  line-height: 1.5;
   color: var(--text-primary);
   font-weight: 500;
   text-wrap: pretty;
+}
+
+.msg-body > :first-child {
+  margin-top: 0;
+}
+
+.msg-body > :last-child {
+  margin-bottom: 0;
+}
+
+.msg-body p {
+  margin: 0;
 }
 
 .msg-body code {
