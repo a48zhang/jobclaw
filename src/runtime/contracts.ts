@@ -316,6 +316,70 @@ export interface ApplicationRecord {
   rejection?: ApplicationRejection
 }
 
+export type LearningRecordKind =
+  | 'resume_review'
+  | 'jd_gap_analysis'
+  | 'interview_session'
+  | 'failure_analysis'
+  | 'hit_rate_snapshot'
+  | 'improvement_plan'
+
+export type LearningRecordStatus = 'open' | 'in_progress' | 'completed' | 'archived'
+export type LearningFindingSeverity = 'info' | 'warning' | 'critical'
+export type LearningActionItemStatus = 'pending' | 'done' | 'dismissed'
+
+export interface LearningRecordLinks {
+  applicationId?: string
+  jobId?: string
+  taskId?: string
+  artifactPaths: string[]
+}
+
+export interface LearningFinding {
+  id: string
+  title: string
+  summary: string
+  severity: LearningFindingSeverity
+  evidence: string[]
+}
+
+export interface LearningActionItem {
+  id: string
+  summary: string
+  owner: ApplicationActionOwner
+  status: LearningActionItemStatus
+  linkedTaskId?: string
+  dueAt?: string
+  note?: string
+  updatedAt: string
+  source: ApplicationWriteSource
+  actor: string
+}
+
+export interface LearningRecordMetrics {
+  interviewScore?: number
+  hitRate?: number
+  gapCount?: number
+  failureCount?: number
+}
+
+export interface LearningRecord {
+  id: string
+  kind: LearningRecordKind
+  status: LearningRecordStatus
+  title: string
+  summary: string
+  createdAt: string
+  updatedAt: string
+  source: ApplicationWriteSource
+  actor: string
+  tags: string[]
+  links: LearningRecordLinks
+  findings: LearningFinding[]
+  actionItems: LearningActionItem[]
+  metrics?: LearningRecordMetrics
+}
+
 export interface ArtifactRecord {
   id: string
   name: string

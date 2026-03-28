@@ -8,6 +8,7 @@ import * as path from 'node:path'
 import { eventBus, mapRuntimeEventToLegacyEvent } from '../eventBus.js'
 import type { EventBusMap } from '../eventBus.js'
 import { ApplicationService } from '../domain/application-service.js'
+import { LearningService } from '../domain/learning-service.js'
 import { JobsService } from '../domain/jobs-service.js'
 import { RecommendationService } from '../domain/recommendation-service.js'
 import { ArtifactStore } from '../memory/artifactStore.js'
@@ -182,6 +183,13 @@ function parseSortOrder(value?: string | null): 'asc' | 'desc' {
   return value === 'asc' ? 'asc' : 'desc'
 }
 
+function parseCsv(value?: string | null): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 function parseTaskReference(value?: string | null): { taskId: string; taskKind: 'session' | 'delegation' } | null {
   const trimmed = value?.trim()
   if (!trimmed) return null
@@ -205,6 +213,29 @@ function parseTaskReference(value?: string | null): { taskId: string; taskKind: 
     taskId: trimmed,
     taskKind: 'delegation',
   }
+}
+
+function parseLearningKinds(value?: string | null) {
+  const allowed = new Set([
+    'resume_review',
+    'jd_gap_analysis',
+    'interview_session',
+    'failure_analysis',
+    'hit_rate_snapshot',
+    'improvement_plan',
+  ])
+  return parseCsv(value).filter((item): item is
+    | 'resume_review'
+    | 'jd_gap_analysis'
+    | 'interview_session'
+    | 'failure_analysis'
+    | 'hit_rate_snapshot'
+    | 'improvement_plan' => allowed.has(item))
+}
+
+function parseLearningStatuses(value?: string | null) {
+  const allowed = new Set(['open', 'in_progress', 'completed', 'archived'])
+  return parseCsv(value).filter((item): item is 'open' | 'in_progress' | 'completed' | 'archived' => allowed.has(item))
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -822,6 +853,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
   const app = new Hono()
   const jobs = new JobsService(workspaceRoot, 'web-server')
   const applications = new ApplicationService(workspaceRoot)
+  const learning = new LearningService(workspaceRoot)
   const recommendations = new RecommendationService(workspaceRoot)
   const strategyStore = new StrategyStore(workspaceRoot)
   const conversationStore = new ConversationStore(workspaceRoot)
@@ -833,6 +865,8 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
   const executionTraceService = new ExecutionTraceService({
     workspaceRoot,
     applicationService: applications,
+    learningService: learning,
+    recommendationService: recommendations,
     taskResultsService: runtimeTaskResultsService,
   })
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
@@ -1456,6 +1490,154 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
       return c.json({ ok: true, application: toDetailedApplication(application) })
     } catch (err) {
       return respondWithDomainError(c, err)
+    }
+  })
+
+  app.get('/api/learning/records', async (c) => {
+    try {
+      const items = await learning.list({
+        kinds: parseLearningKinds(c.req.query('kinds')),
+        statuses: parseLearningStatuses(c.req.query('statuses')),
+        applicationId: c.req.query('applicationId')?.trim(),
+        jobId: c.req.query('jobId')?.trim(),
+        taskId: parseTaskReference(c.req.query('taskId'))?.taskId ?? c.req.query('taskId')?.trim(),
+        tag: c.req.query('tag')?.trim(),
+        limit: parsePositiveInt(c.req.query('limit')),
+        sortBy: c.req.query('sortBy') === 'createdAt' ? 'createdAt' : 'updatedAt',
+        order: parseSortOrder(c.req.query('order')),
+      })
+      return c.json({ ok: true, items })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/learning/detail', async (c) => {
+    try {
+      const id = c.req.query('id')?.trim()
+      if (!id) return c.json({ ok: false, error: 'id is required' }, 400)
+      const record = await learning.get(id)
+      if (!record) return c.json({ ok: false, error: 'Learning record not found' }, 404)
+      return c.json({ ok: true, record })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.post('/api/learning/records', async (c) => {
+    try {
+      const body = await c.req.json<{
+        id?: string
+        kind?: 'resume_review' | 'jd_gap_analysis' | 'interview_session' | 'failure_analysis' | 'hit_rate_snapshot' | 'improvement_plan'
+        status?: 'open' | 'in_progress' | 'completed' | 'archived'
+        title?: string
+        summary?: string
+        tags?: string[]
+        links?: {
+          applicationId?: string
+          jobId?: string
+          taskId?: string
+          artifactPaths?: string[]
+        }
+        findings?: Array<{
+          id?: string
+          title?: string
+          summary?: string
+          severity?: 'info' | 'warning' | 'critical'
+          evidence?: string[]
+        }>
+        actionItems?: Array<{
+          id?: string
+          summary?: string
+          owner?: 'user' | 'agent' | 'system'
+          status?: 'pending' | 'done' | 'dismissed'
+          linkedTaskId?: string
+          dueAt?: string
+          note?: string
+        }>
+        metrics?: {
+          interviewScore?: number
+          hitRate?: number
+          gapCount?: number
+          failureCount?: number
+        }
+      }>()
+
+      if (!body.kind || !body.title?.trim() || !body.summary?.trim()) {
+        return c.json({ ok: false, error: 'kind, title, and summary are required' }, 400)
+      }
+
+      const record = await learning.upsert({
+        id: body.id,
+        kind: body.kind,
+        status: body.status,
+        title: body.title,
+        summary: body.summary,
+        tags: body.tags,
+        links: {
+          ...body.links,
+          taskId: parseTaskReference(body.links?.taskId)?.taskId ?? body.links?.taskId,
+        },
+        findings: body.findings?.map((item) => ({
+          id: item.id,
+          title: item.title ?? '',
+          summary: item.summary ?? '',
+          severity: item.severity,
+          evidence: item.evidence,
+        })),
+        actionItems: body.actionItems?.map((item) => ({
+          id: item.id,
+          summary: item.summary ?? '',
+          owner: item.owner,
+          status: item.status,
+          linkedTaskId: parseTaskReference(item.linkedTaskId)?.taskId ?? item.linkedTaskId,
+          dueAt: item.dueAt,
+          note: item.note,
+        })),
+        metrics: body.metrics,
+      }, { source: 'manual', actor: 'web-server' })
+
+      return c.json({ ok: true, record })
+    } catch (err) {
+      return respondWithDomainError(c, err)
+    }
+  })
+
+  app.post('/api/learning/action-items', async (c) => {
+    try {
+      const body = await c.req.json<{
+        id?: string
+        actionItemId?: string
+        status?: 'pending' | 'done' | 'dismissed'
+        dueAt?: string
+        note?: string
+        linkedTaskId?: string
+      }>()
+      if (!body.id?.trim() || !body.actionItemId?.trim()) {
+        return c.json({ ok: false, error: 'id and actionItemId are required' }, 400)
+      }
+      const record = await learning.updateActionItem(
+        body.id.trim(),
+        body.actionItemId.trim(),
+        {
+          status: body.status,
+          dueAt: body.dueAt,
+          note: body.note,
+          linkedTaskId: parseTaskReference(body.linkedTaskId)?.taskId ?? body.linkedTaskId,
+        },
+        { source: 'manual', actor: 'web-server' }
+      )
+      return c.json({ ok: true, record })
+    } catch (err) {
+      return respondWithDomainError(c, err)
+    }
+  })
+
+  app.get('/api/learning/insights', async (c) => {
+    try {
+      return c.json(await learning.getInsights())
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
     }
   })
 

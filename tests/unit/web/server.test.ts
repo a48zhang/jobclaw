@@ -1972,6 +1972,221 @@ describe('/api/applications*', () => {
   })
 })
 
+describe('/api/learning*', () => {
+  test('stores learning records, updates action items, and exposes insights', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-learning-'))
+    const app = createApp(workspace)
+
+    try {
+      const createRes = await app.request('/api/learning/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'jd_gap_analysis',
+          title: 'Gap review for Acme',
+          summary: 'Need better systems evidence.',
+          tags: ['backend', 'platform'],
+          links: {
+            applicationId: 'application-1',
+            taskId: 'delegation:run-gap-1',
+          },
+          findings: [{
+            title: 'Systems gap',
+            summary: 'Resume lacks distributed systems examples.',
+            severity: 'critical',
+          }],
+          actionItems: [{
+            summary: 'Add one distributed systems bullet',
+            owner: 'user',
+          }],
+          metrics: {
+            gapCount: 2,
+          },
+        }),
+      })
+      expect(createRes.status).toBe(200)
+      const createJson = await createRes.json() as {
+        ok: boolean
+        record: { id: string; links: { taskId?: string }; actionItems: Array<{ id: string; linkedTaskId?: string }> }
+      }
+      expect(createJson.ok).toBe(true)
+      expect(createJson.record.links.taskId).toBe('run-gap-1')
+
+      const [listRes, detailRes] = await Promise.all([
+        app.request('/api/learning/records?applicationId=application-1&kinds=jd_gap_analysis'),
+        app.request(`/api/learning/detail?id=${createJson.record.id}`),
+      ])
+      expect(listRes.status).toBe(200)
+      expect(detailRes.status).toBe(200)
+
+      const listJson = await listRes.json() as {
+        ok: boolean
+        items: Array<{ id: string }>
+      }
+      const detailJson = await detailRes.json() as {
+        ok: boolean
+        record: { findings: Array<{ severity: string }> }
+      }
+      expect(listJson.ok).toBe(true)
+      expect(listJson.items.map((item) => item.id)).toEqual([createJson.record.id])
+      expect(detailJson.record.findings[0]?.severity).toBe('critical')
+
+      const updateActionRes = await app.request('/api/learning/action-items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: createJson.record.id,
+          actionItemId: createJson.record.actionItems[0]!.id,
+          status: 'done',
+          note: 'Resume updated',
+        }),
+      })
+      expect(updateActionRes.status).toBe(200)
+
+      const insightsRes = await app.request('/api/learning/insights')
+      expect(insightsRes.status).toBe(200)
+      const insightsJson = await insightsRes.json() as {
+        ok: boolean
+        totals: { records: number; criticalFindings: number }
+        byKind: { jd_gap_analysis: number }
+        byStatus: { open: number }
+      }
+      expect(insightsJson.ok).toBe(true)
+      expect(insightsJson.totals.records).toBe(1)
+      expect(insightsJson.totals.criticalFindings).toBe(1)
+      expect(insightsJson.byKind.jd_gap_analysis).toBe(1)
+      expect(insightsJson.byStatus.open).toBe(1)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('enriches execution traces with recommendation, learning records, and explanation data', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-learning-trace-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'delegation'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'interventions'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'jobs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'jobs', 'jobs.json'),
+      JSON.stringify([{
+        id: 'job-1',
+        company: 'Acme',
+        title: 'Platform Engineer',
+        url: 'https://example.com/jobs/1',
+        status: 'favorite',
+        discoveredAt: '2026-03-28T00:00:00.000Z',
+        updatedAt: '2026-03-28T00:00:00.000Z',
+        fitSummary: 'Strong platform fit',
+      }]),
+      'utf-8'
+    )
+    const app = createApp(workspace)
+
+    try {
+      const applicationRes = await app.request('/api/applications/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company: 'Acme',
+          jobTitle: 'Platform Engineer',
+          jobId: 'job-1',
+          status: 'applied',
+          nextAction: {
+            summary: 'Complete portal verification',
+          },
+        }),
+      })
+      const applicationJson = await applicationRes.json() as { application: { id: string } }
+
+      fs.writeFileSync(
+        path.join(workspace, 'state', 'delegation', 'run-2.json'),
+        JSON.stringify({
+          id: 'run-2',
+          parentSessionId: 'main',
+          profile: 'delivery',
+          state: 'waiting_input',
+          instruction: 'Apply to Acme via portal',
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:02:00.000Z',
+        }),
+        'utf-8'
+      )
+      fs.writeFileSync(
+        path.join(workspace, 'state', 'interventions', 'ivr-2.json'),
+        JSON.stringify({
+          id: 'ivr-2',
+          ownerType: 'delegated_run',
+          ownerId: 'run-2',
+          kind: 'text',
+          prompt: 'Need verification code',
+          status: 'pending',
+          createdAt: '2026-03-28T00:02:10.000Z',
+          updatedAt: '2026-03-28T00:02:11.000Z',
+        }),
+        'utf-8'
+      )
+
+      const [linkRes, learningRes] = await Promise.all([
+        app.request('/api/applications/link-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: applicationJson.application.id,
+            taskId: 'delegation:run-2',
+          }),
+        }),
+        app.request('/api/learning/records', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'improvement_plan',
+            title: 'Portal delivery follow-up',
+            summary: 'Translate delivery blockage into a clear next action.',
+            links: {
+              applicationId: applicationJson.application.id,
+              jobId: 'job-1',
+              taskId: 'delegation:run-2',
+            },
+            actionItems: [{
+              summary: 'Provide the verification code',
+              owner: 'user',
+            }],
+          }),
+        }),
+      ])
+      expect(linkRes.status).toBe(200)
+      expect(learningRes.status).toBe(200)
+
+      const traceRes = await app.request(`/api/applications/progress?id=${applicationJson.application.id}`)
+      expect(traceRes.status).toBe(200)
+      const traceJson = await traceRes.json() as {
+        ok: boolean
+        recommendation: { jobId: string; summary: string } | null
+        learningRecords: Array<{ id: string }>
+        explanation: {
+          whyThisWork: string[]
+          pendingAuthorizations: Array<{ prompt: string }>
+          nextPlannedSteps: string[]
+        }
+      }
+      expect(traceJson.ok).toBe(true)
+      expect(traceJson.recommendation?.jobId).toBe('job-1')
+      expect(traceJson.recommendation?.summary).toContain('Acme')
+      expect(traceJson.learningRecords).toHaveLength(1)
+      expect(traceJson.explanation.pendingAuthorizations).toEqual([
+        expect.objectContaining({ prompt: 'Need verification code' }),
+      ])
+      expect(traceJson.explanation.whyThisWork.some((item) => item.includes('Application Acme / Platform Engineer'))).toBe(true)
+      expect(traceJson.explanation.nextPlannedSteps).toEqual(expect.arrayContaining([
+        'Need verification code',
+        'Provide the verification code',
+      ]))
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('/api/runtime/automation-insights', () => {
   test('returns pending authorization, failures, pipeline summary, and next steps', async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-automation-insights-'))
