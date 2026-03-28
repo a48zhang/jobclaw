@@ -7,6 +7,7 @@ import type {
   ApplicationReminder,
   ApplicationReminderStatus,
   ApplicationStatus,
+  ApplicationTaskLink,
   ApplicationTimelineEntry,
   ApplicationWriteSource,
 } from '../runtime/contracts.js'
@@ -48,6 +49,13 @@ export interface ApplicationListFilters {
   limit?: number
 }
 
+export interface ApplicationTaskLinkInput {
+  taskId: string
+  taskKind: 'session' | 'delegation'
+  role?: 'delivery' | 'follow_up' | 'supporting'
+  note?: string
+}
+
 export class ApplicationService {
   private readonly store: ApplicationStore
 
@@ -64,6 +72,11 @@ export class ApplicationService {
 
   async get(id: string): Promise<ApplicationRecord | undefined> {
     return this.store.get(id)
+  }
+
+  async findByTaskId(taskId: string): Promise<ApplicationRecord[]> {
+    const records = await this.store.list()
+    return records.filter((record) => record.linkedTasks.some((link) => link.taskId === taskId))
   }
 
   async upsert(input: ApplicationUpsertInput, mutation: ApplicationMutationContext): Promise<ApplicationRecord> {
@@ -160,6 +173,7 @@ export class ApplicationService {
         ...timeline,
       ],
       reminders: [],
+      linkedTasks: [],
       nextAction,
     }
     if (record.nextAction) {
@@ -307,6 +321,50 @@ export class ApplicationService {
             at: now,
             summary: 'Application note added',
             noteId: note.id,
+          }),
+        ],
+      }
+    })
+  }
+
+  async linkTask(
+    id: string,
+    input: ApplicationTaskLinkInput,
+    mutation: ApplicationMutationContext
+  ): Promise<ApplicationRecord> {
+    return this.updateRecord(id, mutation, (current, now) => {
+      const taskId = input.taskId.trim()
+      if (!taskId) {
+        throw new Error('taskId is required')
+      }
+      const note = normalizeOptional(input.note)
+      const existing = current.linkedTasks.find((link) => link.taskId === taskId)
+      const nextLink: ApplicationTaskLink = {
+        taskId,
+        taskKind: input.taskKind,
+        role: input.role ?? 'delivery',
+        linkedAt: existing?.linkedAt ?? now,
+        note,
+        source: mutation.source,
+        actor: mutation.actor,
+      }
+
+      return {
+        ...current,
+        updatedAt: now,
+        linkedTasks: existing
+          ? current.linkedTasks.map((link) => (link.taskId === taskId ? nextLink : link))
+          : [...current.linkedTasks, nextLink],
+        timeline: [
+          ...current.timeline,
+          buildTimelineEntry('task_linked', mutation, {
+            at: now,
+            summary: `Linked ${input.taskKind} task ${taskId}`,
+            meta: {
+              taskId,
+              taskKind: input.taskKind,
+              role: nextLink.role,
+            },
           }),
         ],
       }

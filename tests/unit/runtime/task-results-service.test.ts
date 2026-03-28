@@ -120,6 +120,15 @@ describe('RuntimeTaskResultsService', () => {
     expect(mainTask?.summary).toContain('Waiting for input')
     expect(mainTask?.pendingIntervention?.prompt).toBe('Confirm target city')
     expect(mainTask?.latestArtifact?.id).toBe('art-main')
+    expect(mainTask?.nextAction).toMatchObject({
+      code: 'provide_input',
+      label: 'Provide input',
+      reason: 'Confirm target city',
+    })
+    expect(mainTask?.retryHint).toMatchObject({
+      supported: false,
+      mode: 'none',
+    })
 
     const failedRun = snapshot.tasks.find((task) => task.id === 'run-failed')
     expect(failedRun).toMatchObject({
@@ -130,11 +139,18 @@ describe('RuntimeTaskResultsService', () => {
       artifactCount: 1,
     })
     expect(failedRun?.latestArtifact?.id).toBe('art-run')
+    expect(failedRun?.retryHint).toMatchObject({
+      supported: true,
+      mode: 'rerun_delegation',
+      instruction: 'Apply to Example Corp',
+    })
+    expect(failedRun?.detail.failureReason).toBe('Apply blocked by captcha')
 
     const completedRun = snapshot.tasks.find((task) => task.id === 'run-done')
     expect(completedRun).toMatchObject({
       kind: 'delegation',
       lifecycle: 'completed',
+      status: 'completed',
       resultSummary: 'Resume generated successfully',
     })
 
@@ -275,6 +291,61 @@ describe('RuntimeTaskResultsService', () => {
     expect(detail?.nextActions[0]).toMatchObject({
       code: 'provide_input',
       label: 'Provide input',
+    })
+    expect(detail?.task.detail).toMatchObject({
+      rawState: 'waiting_input',
+      instruction: 'Review uploaded resume',
+    })
+    expect(detail?.task.retryHint).toMatchObject({
+      supported: false,
+      mode: 'none',
+    })
+  })
+
+  test('builds retry-ready detail for failed delegated tasks', async () => {
+    const workspace = createWorkspace()
+    const delegationStore = new DelegationStore(workspace)
+    const artifactStore = new ArtifactStore(workspace)
+
+    await delegationStore.save(delegation('run-apply', {
+      profile: 'delivery',
+      state: 'failed',
+      instruction: 'Apply to Example Corp',
+      updatedAt: '2026-03-28T12:00:00.000Z',
+      error: 'Captcha required',
+    }))
+
+    await artifactStore.save(artifact('art-apply', {
+      name: 'apply-log.txt',
+      path: 'output/apply-log.txt',
+      createdAt: '2026-03-28T12:01:00.000Z',
+      meta: { delegatedRunId: 'run-apply' },
+    }))
+
+    const service = new RuntimeTaskResultsService(workspace)
+    const detail = await service.getTaskDetail('run-apply')
+
+    expect(detail?.task).toMatchObject({
+      id: 'run-apply',
+      status: 'failed',
+      nextAction: {
+        code: 'retry',
+      },
+      retryHint: {
+        supported: true,
+        mode: 'rerun_delegation',
+        instruction: 'Apply to Example Corp',
+      },
+    })
+    expect(detail?.failures).toContainEqual(expect.objectContaining({
+      id: 'run-apply',
+      kind: 'delegation',
+      reason: 'Captcha required',
+    }))
+    expect(detail?.artifacts.map((item) => item.id)).toEqual(['art-apply'])
+    expect(detail?.nextActions[0]).toMatchObject({
+      code: 'retry',
+      label: 'Retry task',
     })
   })
 })

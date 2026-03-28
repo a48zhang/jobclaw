@@ -223,6 +223,7 @@ export type ApplicationTimelineEntryType =
   | 'status_changed'
   | 'note_added'
   | 'next_action_set'
+  | 'task_linked'
   | 'reminder_added'
   | 'reminder_completed'
   | 'reminder_cancelled'
@@ -287,6 +288,16 @@ export interface ApplicationRejection {
   actor: string
 }
 
+export interface ApplicationTaskLink {
+  taskId: string
+  taskKind: 'session' | 'delegation'
+  role: 'delivery' | 'follow_up' | 'supporting'
+  linkedAt: string
+  note?: string
+  source: ApplicationWriteSource
+  actor: string
+}
+
 export interface ApplicationRecord {
   id: string
   company: string
@@ -300,6 +311,7 @@ export interface ApplicationRecord {
   notes: ApplicationNote[]
   timeline: ApplicationTimelineEntry[]
   reminders: ApplicationReminder[]
+  linkedTasks: ApplicationTaskLink[]
   nextAction?: ApplicationNextAction
   rejection?: ApplicationRejection
 }

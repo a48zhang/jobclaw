@@ -496,13 +496,21 @@ describe('/api/runtime/*', () => {
 
       const tasksJson = await tasksRes.json() as {
         ok: boolean
-        tasks: Array<{ id: string; kind: string; state: string; status: string }>
+        tasks: Array<{
+          id: string
+          kind: string
+          state: string
+          status: string
+          nextStep?: { code: string }
+          retryHint: { supported: boolean; mode: string }
+          detail: { rawState: string }
+        }>
       }
       const resultsJson = await resultsRes.json() as {
         ok: boolean
         resultSummary: { totalTasks: number }
         recentFailures: Array<{ id: string }>
-        recentArtifacts: Array<{ path: string }>
+        recentArtifacts: Array<{ path: string; relatedTaskIds: string[] }>
       }
 
       expect(tasksJson.ok).toBe(true)
@@ -518,6 +526,12 @@ describe('/api/runtime/*', () => {
         'failed',
         'requires_input',
       ])
+      expect(tasksJson.tasks[0]?.retryHint).toMatchObject({
+        supported: true,
+        mode: 'rerun_delegation',
+      })
+      expect(tasksJson.tasks[1]?.nextStep?.code).toBe('provide_input')
+      expect(tasksJson.tasks[1]?.detail.rawState).toBe('running')
 
       expect(resultsJson.ok).toBe(true)
       expect(resultsJson.resultSummary.totalTasks).toBe(2)
@@ -526,6 +540,7 @@ describe('/api/runtime/*', () => {
         'data/uploads/resume-upload.pdf',
         'output/resume.pdf',
       ])
+      expect(resultsJson.recentArtifacts[0]?.relatedTaskIds).toEqual(['session:main'])
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
@@ -573,16 +588,276 @@ describe('/api/runtime/*', () => {
       const json = await res.json() as {
         ok: boolean
         detail: {
-          task: { id: string; status: string }
+          task: {
+            id: string
+            status: string
+            retryHint: { supported: boolean; mode: string }
+            detail: { rawState: string; instruction?: string }
+          }
           interventions: Array<{ id: string }>
           nextActions: Array<{ code: string }>
         }
       }
       expect(json.ok).toBe(true)
-      expect(json.detail.task.id).toBe('run-1')
+      expect(json.detail.task.id).toBe('delegation:run-1')
       expect(json.detail.task.status).toBe('requires_input')
+      expect(json.detail.task.retryHint).toMatchObject({
+        supported: false,
+        mode: 'none',
+      })
+      expect(json.detail.task.detail).toMatchObject({
+        rawState: 'waiting_input',
+        instruction: 'Review resume',
+      })
       expect(json.detail.interventions.map((item) => item.id)).toEqual(['ivr-1'])
       expect(json.detail.nextActions[0]?.code).toBe('provide_input')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('prefers runtime-owned task results service across tasks, detail, results, and automation insights', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-runtime-task-service-'))
+    const aggregate = vi.fn(async () => ({
+      generatedAt: '2026-03-28T00:00:00.000Z',
+      tasks: [{
+        id: 'runtime-run',
+        kind: 'delegation' as const,
+        profile: 'review' as const,
+        sessionId: 'main',
+        agentName: 'review-agent',
+        title: 'Runtime review task',
+        state: 'waiting_input' as const,
+        lifecycle: 'waiting' as const,
+        status: 'requires_input' as const,
+        statusLabel: 'Needs Input',
+        createdAt: '2026-03-28T00:00:00.000Z',
+        updatedAt: '2026-03-28T00:00:10.000Z',
+        activityAt: '2026-03-28T00:00:10.000Z',
+        summary: 'Waiting for runtime-owned input',
+        pendingIntervention: {
+          id: 'ivr-runtime',
+          kind: 'text' as const,
+          prompt: 'Need runtime confirmation',
+          status: 'pending' as const,
+          createdAt: '2026-03-28T00:00:01.000Z',
+          updatedAt: '2026-03-28T00:00:10.000Z',
+        },
+        interventionCounts: {
+          pending: 1,
+          resolved: 0,
+          timeout: 0,
+          cancelled: 0,
+        },
+        artifactCount: 0,
+        nextAction: {
+          code: 'provide_input' as const,
+          label: 'Provide input',
+          reason: 'Need runtime confirmation',
+        },
+        retryHint: {
+          supported: false,
+          mode: 'none' as const,
+          reason: 'No structured retry path is available for this task state.',
+        },
+        detail: {
+          rawState: 'waiting_input' as const,
+          instruction: 'Runtime review task',
+          pendingIntervention: {
+            id: 'ivr-runtime',
+            kind: 'text' as const,
+            prompt: 'Need runtime confirmation',
+            status: 'pending' as const,
+            createdAt: '2026-03-28T00:00:01.000Z',
+            updatedAt: '2026-03-28T00:00:10.000Z',
+          },
+          interventionCounts: {
+            pending: 1,
+            resolved: 0,
+            timeout: 0,
+            cancelled: 0,
+          },
+          artifactCount: 0,
+        },
+      }],
+      recentFailures: [],
+      recentArtifacts: [],
+      resultSummary: {
+        generatedAt: '2026-03-28T00:00:00.000Z',
+        headline: '1 tasks waiting on input, 1 interventions pending',
+        totalTasks: 1,
+        sessionTasks: 0,
+        delegatedTasks: 1,
+        idleTasks: 0,
+        queuedTasks: 0,
+        runningTasks: 0,
+        waitingTasks: 1,
+        requiresInputTasks: 1,
+        failedTasks: 0,
+        completedTasks: 0,
+        cancelledTasks: 0,
+        pendingInterventions: 1,
+        recentFailures: 0,
+        recentArtifacts: 0,
+      },
+    }))
+    const getTaskDetail = vi.fn(async () => ({
+      task: {
+        id: 'runtime-run',
+        kind: 'delegation' as const,
+        profile: 'review' as const,
+        sessionId: 'main',
+        agentName: 'review-agent',
+        title: 'Runtime review task',
+        state: 'waiting_input' as const,
+        lifecycle: 'waiting' as const,
+        status: 'requires_input' as const,
+        statusLabel: 'Needs Input',
+        createdAt: '2026-03-28T00:00:00.000Z',
+        updatedAt: '2026-03-28T00:00:10.000Z',
+        activityAt: '2026-03-28T00:00:10.000Z',
+        summary: 'Waiting for runtime-owned input',
+        pendingIntervention: {
+          id: 'ivr-runtime',
+          kind: 'text' as const,
+          prompt: 'Need runtime confirmation',
+          status: 'pending' as const,
+          createdAt: '2026-03-28T00:00:01.000Z',
+          updatedAt: '2026-03-28T00:00:10.000Z',
+        },
+        interventionCounts: {
+          pending: 1,
+          resolved: 0,
+          timeout: 0,
+          cancelled: 0,
+        },
+        artifactCount: 0,
+        nextAction: {
+          code: 'provide_input' as const,
+          label: 'Provide input',
+          reason: 'Need runtime confirmation',
+        },
+        retryHint: {
+          supported: false,
+          mode: 'none' as const,
+          reason: 'No structured retry path is available for this task state.',
+        },
+        detail: {
+          rawState: 'waiting_input' as const,
+          instruction: 'Runtime review task',
+          pendingIntervention: {
+            id: 'ivr-runtime',
+            kind: 'text' as const,
+            prompt: 'Need runtime confirmation',
+            status: 'pending' as const,
+            createdAt: '2026-03-28T00:00:01.000Z',
+            updatedAt: '2026-03-28T00:00:10.000Z',
+          },
+          interventionCounts: {
+            pending: 1,
+            resolved: 0,
+            timeout: 0,
+            cancelled: 0,
+          },
+          artifactCount: 0,
+        },
+      },
+      interventions: [{
+        id: 'ivr-runtime',
+        ownerType: 'delegated_run' as const,
+        ownerId: 'runtime-run',
+        kind: 'text' as const,
+        prompt: 'Need runtime confirmation',
+        status: 'pending' as const,
+        createdAt: '2026-03-28T00:00:01.000Z',
+        updatedAt: '2026-03-28T00:00:10.000Z',
+      }],
+      artifacts: [],
+      failures: [],
+      nextActions: [{
+        code: 'provide_input' as const,
+        label: 'Provide input',
+        reason: 'Need runtime confirmation',
+      }],
+    }))
+
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      getRuntimeStatus: () => ({
+        mcp: {
+          enabled: false,
+          connected: false,
+          message: 'disabled',
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getTaskResultsService: () => ({ aggregate, getTaskDetail }),
+    }
+
+    try {
+      const app = createApp(workspace, runtime as any)
+      const [tasksRes, detailRes, resultsRes, insightsRes] = await Promise.all([
+        app.request('/api/runtime/tasks?sessionId=main'),
+        app.request('/api/runtime/tasks/detail?id=delegation:runtime-run'),
+        app.request('/api/runtime/results?sessionId=main'),
+        app.request('/api/runtime/automation-insights?sessionId=main'),
+      ])
+
+      expect(tasksRes.status).toBe(200)
+      expect(detailRes.status).toBe(200)
+      expect(resultsRes.status).toBe(200)
+      expect(insightsRes.status).toBe(200)
+
+      const tasksJson = await tasksRes.json() as {
+        ok: boolean
+        tasks: Array<{ id: string; nextStep?: { code: string } }>
+      }
+      const detailJson = await detailRes.json() as {
+        ok: boolean
+        detail: { task: { id: string } }
+      }
+      const resultsJson = await resultsRes.json() as {
+        ok: boolean
+        resultSummary: { totalTasks: number }
+      }
+      const insightsJson = await insightsRes.json() as {
+        ok: boolean
+        pendingAuthorizations: Array<{ taskId: string; prompt: string }>
+      }
+
+      expect(tasksJson.ok).toBe(true)
+      expect(tasksJson.tasks).toEqual([
+        expect.objectContaining({
+          id: 'delegation:runtime-run',
+          nextStep: expect.objectContaining({ code: 'provide_input' }),
+        }),
+      ])
+      expect(detailJson.ok).toBe(true)
+      expect(detailJson.detail.task.id).toBe('delegation:runtime-run')
+      expect(resultsJson.ok).toBe(true)
+      expect(resultsJson.resultSummary.totalTasks).toBe(1)
+      expect(insightsJson.ok).toBe(true)
+      expect(insightsJson.pendingAuthorizations).toEqual([
+        expect.objectContaining({
+          taskId: 'delegation:runtime-run',
+          prompt: 'Need runtime confirmation',
+        }),
+      ])
+      expect(getTaskDetail).toHaveBeenCalledWith('delegation:runtime-run')
+      expect(aggregate).toHaveBeenCalledWith({ sessionId: 'main' })
+      expect(aggregate).toHaveBeenCalledWith({ sessionId: 'main', taskLimit: 20, failureLimit: 10, artifactLimit: 10 })
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
@@ -1567,6 +1842,130 @@ describe('/api/applications*', () => {
       const json = await res.json() as { ok: boolean; error: string }
       expect(json.ok).toBe(false)
       expect(json.error).toContain('Application not found')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('links runtime tasks to applications and exposes execution progress', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-applications-progress-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'delegation'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'interventions'), { recursive: true })
+    const app = createApp(workspace)
+
+    try {
+      const createRes = await app.request('/api/applications/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company: 'Acme',
+          jobTitle: 'Platform Engineer',
+          status: 'applied',
+          nextAction: {
+            summary: 'Wait for recruiter response',
+          },
+        }),
+      })
+      const createJson = await createRes.json() as { application: { id: string } }
+
+      fs.writeFileSync(
+        path.join(workspace, 'state', 'delegation', 'run-1.json'),
+        JSON.stringify({
+          id: 'run-1',
+          parentSessionId: 'main',
+          profile: 'delivery',
+          state: 'waiting_input',
+          instruction: 'Apply to Acme',
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:01:00.000Z',
+        }),
+        'utf-8'
+      )
+      fs.writeFileSync(
+        path.join(workspace, 'state', 'interventions', 'ivr-1.json'),
+        JSON.stringify({
+          id: 'ivr-1',
+          ownerType: 'delegated_run',
+          ownerId: 'run-1',
+          kind: 'text',
+          prompt: 'Need email verification code',
+          status: 'pending',
+          createdAt: '2026-03-28T00:01:30.000Z',
+          updatedAt: '2026-03-28T00:01:31.000Z',
+        }),
+        'utf-8'
+      )
+
+      const linkRes = await app.request('/api/applications/link-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: createJson.application.id,
+          taskId: 'delegation:run-1',
+          role: 'delivery',
+        }),
+      })
+      expect(linkRes.status).toBe(200)
+
+      const progressRes = await app.request(`/api/applications/progress?id=${createJson.application.id}`)
+      expect(progressRes.status).toBe(200)
+      const progressJson = await progressRes.json() as {
+        ok: boolean
+        focus: { type: string }
+        relatedTasks: Array<{ task: { id: string; status: string } }>
+        blockers: string[]
+        nextSteps: string[]
+      }
+      expect(progressJson.ok).toBe(true)
+      expect(progressJson.focus.type).toBe('application')
+      expect(progressJson.relatedTasks[0]?.task.id).toBe('run-1')
+      expect(progressJson.relatedTasks[0]?.task.status).toBe('requires_input')
+      expect(progressJson.blockers.some((item) => item.includes('verification code'))).toBe(true)
+      expect(progressJson.nextSteps.length).toBeGreaterThan(0)
+
+      const traceRes = await app.request('/api/runtime/execution-trace?taskId=delegation:run-1')
+      expect(traceRes.status).toBe(200)
+      const traceJson = await traceRes.json() as {
+        ok: boolean
+        focus: { type: string }
+        relatedApplications: Array<{ id: string }>
+      }
+      expect(traceJson.ok).toBe(true)
+      expect(traceJson.focus.type).toBe('task')
+      expect(traceJson.relatedApplications.map((item) => item.id)).toContain(createJson.application.id)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects empty prefixed task references when linking runtime tasks', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-applications-link-validation-'))
+    const app = createApp(workspace)
+
+    try {
+      const createRes = await app.request('/api/applications/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company: 'Bravo',
+          jobTitle: 'Backend Engineer',
+        }),
+      })
+      const createJson = await createRes.json() as { application: { id: string } }
+
+      const linkRes = await app.request('/api/applications/link-task', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: createJson.application.id,
+          taskId: 'delegation:',
+        }),
+      })
+
+      expect(linkRes.status).toBe(400)
+      const linkJson = await linkRes.json() as { ok: boolean; error: string }
+      expect(linkJson.ok).toBe(false)
+      expect(linkJson.error).toBe('taskId is required')
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
     }

@@ -57,6 +57,11 @@ function normalizeRecord(record: ApplicationRecord): ApplicationRecord {
       updatedAt: normalizeTimestamp(reminder.updatedAt),
       completedAt: normalizeOptional(reminder.completedAt),
     })),
+    linkedTasks: (record.linkedTasks ?? []).map((link) => ({
+      ...link,
+      linkedAt: normalizeTimestamp(link.linkedAt),
+      note: normalizeOptional(link.note),
+    })),
     nextAction: record.nextAction
       ? {
           ...record.nextAction,

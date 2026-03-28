@@ -108,4 +108,59 @@ describe('ApplicationService', () => {
       )
     ).rejects.toThrow('Reminder not found: missing-reminder')
   })
+
+  it('links runtime tasks to applications and allows task-based lookup', async () => {
+    const service = new ApplicationService(workspaceRoot)
+    const created = await service.upsert(
+      {
+        company: 'Delta',
+        jobTitle: 'Backend Engineer',
+      },
+      { source: 'manual', actor: 'web-server' }
+    )
+
+    const linked = await service.linkTask(
+      created.id,
+      {
+        taskId: 'run-delivery-1',
+        taskKind: 'delegation',
+        role: 'delivery',
+        note: 'Initial auto-apply run',
+      },
+      { source: 'agent', actor: 'delivery-agent' }
+    )
+
+    expect(linked.linkedTasks).toHaveLength(1)
+    expect(linked.linkedTasks[0]).toMatchObject({
+      taskId: 'run-delivery-1',
+      taskKind: 'delegation',
+      role: 'delivery',
+    })
+    expect(linked.timeline.at(-1)?.type).toBe('task_linked')
+
+    const matches = await service.findByTaskId('run-delivery-1')
+    expect(matches.map((item) => item.id)).toEqual([created.id])
+  })
+
+  it('rejects empty task ids when linking runtime tasks', async () => {
+    const service = new ApplicationService(workspaceRoot)
+    const created = await service.upsert(
+      {
+        company: 'Echo',
+        jobTitle: 'Platform Engineer',
+      },
+      { source: 'manual', actor: 'web-server' }
+    )
+
+    await expect(
+      service.linkTask(
+        created.id,
+        {
+          taskId: '   ',
+          taskKind: 'delegation',
+        },
+        { source: 'manual', actor: 'web-server' }
+      )
+    ).rejects.toThrow('taskId is required')
+  })
 })

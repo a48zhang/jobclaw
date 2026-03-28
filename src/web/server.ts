@@ -36,6 +36,7 @@ import type {
   RuntimeEvent,
 } from '../runtime/contracts.js'
 import { AutomationInsightsService } from '../runtime/automation-insights-service.js'
+import { ExecutionTraceService } from '../runtime/execution-trace-service.js'
 import { ResumeWorkflowService } from '../runtime/resume-workflow-service.js'
 import { buildSetupCapabilitySummary } from '../runtime/setup-summary.js'
 import { RuntimeTaskResultsService } from '../runtime/task-results-service.js'
@@ -179,6 +180,31 @@ function parseApplicationSortField(value?: string | null): ApplicationSortField 
 
 function parseSortOrder(value?: string | null): 'asc' | 'desc' {
   return value === 'asc' ? 'asc' : 'desc'
+}
+
+function parseTaskReference(value?: string | null): { taskId: string; taskKind: 'session' | 'delegation' } | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  if (trimmed.startsWith('session:')) {
+    const taskId = trimmed.slice('session:'.length).trim()
+    if (!taskId) return null
+    return {
+      taskId,
+      taskKind: 'session',
+    }
+  }
+  if (trimmed.startsWith('delegation:')) {
+    const taskId = trimmed.slice('delegation:'.length).trim()
+    if (!taskId) return null
+    return {
+      taskId,
+      taskKind: 'delegation',
+    }
+  }
+  return {
+    taskId: trimmed,
+    taskKind: 'delegation',
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -804,6 +830,11 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
   const interventionStore = new InterventionStore(workspaceRoot)
   const artifactStore = new ArtifactStore(workspaceRoot)
   const runtimeTaskResultsService = runtime.getTaskResultsService?.() ?? new RuntimeTaskResultsService(workspaceRoot)
+  const executionTraceService = new ExecutionTraceService({
+    workspaceRoot,
+    applicationService: applications,
+    taskResultsService: runtimeTaskResultsService,
+  })
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
   const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
 
@@ -1274,6 +1305,18 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     }
   })
 
+  app.get('/api/applications/progress', async (c) => {
+    try {
+      const id = c.req.query('id')?.trim()
+      if (!id) return c.json({ ok: false, error: 'id is required' }, 400)
+      const trace = await executionTraceService.getByApplicationId(id)
+      if (!trace) return c.json({ ok: false, error: 'Application not found' }, 404)
+      return c.json(trace)
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
   app.post('/api/applications/upsert', async (c) => {
     try {
       const body = await c.req.json<{
@@ -1392,6 +1435,30 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     }
   })
 
+  app.post('/api/applications/link-task', async (c) => {
+    try {
+      const body = await c.req.json<{ id?: string; taskId?: string; role?: 'delivery' | 'follow_up' | 'supporting'; note?: string }>()
+      if (!body.id?.trim() || !body.taskId?.trim()) {
+        return c.json({ ok: false, error: 'id and taskId are required' }, 400)
+      }
+      const parsed = parseTaskReference(body.taskId)
+      if (!parsed) return c.json({ ok: false, error: 'taskId is required' }, 400)
+      const application = await applications.linkTask(
+        body.id.trim(),
+        {
+          taskId: parsed.taskId,
+          taskKind: parsed.taskKind,
+          role: body.role,
+          note: body.note,
+        },
+        { source: 'manual', actor: 'web-server' }
+      )
+      return c.json({ ok: true, application: toDetailedApplication(application) })
+    } catch (err) {
+      return respondWithDomainError(c, err)
+    }
+  })
+
   app.get('/api/runtime/automation-insights', async (c) => {
     try {
       const service = new AutomationInsightsService({
@@ -1401,6 +1468,25 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         taskResultsService: runtimeTaskResultsService,
       })
       return c.json(await service.getInsights({ sessionId: c.req.query('sessionId') || undefined }))
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/runtime/execution-trace', async (c) => {
+    try {
+      const applicationId = c.req.query('applicationId')?.trim()
+      const taskId = c.req.query('taskId')?.trim()
+      if (!applicationId && !taskId) {
+        return c.json({ ok: false, error: 'applicationId or taskId is required' }, 400)
+      }
+      const trace = applicationId
+        ? await executionTraceService.getByApplicationId(applicationId)
+        : await executionTraceService.getByTaskId(taskId!)
+      if (!trace) {
+        return c.json({ ok: false, error: applicationId ? 'Application not found' : 'Task not found' }, 404)
+      }
+      return c.json(trace)
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }
