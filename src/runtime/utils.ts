@@ -22,6 +22,8 @@ export function ensureRuntimeStateDirs(workspaceRoot: string): void {
     'state/delegation',
     'state/interventions',
     'state/jobs',
+    'state/applications',
+    'state/strategy',
     'state/user',
     'state/artifacts',
   ]

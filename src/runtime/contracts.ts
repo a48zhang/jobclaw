@@ -93,6 +93,87 @@ export interface UserFacts {
   sourceRefs: string[]
 }
 
+export type JobRecommendationBand = 'strong_match' | 'good_match' | 'possible_match' | 'weak_match' | 'avoid'
+export type RecommendationReasonPolarity = 'positive' | 'negative' | 'neutral'
+export type RecommendationReasonCode =
+  | 'preferred_company'
+  | 'excluded_company'
+  | 'target_role_match'
+  | 'preferred_role_match'
+  | 'preferred_location_match'
+  | 'excluded_keyword'
+  | 'preferred_keyword'
+  | 'skill_signal'
+  | 'constraint_signal'
+  | 'status_penalty'
+  | 'favorite_signal'
+  | 'recency_signal'
+  | 'fit_summary_signal'
+  | 'notes_signal'
+
+export interface JobStrategyScoringWeights {
+  roleMatch: number
+  locationMatch: number
+  skillSignal: number
+  companyPreference: number
+  keywordPreference: number
+  constraintPenalty: number
+  statusPenalty: number
+  recency: number
+  fitSummary: number
+}
+
+export interface JobStrategyPreferences {
+  version: number
+  preferredRoles: string[]
+  preferredLocations: string[]
+  preferredCompanies: string[]
+  excludedCompanies: string[]
+  preferredKeywords: string[]
+  excludedKeywords: string[]
+  workModes: string[]
+  scoringWeights: JobStrategyScoringWeights
+  updatedAt: string
+  sourceRefs: string[]
+}
+
+export interface JobRecommendationReason {
+  code: RecommendationReasonCode
+  polarity: RecommendationReasonPolarity
+  weight: number
+  message: string
+  evidence?: string[]
+}
+
+export interface JobRecommendationBreakdown {
+  positiveScore: number
+  negativeScore: number
+  rawScore: number
+  normalizedScore: number
+  maxScore: number
+}
+
+export interface JobRecommendationSignals {
+  matchedRoles: string[]
+  matchedLocations: string[]
+  matchedSkills: string[]
+  matchedPreferredKeywords: string[]
+  matchedConstraints: string[]
+  matchedExcludedKeywords: string[]
+}
+
+export interface JobRecommendation {
+  jobId: string
+  jobUrl: string
+  score: number
+  band: JobRecommendationBand
+  summary: string
+  generatedAt: string
+  breakdown: JobRecommendationBreakdown
+  signals: JobRecommendationSignals
+  reasons: JobRecommendationReason[]
+}
+
 export type JobWriteSource = 'agent' | 'manual' | 'system'
 export type JobMutationOperation = 'created' | 'updated' | 'status_updated' | 'imported' | 'deleted'
 
@@ -124,6 +205,104 @@ export interface JobRecord {
 }
 
 export type JobStatus = JobRecord['status']
+
+export type ApplicationWriteSource = 'agent' | 'manual' | 'system'
+export type ApplicationStatus =
+  | 'draft'
+  | 'applied'
+  | 'follow_up'
+  | 'screening'
+  | 'interview'
+  | 'offer'
+  | 'rejected'
+  | 'withdrawn'
+  | 'ghosted'
+
+export type ApplicationTimelineEntryType =
+  | 'created'
+  | 'status_changed'
+  | 'note_added'
+  | 'next_action_set'
+  | 'reminder_added'
+  | 'reminder_completed'
+  | 'reminder_cancelled'
+  | 'rejection_recorded'
+
+export type ApplicationReminderStatus = 'pending' | 'completed' | 'cancelled'
+export type ApplicationNoteCategory = 'general' | 'follow_up' | 'interview' | 'rejection'
+export type ApplicationActionOwner = 'user' | 'agent' | 'system'
+
+export interface ApplicationTimelineEntry {
+  id: string
+  type: ApplicationTimelineEntryType
+  at: string
+  source: ApplicationWriteSource
+  actor: string
+  summary: string
+  fromStatus?: ApplicationStatus
+  toStatus?: ApplicationStatus
+  reminderId?: string
+  noteId?: string
+  meta?: Record<string, unknown>
+}
+
+export interface ApplicationReminder {
+  id: string
+  title: string
+  dueAt: string
+  status: ApplicationReminderStatus
+  note?: string
+  createdAt: string
+  updatedAt: string
+  completedAt?: string
+  source: ApplicationWriteSource
+  actor: string
+}
+
+export interface ApplicationNextAction {
+  summary: string
+  dueAt?: string
+  owner: ApplicationActionOwner
+  note?: string
+  updatedAt: string
+  source: ApplicationWriteSource
+  actor: string
+}
+
+export interface ApplicationNote {
+  id: string
+  body: string
+  category: ApplicationNoteCategory
+  createdAt: string
+  updatedAt: string
+  source: ApplicationWriteSource
+  actor: string
+}
+
+export interface ApplicationRejection {
+  recordedAt: string
+  reason?: string
+  notes?: string
+  source: ApplicationWriteSource
+  actor: string
+}
+
+export interface ApplicationRecord {
+  id: string
+  company: string
+  jobTitle: string
+  jobUrl?: string
+  jobId?: string
+  status: ApplicationStatus
+  createdAt: string
+  updatedAt: string
+  appliedAt?: string
+  notes: ApplicationNote[]
+  timeline: ApplicationTimelineEntry[]
+  reminders: ApplicationReminder[]
+  nextAction?: ApplicationNextAction
+  rejection?: ApplicationRejection
+}
 
 export interface ArtifactRecord {
   id: string

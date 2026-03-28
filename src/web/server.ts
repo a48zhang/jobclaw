@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { WebSocketServer, WebSocket } from 'ws'
@@ -6,12 +7,15 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { eventBus, mapRuntimeEventToLegacyEvent } from '../eventBus.js'
 import type { EventBusMap } from '../eventBus.js'
+import { ApplicationService } from '../domain/application-service.js'
 import { JobsService } from '../domain/jobs-service.js'
+import { RecommendationService } from '../domain/recommendation-service.js'
 import { ArtifactStore } from '../memory/artifactStore.js'
 import { ConversationStore } from '../memory/conversationStore.js'
 import { DelegationStore } from '../memory/delegationStore.js'
 import { InterventionStore } from '../memory/interventionStore.js'
 import { SessionStore } from '../memory/sessionStore.js'
+import { StrategyStore } from '../memory/strategyStore.js'
 import { lockFile, unlockFile } from '../tools/lockFile.js'
 import type { BaseAgent } from '../agents/base/agent.js'
 import type { AgentFactory } from '../agents/factory.js'
@@ -20,13 +24,18 @@ import { getConfigStatus as readConfigStatus, readConfigFile, saveConfigFile } f
 import type { MCPClientStatus } from '../mcp.js'
 import type {
   AgentSession,
+  ApplicationRecord,
+  ApplicationStatus,
   DelegatedRun,
   EventStream,
   InterventionRecord,
   JobRecord,
+  JobStrategyPreferences,
+  JobStrategyScoringWeights,
   JobStatus,
   RuntimeEvent,
 } from '../runtime/contracts.js'
+import { AutomationInsightsService } from '../runtime/automation-insights-service.js'
 import { ResumeWorkflowService } from '../runtime/resume-workflow-service.js'
 import { buildSetupCapabilitySummary } from '../runtime/setup-summary.js'
 import { RuntimeTaskResultsService } from '../runtime/task-results-service.js'
@@ -46,6 +55,10 @@ interface RuntimeSessionStore {
 interface RuntimeDelegationStore {
   listByParent(parentSessionId: string): Promise<DelegatedRun[]>
   list(): Promise<DelegatedRun[]>
+}
+
+type StrategyUpdatePayload = Omit<Partial<JobStrategyPreferences>, 'scoringWeights'> & {
+  scoringWeights?: Partial<JobStrategyScoringWeights>
 }
 
 interface RuntimeInterventionManager {
@@ -118,7 +131,22 @@ function isJobStatus(value: string): value is JobStatus {
   )
 }
 
+function isApplicationStatus(value: string): value is ApplicationStatus {
+  return (
+    value === 'draft' ||
+    value === 'applied' ||
+    value === 'follow_up' ||
+    value === 'screening' ||
+    value === 'interview' ||
+    value === 'offer' ||
+    value === 'rejected' ||
+    value === 'withdrawn' ||
+    value === 'ghosted'
+  )
+}
+
 type JobQuerySortField = 'updatedAt' | 'discoveredAt' | 'company' | 'title' | 'status'
+type ApplicationSortField = 'updatedAt' | 'createdAt' | 'nextActionAt' | 'company' | 'status'
 
 function splitCsv(value?: string | null): string[] {
   if (!value) return []
@@ -136,8 +164,104 @@ function parseJobSortField(value?: string | null): JobQuerySortField {
   return 'updatedAt'
 }
 
+function parseApplicationSortField(value?: string | null): ApplicationSortField {
+  if (value === 'createdAt') return 'createdAt'
+  if (value === 'nextActionAt') return 'nextActionAt'
+  if (value === 'company') return 'company'
+  if (value === 'status') return 'status'
+  return 'updatedAt'
+}
+
 function parseSortOrder(value?: string | null): 'asc' | 'desc' {
   return value === 'asc' ? 'asc' : 'desc'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function sanitizeStringList(value: unknown, fieldName: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${fieldName} must be an array of strings`)
+  }
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+function sanitizeStrategyBody(body: unknown): StrategyUpdatePayload {
+  if (!isRecord(body)) {
+    throw new Error('strategy payload must be an object')
+  }
+
+  const patch: StrategyUpdatePayload = {}
+  const listFields = [
+    'preferredRoles',
+    'preferredLocations',
+    'preferredCompanies',
+    'excludedCompanies',
+    'preferredKeywords',
+    'excludedKeywords',
+    'workModes',
+    'sourceRefs',
+  ] as const
+
+  for (const field of listFields) {
+    if (body[field] !== undefined) {
+      patch[field] = sanitizeStringList(body[field], field)
+    }
+  }
+
+  if (body.scoringWeights !== undefined) {
+    if (!isRecord(body.scoringWeights)) {
+      throw new Error('scoringWeights must be an object')
+    }
+    patch.scoringWeights = sanitizeScoringWeights(body.scoringWeights)
+  }
+
+  return patch
+}
+
+function sanitizeScoringWeights(value: Record<string, unknown>): Partial<JobStrategyScoringWeights> {
+  const patch: Partial<JobStrategyScoringWeights> = {}
+  const keys = [
+    'roleMatch',
+    'locationMatch',
+    'skillSignal',
+    'companyPreference',
+    'keywordPreference',
+    'constraintPenalty',
+    'statusPenalty',
+    'recency',
+    'fitSummary',
+  ] as const
+
+  for (const key of keys) {
+    const raw = value[key]
+    if (raw === undefined) continue
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) {
+      throw new Error(`scoringWeights.${key} must be a finite number`)
+    }
+    patch[key] = raw
+  }
+
+  return patch
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof Error && /not found/i.test(error.message)
+}
+
+function respondWithDomainError(c: Context, error: unknown) {
+  if (isNotFoundError(error)) {
+    return c.json({ ok: false, error: (error as Error).message }, 404)
+  }
+  return c.json({ ok: false, error: (error as Error).message }, 500)
 }
 
 function parseNonNegativeInt(value: string | undefined, fallback: number): number {
@@ -343,6 +467,75 @@ async function readJobsForApi(workspaceRoot: string, jobs: JobsService): Promise
     }))
   } catch {
     return []
+  }
+}
+
+function matchesApplicationQuery(
+  record: ApplicationRecord,
+  filters: {
+    statuses: ApplicationStatus[]
+    company?: string
+    q?: string
+    dueBefore?: string
+  }
+): boolean {
+  if (filters.statuses.length > 0 && !filters.statuses.includes(record.status)) return false
+  if (filters.company && !record.company.toLowerCase().includes(filters.company.toLowerCase())) return false
+  if (filters.q) {
+    const needle = filters.q.toLowerCase()
+    const haystacks = [
+      record.company,
+      record.jobTitle,
+      record.jobUrl ?? '',
+      record.nextAction?.summary ?? '',
+      ...record.notes.map((note) => note.body),
+    ]
+    if (!haystacks.some((value) => value.toLowerCase().includes(needle))) return false
+  }
+  if (filters.dueBefore) {
+    const dueAt = toTimestamp(record.nextAction?.dueAt ?? '')
+    if (!dueAt || dueAt > toTimestamp(filters.dueBefore)) return false
+  }
+  return true
+}
+
+function sortApplications(
+  records: ApplicationRecord[],
+  sortBy: ApplicationSortField,
+  order: 'asc' | 'desc'
+): ApplicationRecord[] {
+  const direction = order === 'asc' ? 1 : -1
+  return [...records].sort((left, right) => {
+    let comparison = 0
+    switch (sortBy) {
+      case 'createdAt':
+        comparison = toTimestamp(left.createdAt) - toTimestamp(right.createdAt)
+        break
+      case 'nextActionAt':
+        comparison = toTimestamp(left.nextAction?.dueAt ?? '') - toTimestamp(right.nextAction?.dueAt ?? '')
+        break
+      case 'company':
+        comparison = left.company.localeCompare(right.company)
+        break
+      case 'status':
+        comparison = left.status.localeCompare(right.status)
+        break
+      case 'updatedAt':
+      default:
+        comparison = toTimestamp(left.updatedAt) - toTimestamp(right.updatedAt)
+        break
+    }
+    if (comparison !== 0) return comparison * direction
+    return left.company.localeCompare(right.company) * direction
+  })
+}
+
+function toDetailedApplication(record: ApplicationRecord) {
+  return {
+    ...record,
+    overdueReminderCount: record.reminders.filter(
+      (reminder) => reminder.status === 'pending' && toTimestamp(reminder.dueAt) < Date.now()
+    ).length,
   }
 }
 
@@ -595,6 +788,9 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
 
   const app = new Hono()
   const jobs = new JobsService(workspaceRoot, 'web-server')
+  const applications = new ApplicationService(workspaceRoot)
+  const recommendations = new RecommendationService(workspaceRoot)
+  const strategyStore = new StrategyStore(workspaceRoot)
   const conversationStore = new ConversationStore(workspaceRoot)
   const sessionStore = new SessionStore(workspaceRoot)
   const delegationStore = new DelegationStore(workspaceRoot)
@@ -909,6 +1105,238 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         total: items.length,
         items,
       })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/jobs/recommendations', async (c) => {
+    try {
+      const statuses = splitCsv(c.req.query('status')).filter(isJobStatus)
+      const limit = parsePositiveInt(c.req.query('limit')) ?? 20
+      const includeAvoid = c.req.query('includeAvoid') === '1'
+      const minScore = parsePositiveInt(c.req.query('minScore'))
+      const items = await recommendations.list({
+        statuses,
+        limit,
+        includeAvoid,
+        minScore,
+      })
+      return c.json({ ok: true, total: items.length, items })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/jobs/recommendations/detail', async (c) => {
+    try {
+      const id = c.req.query('id')?.trim()
+      if (!id) return c.json({ ok: false, error: 'id is required' }, 400)
+      const item = await recommendations.get(id)
+      if (!item) return c.json({ ok: false, error: 'Recommendation not found' }, 404)
+      return c.json({ ok: true, recommendation: item })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/strategy', async (c) => {
+    try {
+      const strategy = await strategyStore.get()
+      return c.json({ ok: true, strategy })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.post('/api/strategy', async (c) => {
+    try {
+      const body = sanitizeStrategyBody(await c.req.json())
+      const strategy = await strategyStore.update((current) => ({
+        ...current,
+        ...body,
+        version: current.version + 1,
+        updatedAt: nowIso(),
+        scoringWeights: {
+          ...current.scoringWeights,
+          ...body.scoringWeights,
+        },
+        sourceRefs: body.sourceRefs ?? current.sourceRefs,
+      }))
+      return c.json({ ok: true, strategy })
+    } catch (err) {
+      const status = err instanceof Error && /must be|payload/i.test(err.message) ? 400 : 500
+      return c.json({ ok: false, error: (err as Error).message }, status)
+    }
+  })
+
+  app.get('/api/applications', async (c) => {
+    try {
+      const statuses = splitCsv(c.req.query('status')).filter(isApplicationStatus)
+      const company = c.req.query('company')?.trim()
+      const q = c.req.query('q')?.trim()
+      const dueBefore = c.req.query('dueBefore')?.trim()
+      const sortBy = parseApplicationSortField(c.req.query('sortBy'))
+      const order = parseSortOrder(c.req.query('order'))
+      const limit = parsePositiveInt(c.req.query('limit'))
+      const items = sortApplications(
+        (await applications.list()).filter((record) => matchesApplicationQuery(record, { statuses, company, q, dueBefore })),
+        sortBy,
+        order
+      )
+      const paged = typeof limit === 'number' ? items.slice(0, limit) : items
+      return c.json({ ok: true, total: items.length, items: paged.map(toDetailedApplication) })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/applications/detail', async (c) => {
+    try {
+      const id = c.req.query('id')?.trim()
+      if (!id) return c.json({ ok: false, error: 'id is required' }, 400)
+      const application = await applications.get(id)
+      if (!application) return c.json({ ok: false, error: 'Application not found' }, 404)
+      return c.json({ ok: true, application: toDetailedApplication(application) })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/applications/summary', async (c) => {
+    try {
+      return c.json({ ok: true, summary: await applications.getSummary() })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.post('/api/applications/upsert', async (c) => {
+    try {
+      const body = await c.req.json<{
+        id?: string
+        company?: string
+        jobTitle?: string
+        jobUrl?: string
+        jobId?: string
+        status?: ApplicationStatus
+        appliedAt?: string
+        nextAction?: { summary?: string; dueAt?: string; owner?: 'user' | 'agent' | 'system'; note?: string }
+        note?: { body?: string; category?: 'general' | 'follow_up' | 'interview' | 'rejection' }
+      }>()
+      if (!body.company?.trim() || !body.jobTitle?.trim()) {
+        return c.json({ ok: false, error: 'company and jobTitle are required' }, 400)
+      }
+      const application = await applications.upsert(
+        {
+          id: body.id,
+          company: body.company.trim(),
+          jobTitle: body.jobTitle.trim(),
+          jobUrl: body.jobUrl?.trim(),
+          jobId: body.jobId?.trim(),
+          status: body.status,
+          appliedAt: body.appliedAt,
+          nextAction: body.nextAction?.summary?.trim()
+            ? {
+                summary: body.nextAction.summary.trim(),
+                dueAt: body.nextAction.dueAt,
+                owner: body.nextAction.owner,
+                note: body.nextAction.note,
+              }
+            : undefined,
+          note: body.note?.body?.trim()
+            ? {
+                body: body.note.body.trim(),
+                category: body.note.category,
+              }
+            : undefined,
+        },
+        { source: 'manual', actor: 'web-server' }
+      )
+      return c.json({ ok: true, application: toDetailedApplication(application) })
+    } catch (err) {
+      return respondWithDomainError(c, err)
+    }
+  })
+
+  app.post('/api/applications/status', async (c) => {
+    try {
+      const body = await c.req.json<{ id?: string; status?: ApplicationStatus; rejectionReason?: string; rejectionNotes?: string }>()
+      if (!body.id?.trim() || !body.status || !isApplicationStatus(body.status)) {
+        return c.json({ ok: false, error: 'id and valid status are required' }, 400)
+      }
+      const application = await applications.updateStatus(
+        body.id.trim(),
+        body.status,
+        { source: 'manual', actor: 'web-server' },
+        { rejectionReason: body.rejectionReason, rejectionNotes: body.rejectionNotes }
+      )
+      return c.json({ ok: true, application: toDetailedApplication(application) })
+    } catch (err) {
+      return respondWithDomainError(c, err)
+    }
+  })
+
+  app.post('/api/applications/reminders', async (c) => {
+    try {
+      const body = await c.req.json<{ id?: string; title?: string; dueAt?: string; note?: string }>()
+      if (!body.id?.trim() || !body.title?.trim() || !body.dueAt?.trim()) {
+        return c.json({ ok: false, error: 'id, title, and dueAt are required' }, 400)
+      }
+      const application = await applications.addReminder(
+        body.id.trim(),
+        { title: body.title.trim(), dueAt: body.dueAt.trim(), note: body.note?.trim() },
+        { source: 'manual', actor: 'web-server' }
+      )
+      return c.json({ ok: true, application: toDetailedApplication(application) })
+    } catch (err) {
+      return respondWithDomainError(c, err)
+    }
+  })
+
+  app.post('/api/applications/reminders/complete', async (c) => {
+    try {
+      const body = await c.req.json<{ id?: string; reminderId?: string; status?: 'completed' | 'cancelled' }>()
+      if (!body.id?.trim() || !body.reminderId?.trim() || (body.status !== 'completed' && body.status !== 'cancelled')) {
+        return c.json({ ok: false, error: 'id, reminderId, and valid status are required' }, 400)
+      }
+      const application = await applications.completeReminder(
+        body.id.trim(),
+        body.reminderId.trim(),
+        body.status,
+        { source: 'manual', actor: 'web-server' }
+      )
+      return c.json({ ok: true, application: toDetailedApplication(application) })
+    } catch (err) {
+      return respondWithDomainError(c, err)
+    }
+  })
+
+  app.post('/api/applications/notes', async (c) => {
+    try {
+      const body = await c.req.json<{ id?: string; body?: string; category?: 'general' | 'follow_up' | 'interview' | 'rejection' }>()
+      if (!body.id?.trim() || !body.body?.trim()) {
+        return c.json({ ok: false, error: 'id and body are required' }, 400)
+      }
+      const application = await applications.addNote(
+        body.id.trim(),
+        { body: body.body.trim(), category: body.category },
+        { source: 'manual', actor: 'web-server' }
+      )
+      return c.json({ ok: true, application: toDetailedApplication(application) })
+    } catch (err) {
+      return respondWithDomainError(c, err)
+    }
+  })
+
+  app.get('/api/runtime/automation-insights', async (c) => {
+    try {
+      const service = new AutomationInsightsService({
+        workspaceRoot,
+        configStatus: runtime.getConfigStatus(),
+        runtimeStatus: runtime.getRuntimeStatus?.(),
+      })
+      return c.json(await service.getInsights({ sessionId: c.req.query('sessionId') || undefined }))
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }

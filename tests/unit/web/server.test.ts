@@ -1160,6 +1160,89 @@ describe('/api/jobs/*', () => {
     }
   })
 
+  test('returns explainable job recommendations from strategy and user facts', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-job-recommendations-'))
+    writeJobsState(workspace, [
+      {
+        id: 'job-1',
+        company: 'Acme Cloud',
+        title: 'Senior Backend Engineer',
+        url: 'https://example.com/acme-backend',
+        status: 'favorite',
+        discoveredAt: '2026-03-20T00:00:00.000Z',
+        updatedAt: '2026-03-28T00:00:00.000Z',
+        fitSummary: 'Strong backend match',
+      },
+      {
+        id: 'job-2',
+        company: 'Noise Corp',
+        title: 'Frontend Engineer',
+        url: 'https://example.com/noise-frontend',
+        status: 'failed',
+        discoveredAt: '2026-03-20T00:00:00.000Z',
+        updatedAt: '2026-03-28T00:00:00.000Z',
+      },
+    ])
+    fs.mkdirSync(path.join(workspace, 'state', 'user'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'user', 'facts.json'),
+      JSON.stringify({
+        version: 1,
+        targetRoles: ['backend engineer'],
+        targetLocations: [],
+        skills: ['node'],
+        constraints: ['remote'],
+        sourceRefs: [],
+      }, null, 2),
+      'utf-8'
+    )
+    fs.mkdirSync(path.join(workspace, 'state', 'strategy'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'strategy', 'preferences.json'),
+      JSON.stringify({
+        version: 1,
+        preferredRoles: ['backend engineer'],
+        preferredLocations: [],
+        preferredCompanies: ['Acme'],
+        excludedCompanies: ['Noise'],
+        preferredKeywords: ['backend', 'remote'],
+        excludedKeywords: [],
+        workModes: [],
+        scoringWeights: {
+          roleMatch: 18,
+          locationMatch: 10,
+          skillSignal: 12,
+          companyPreference: 12,
+          keywordPreference: 8,
+          constraintPenalty: 14,
+          statusPenalty: 16,
+          recency: 6,
+          fitSummary: 10,
+        },
+        updatedAt: '2026-03-28T00:00:00.000Z',
+        sourceRefs: [],
+      }, null, 2),
+      'utf-8'
+    )
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/jobs/recommendations?includeAvoid=1')
+      expect(res.status).toBe(200)
+      const json = await res.json() as {
+        ok: boolean
+        items: Array<{ jobId: string; score: number; reasons: Array<{ code: string }> }>
+      }
+      expect(json.ok).toBe(true)
+      expect(json.items[0].jobId).toBe('job-1')
+      expect(json.items[0].score).toBeGreaterThan(json.items[1].score)
+      expect(json.items[0].reasons.some((item) => item.code === 'preferred_company')).toBe(true)
+      expect(json.items[1].reasons.some((item) => item.code === 'excluded_company')).toBe(true)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('updates selected job statuses without rewriting unrelated rows', async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-jobs-status-'))
     fs.mkdirSync(path.join(workspace, 'data'), { recursive: true })
@@ -1233,6 +1316,219 @@ describe('/api/jobs/*', () => {
       const content = fs.readFileSync(path.join(workspace, 'data/jobs.md'), 'utf-8')
       expect(content).not.toContain('https://example.com/a')
       expect(content).toContain('https://example.com/b')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('/api/strategy', () => {
+  test('reads and updates strategy preferences', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-strategy-'))
+    const app = createApp(workspace)
+
+    try {
+      const initialRes = await app.request('/api/strategy')
+      expect(initialRes.status).toBe(200)
+      const initialJson = await initialRes.json() as { ok: boolean; strategy: { version: number } }
+      expect(initialJson.ok).toBe(true)
+      expect(initialJson.strategy.version).toBe(1)
+
+      const updateRes = await app.request('/api/strategy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          preferredRoles: ['backend engineer'],
+          preferredCompanies: ['Acme'],
+        }),
+      })
+      expect(updateRes.status).toBe(200)
+      const updateJson = await updateRes.json() as { ok: boolean; strategy: { version: number; preferredCompanies: string[] } }
+      expect(updateJson.ok).toBe(true)
+      expect(updateJson.strategy.version).toBe(2)
+      expect(updateJson.strategy.preferredCompanies).toEqual(['Acme'])
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects invalid strategy payloads before persisting them', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-strategy-invalid-'))
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/strategy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          preferredCompanies: 'Acme',
+          scoringWeights: {
+            roleMatch: 'high',
+          },
+        }),
+      })
+
+      expect(res.status).toBe(400)
+      const json = await res.json() as { ok: boolean; error: string }
+      expect(json.ok).toBe(false)
+      expect(json.error).toContain('must be')
+
+      const current = await app.request('/api/strategy')
+      const currentJson = await current.json() as { ok: boolean; strategy: { version: number; preferredCompanies: string[] } }
+      expect(currentJson.ok).toBe(true)
+      expect(currentJson.strategy.version).toBe(1)
+      expect(currentJson.strategy.preferredCompanies).toEqual([])
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('/api/applications*', () => {
+  test('creates application records, updates status, and exposes summary/detail', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-applications-'))
+    const app = createApp(workspace)
+
+    try {
+      const createRes = await app.request('/api/applications/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company: 'Acme',
+          jobTitle: 'Backend Engineer',
+          status: 'applied',
+          nextAction: {
+            summary: 'Send follow-up email',
+            dueAt: '2026-04-01T00:00:00.000Z',
+          },
+        }),
+      })
+      expect(createRes.status).toBe(200)
+      const createJson = await createRes.json() as {
+        ok: boolean
+        application: { id: string; status: string }
+      }
+      expect(createJson.ok).toBe(true)
+      expect(createJson.application.status).toBe('applied')
+
+      const reminderRes = await app.request('/api/applications/reminders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: createJson.application.id,
+          title: 'Follow up reminder',
+          dueAt: '2026-04-02T00:00:00.000Z',
+        }),
+      })
+      expect(reminderRes.status).toBe(200)
+
+      const statusRes = await app.request('/api/applications/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: createJson.application.id,
+          status: 'interview',
+        }),
+      })
+      expect(statusRes.status).toBe(200)
+
+      const [listRes, detailRes, summaryRes] = await Promise.all([
+        app.request('/api/applications?status=interview'),
+        app.request(`/api/applications/detail?id=${createJson.application.id}`),
+        app.request('/api/applications/summary'),
+      ])
+      expect(listRes.status).toBe(200)
+      expect(detailRes.status).toBe(200)
+      expect(summaryRes.status).toBe(200)
+
+      const listJson = await listRes.json() as { ok: boolean; total: number; items: Array<{ status: string }> }
+      const detailJson = await detailRes.json() as { ok: boolean; application: { status: string; reminders: unknown[]; timeline: unknown[] } }
+      const summaryJson = await summaryRes.json() as { ok: boolean; summary: { total: number; byStatus: { interview: number } } }
+      expect(listJson.ok).toBe(true)
+      expect(listJson.total).toBe(1)
+      expect(detailJson.application.status).toBe('interview')
+      expect(detailJson.application.reminders.length).toBe(1)
+      expect(detailJson.application.timeline.length).toBeGreaterThanOrEqual(3)
+      expect(summaryJson.summary.total).toBe(1)
+      expect(summaryJson.summary.byStatus.interview).toBe(1)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('returns 404 when mutating a missing application', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-applications-missing-'))
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/applications/reminders/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: 'missing-application',
+          reminderId: 'missing-reminder',
+          status: 'completed',
+        }),
+      })
+
+      expect(res.status).toBe(404)
+      const json = await res.json() as { ok: boolean; error: string }
+      expect(json.ok).toBe(false)
+      expect(json.error).toContain('Application not found')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('/api/runtime/automation-insights', () => {
+  test('returns pending authorization, failures, pipeline summary, and next steps', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-automation-insights-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'delegation'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'interventions'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'delegation', 'review-run.json'),
+      JSON.stringify({
+        id: 'review-run',
+        parentSessionId: 'main',
+        profile: 'review',
+        state: 'waiting_input',
+        instruction: 'Review resume',
+        createdAt: '2026-03-28T03:00:00.000Z',
+        updatedAt: '2026-03-28T03:01:00.000Z',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'interventions', 'ivr-1.json'),
+      JSON.stringify({
+        id: 'ivr-1',
+        ownerType: 'delegated_run',
+        ownerId: 'review-run',
+        kind: 'text',
+        prompt: 'Need ATS code',
+        status: 'pending',
+        createdAt: '2026-03-28T03:02:00.000Z',
+        updatedAt: '2026-03-28T03:03:00.000Z',
+      }),
+      'utf-8'
+    )
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/runtime/automation-insights')
+      expect(res.status).toBe(200)
+      const json = await res.json() as {
+        ok: boolean
+        pendingAuthorizations: Array<{ prompt: string }>
+        pipeline: { applications: { total: number }; recommendations: unknown[] }
+        nextSteps: string[]
+      }
+      expect(json.ok).toBe(true)
+      expect(json.pendingAuthorizations[0]?.prompt).toContain('ATS code')
+      expect(json.pipeline.applications.total).toBe(0)
+      expect(Array.isArray(json.pipeline.recommendations)).toBe(true)
+      expect(json.nextSteps.length).toBeGreaterThan(0)
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
