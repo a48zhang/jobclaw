@@ -25,6 +25,24 @@ afterEach(() => {
   }
 })
 
+function writeJobsState(
+  workspace: string,
+  records: Array<{
+    id: string
+    company: string
+    title: string
+    url: string
+    status: string
+    discoveredAt: string
+    updatedAt: string
+    fitSummary?: string
+    notes?: string
+  }>
+): void {
+  fs.mkdirSync(path.join(workspace, 'state', 'jobs'), { recursive: true })
+  fs.writeFileSync(path.join(workspace, 'state', 'jobs', 'jobs.json'), JSON.stringify(records, null, 2), 'utf-8')
+}
+
 describe('/api/intervention', () => {
   test('forwards requestId to the event bus payload', async () => {
     const app = createApp(TEST_WORKSPACE)
@@ -642,10 +660,12 @@ describe('/api/resume/upload', () => {
       ok: boolean
       path: string
       name: string
+      workflow: string
     }
     expect(json.ok).toBe(true)
     expect(json.path).toBe('data/uploads/resume-upload.pdf')
     expect(json.name).toBe('resume.pdf')
+    expect(json.workflow).toBe('/api/resume/workflow')
     expect(fs.existsSync(UPLOAD_PATH)).toBe(true)
   })
 
@@ -710,13 +730,120 @@ describe('/api/resume/review', () => {
     const res = await app.request('/api/resume/review', { method: 'POST' })
 
     expect(res.status).toBe(200)
-    const json = await res.json() as { ok: boolean; path: string }
+    const json = await res.json() as { ok: boolean; path: string; workflow: string; dispatch: string }
     expect(json.ok).toBe(true)
     expect(json.path).toBe('data/uploads/resume-upload.pdf')
+    expect(json.workflow).toBe('/api/resume/workflow')
+    expect(json.dispatch).toBe('main_agent')
     expect(submit).toHaveBeenCalledTimes(1)
     expect(submit.mock.calls[0]?.[0]).toContain('resume-upload.pdf')
     expect(submit.mock.calls[0]?.[0]).toContain('resume-clinic')
     expect(submit.mock.calls[0]?.[0]).toContain('read_pdf')
+  })
+})
+
+describe('/api/resume/workflow', () => {
+  test('returns a unified resume workflow overview with artifacts and action gates', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-resume-workflow-'))
+    fs.mkdirSync(path.join(workspace, 'data', 'uploads'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'output'), { recursive: true })
+    fs.writeFileSync(path.join(workspace, 'data', 'targets.md'), '# 目标\n- Example | https://example.com\n', 'utf-8')
+    fs.writeFileSync(
+      path.join(workspace, 'data', 'userinfo.md'),
+      '# 个人信息\n- 姓名：Ada\n- 邮箱：ada@example.com\n- 手机：13800000000\n- 方向：Backend\n- 城市：Shanghai\n- 学历/年限：5年\n- 关键词：Node.js\n',
+      'utf-8'
+    )
+    fs.writeFileSync(path.join(workspace, 'data', 'uploads', 'resume-upload.pdf'), 'upload')
+    fs.writeFileSync(path.join(workspace, 'output', 'resume.pdf'), 'pdf')
+    fs.mkdirSync(path.join(workspace, 'state', 'delegation'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'delegation', 'resume-run.json'),
+      JSON.stringify({
+        id: 'resume-run',
+        parentSessionId: 'main',
+        profile: 'resume',
+        state: 'completed',
+        instruction: '生成简历',
+        createdAt: '2026-03-28T03:00:00.000Z',
+        updatedAt: '2026-03-28T03:01:00.000Z',
+        resultSummary: 'Resume generated',
+      }),
+      'utf-8'
+    )
+
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      getRuntimeStatus: () => ({
+        mcp: {
+          enabled: true,
+          connected: true,
+          message: 'connected',
+        },
+      }),
+      reloadFromConfig: async () => {},
+    }
+
+    try {
+      const app = createApp(workspace, runtime as any)
+      const [workflowRes, artifactsRes] = await Promise.all([
+        app.request('/api/resume/workflow'),
+        app.request('/api/resume/artifacts'),
+      ])
+
+      expect(workflowRes.status).toBe(200)
+      const workflowJson = await workflowRes.json() as {
+        ok: boolean
+        overview: {
+          uploadedResume: { exists: boolean }
+          generatedResume: { exists: boolean }
+          actions: {
+            review: { enabled: boolean }
+            build: { enabled: boolean }
+            download: { enabled: boolean }
+          }
+          recentArtifacts: Array<{ path: string }>
+          recentTasks: Array<{ profile: string }>
+        }
+      }
+      expect(workflowJson.ok).toBe(true)
+      expect(workflowJson.overview.uploadedResume.exists).toBe(true)
+      expect(workflowJson.overview.generatedResume.exists).toBe(true)
+      expect(workflowJson.overview.actions.review.enabled).toBe(true)
+      expect(typeof workflowJson.overview.actions.build.enabled).toBe('boolean')
+      expect(workflowJson.overview.actions.download.enabled).toBe(true)
+      expect(workflowJson.overview.recentArtifacts.map((item) => item.path).sort()).toEqual([
+        'data/uploads/resume-upload.pdf',
+        'output/resume.pdf',
+      ])
+      expect(workflowJson.overview.recentTasks.map((item) => item.profile)).toEqual(['resume'])
+
+      expect(artifactsRes.status).toBe(200)
+      const artifactsJson = await artifactsRes.json() as {
+        ok: boolean
+        total: number
+        artifacts: Array<{ path: string }>
+      }
+      expect(artifactsJson.ok).toBe(true)
+      expect(artifactsJson.total).toBe(2)
+      expect(artifactsJson.artifacts.map((item) => item.path).sort()).toEqual([
+        'data/uploads/resume-upload.pdf',
+        'output/resume.pdf',
+      ])
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
   })
 })
 
@@ -759,6 +886,208 @@ describe('/api/resume/status', () => {
 })
 
 describe('/api/jobs/*', () => {
+  test('keeps /api/jobs compatible while supporting filtered row queries', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-jobs-query-'))
+    writeJobsState(workspace, [
+      {
+        id: 'job-1',
+        company: 'A Corp',
+        title: 'Platform Engineer',
+        url: 'https://example.com/a',
+        status: 'favorite',
+        discoveredAt: '2026-03-20T00:00:00.000Z',
+        updatedAt: '2026-03-27T12:00:00.000Z',
+        fitSummary: 'Strong backend match',
+      },
+      {
+        id: 'job-2',
+        company: 'B Corp',
+        title: 'Frontend Engineer',
+        url: 'https://example.com/b',
+        status: 'discovered',
+        discoveredAt: '2026-03-21T00:00:00.000Z',
+        updatedAt: '2026-03-21T00:00:00.000Z',
+      },
+    ])
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/jobs?status=favorite&q=platform')
+      expect(res.status).toBe(200)
+      const json = await res.json() as Array<{ company: string; title: string; status: string; time: string; updatedAt?: string }>
+      expect(Array.isArray(json)).toBe(true)
+      expect(json).toEqual([
+        {
+          company: 'A Corp',
+          title: 'Platform Engineer',
+          url: 'https://example.com/a',
+          status: 'favorite',
+          time: '2026-03-20T00:00:00.000Z',
+        },
+      ])
+      expect(json[0]).not.toHaveProperty('updatedAt')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('returns structured jobs query results and per-job detail with trace metadata', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-jobs-detail-'))
+    writeJobsState(workspace, [
+      {
+        id: 'job-1',
+        company: 'A Corp',
+        title: 'Platform Engineer',
+        url: 'https://example.com/a',
+        status: 'favorite',
+        discoveredAt: '2026-03-20T00:00:00.000Z',
+        updatedAt: '2026-03-27T12:00:00.000Z',
+        fitSummary: 'Strong backend match',
+        notes: 'User shortlisted this company',
+      },
+      {
+        id: 'job-2',
+        company: 'B Corp',
+        title: 'Frontend Engineer',
+        url: 'https://example.com/b',
+        status: 'discovered',
+        discoveredAt: '2026-03-21T00:00:00.000Z',
+        updatedAt: '2026-03-21T00:00:00.000Z',
+      },
+    ])
+    const app = createApp(workspace)
+
+    try {
+      const queryRes = await app.request('/api/jobs/query?status=favorite&sortBy=updatedAt&order=desc')
+      expect(queryRes.status).toBe(200)
+      const queryJson = await queryRes.json() as {
+        ok: boolean
+        total: number
+        items: Array<{
+          id: string
+          company: string
+          fitSummary: string | null
+          notes: string | null
+          trace: { changeKind: string; hasPostDiscoveryUpdate: boolean }
+        }>
+      }
+      expect(queryJson.ok).toBe(true)
+      expect(queryJson.total).toBe(1)
+      expect(queryJson.items[0]).toMatchObject({
+        id: 'job-1',
+        company: 'A Corp',
+        fitSummary: 'Strong backend match',
+        notes: 'User shortlisted this company',
+        trace: {
+          changeKind: 'updated',
+          hasPostDiscoveryUpdate: true,
+        },
+      })
+
+      const detailRes = await app.request('/api/jobs/detail?id=job-1')
+      expect(detailRes.status).toBe(200)
+      const detailJson = await detailRes.json() as {
+        ok: boolean
+        job: {
+          id: string
+          updatedAt: string
+          trace: { firstSeenAt: string; lastChangedAt: string }
+        }
+      }
+      expect(detailJson.ok).toBe(true)
+      expect(detailJson.job.id).toBe('job-1')
+      expect(detailJson.job.trace.firstSeenAt).toBe('2026-03-20T00:00:00.000Z')
+      expect(detailJson.job.trace.lastChangedAt).toBe('2026-03-27T12:00:00.000Z')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('exposes enriched jobs stats and recent changes while keeping /api/stats legacy fields', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-jobs-stats-'))
+    writeJobsState(workspace, [
+      {
+        id: 'job-1',
+        company: 'A Corp',
+        title: 'Platform Engineer',
+        url: 'https://example.com/a',
+        status: 'favorite',
+        discoveredAt: '2026-03-20T00:00:00.000Z',
+        updatedAt: '2026-03-27T12:00:00.000Z',
+      },
+      {
+        id: 'job-2',
+        company: 'B Corp',
+        title: 'Frontend Engineer',
+        url: 'https://example.com/b',
+        status: 'discovered',
+        discoveredAt: '2026-03-21T00:00:00.000Z',
+        updatedAt: '2026-03-21T00:00:00.000Z',
+      },
+      {
+        id: 'job-3',
+        company: 'A Corp',
+        title: 'Backend Engineer',
+        url: 'https://example.com/c',
+        status: 'applied',
+        discoveredAt: '2026-03-22T00:00:00.000Z',
+        updatedAt: '2026-03-28T00:00:00.000Z',
+      },
+    ])
+    const app = createApp(workspace)
+
+    try {
+      const [statsRes, jobsStatsRes, changesRes] = await Promise.all([
+        app.request('/api/stats'),
+        app.request('/api/jobs/stats'),
+        app.request('/api/jobs/changes?limit=2'),
+      ])
+
+      expect(statsRes.status).toBe(200)
+      const statsJson = await statsRes.json() as {
+        total: number
+        byStatus: Record<string, number>
+        lastUpdatedAt: string | null
+        byCompany: Array<{ company: string; total: number }>
+      }
+      expect(statsJson.total).toBe(3)
+      expect(statsJson.byStatus).toEqual({
+        favorite: 1,
+        discovered: 1,
+        applied: 1,
+      })
+      expect(statsJson.lastUpdatedAt).toBe('2026-03-28T00:00:00.000Z')
+      expect(statsJson.byCompany[0]).toEqual({ company: 'A Corp', total: 2 })
+
+      expect(jobsStatsRes.status).toBe(200)
+      const jobsStatsJson = await jobsStatsRes.json() as {
+        ok: boolean
+        stats: {
+          traceability: { changedAfterDiscovery: number; neverUpdatedSinceDiscovery: number }
+        }
+      }
+      expect(jobsStatsJson.ok).toBe(true)
+      expect(jobsStatsJson.stats.traceability).toEqual({
+        changedAfterDiscovery: 2,
+        neverUpdatedSinceDiscovery: 1,
+      })
+
+      expect(changesRes.status).toBe(200)
+      const changesJson = await changesRes.json() as {
+        ok: boolean
+        total: number
+        items: Array<{ id: string; changedAt: string; trace: { changeKind: string } }>
+      }
+      expect(changesJson.ok).toBe(true)
+      expect(changesJson.total).toBe(2)
+      expect(changesJson.items.map((item) => item.id)).toEqual(['job-3', 'job-1'])
+      expect(changesJson.items[0]?.changedAt).toBe('2026-03-28T00:00:00.000Z')
+      expect(changesJson.items[0]?.trace.changeKind).toBe('updated')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('updates selected job statuses without rewriting unrelated rows', async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-jobs-status-'))
     fs.mkdirSync(path.join(workspace, 'data'), { recursive: true })

@@ -18,7 +18,16 @@ import type { AgentFactory } from '../agents/factory.js'
 import type { Config, ConfigStatus } from '../config.js'
 import { getConfigStatus as readConfigStatus, readConfigFile, saveConfigFile } from '../config.js'
 import type { MCPClientStatus } from '../mcp.js'
-import type { AgentSession, DelegatedRun, EventStream, InterventionRecord, JobStatus, RuntimeEvent } from '../runtime/contracts.js'
+import type {
+  AgentSession,
+  DelegatedRun,
+  EventStream,
+  InterventionRecord,
+  JobRecord,
+  JobStatus,
+  RuntimeEvent,
+} from '../runtime/contracts.js'
+import { ResumeWorkflowService } from '../runtime/resume-workflow-service.js'
 import { buildSetupCapabilitySummary } from '../runtime/setup-summary.js'
 import { RuntimeTaskResultsService } from '../runtime/task-results-service.js'
 
@@ -106,6 +115,234 @@ function isJobStatus(value: string): value is JobStatus {
     value === 'failed' ||
     value === 'login_required'
   )
+}
+
+type JobQuerySortField = 'updatedAt' | 'discoveredAt' | 'company' | 'title' | 'status'
+
+function splitCsv(value?: string | null): string[] {
+  if (!value) return []
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function parseJobSortField(value?: string | null): JobQuerySortField {
+  if (value === 'discoveredAt') return 'discoveredAt'
+  if (value === 'company') return 'company'
+  if (value === 'title') return 'title'
+  if (value === 'status') return 'status'
+  return 'updatedAt'
+}
+
+function parseSortOrder(value?: string | null): 'asc' | 'desc' {
+  return value === 'asc' ? 'asc' : 'desc'
+}
+
+function parseNonNegativeInt(value: string | undefined, fallback: number): number {
+  if (typeof value !== 'string') return fallback
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback
+  return parsed
+}
+
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (typeof value !== 'string') return undefined
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined
+  return parsed
+}
+
+function toTimestamp(value: string): number {
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function buildJobTrace(record: JobRecord) {
+  const discoveredAtMs = toTimestamp(record.discoveredAt)
+  const updatedAtMs = toTimestamp(record.updatedAt)
+  const hasPostDiscoveryUpdate = updatedAtMs > discoveredAtMs
+  return {
+    firstSeenAt: record.discoveredAt,
+    lastChangedAt: record.updatedAt,
+    hasPostDiscoveryUpdate,
+    changeKind: hasPostDiscoveryUpdate ? 'updated' as const : 'discovered' as const,
+    updatedAfterDiscoveryMs: Math.max(0, updatedAtMs - discoveredAtMs),
+  }
+}
+
+function toJobRow(record: JobRecord): { company: string; title: string; url: string; status: string; time: string } {
+  return {
+    company: record.company,
+    title: record.title,
+    url: record.url,
+    status: record.status,
+    time: record.discoveredAt,
+  }
+}
+
+function toDetailedJob(record: JobRecord) {
+  return {
+    id: record.id,
+    company: record.company,
+    title: record.title,
+    url: record.url,
+    status: record.status,
+    discoveredAt: record.discoveredAt,
+    updatedAt: record.updatedAt,
+    fitSummary: record.fitSummary ?? null,
+    notes: record.notes ?? null,
+    trace: buildJobTrace(record),
+  }
+}
+
+function matchesJobQuery(
+  record: JobRecord,
+  filters: {
+    statuses: JobStatus[]
+    company?: string
+    q?: string
+    changedSince?: string
+  }
+): boolean {
+  if (filters.statuses.length > 0 && !filters.statuses.includes(record.status)) {
+    return false
+  }
+
+  if (filters.company) {
+    const companyNeedle = filters.company.toLowerCase()
+    if (!record.company.toLowerCase().includes(companyNeedle)) {
+      return false
+    }
+  }
+
+  if (filters.q) {
+    const needle = filters.q.toLowerCase()
+    const haystacks = [
+      record.company,
+      record.title,
+      record.url,
+      record.fitSummary ?? '',
+      record.notes ?? '',
+    ]
+    if (!haystacks.some((value) => value.toLowerCase().includes(needle))) {
+      return false
+    }
+  }
+
+  if (filters.changedSince && toTimestamp(record.updatedAt) < toTimestamp(filters.changedSince)) {
+    return false
+  }
+
+  return true
+}
+
+function sortJobRecords(records: JobRecord[], sortBy: JobQuerySortField, order: 'asc' | 'desc'): JobRecord[] {
+  const direction = order === 'asc' ? 1 : -1
+  return [...records].sort((left, right) => {
+    let comparison = 0
+    switch (sortBy) {
+      case 'company':
+        comparison = left.company.localeCompare(right.company)
+        break
+      case 'title':
+        comparison = left.title.localeCompare(right.title)
+        break
+      case 'status':
+        comparison = left.status.localeCompare(right.status)
+        break
+      case 'discoveredAt':
+        comparison = toTimestamp(left.discoveredAt) - toTimestamp(right.discoveredAt)
+        break
+      case 'updatedAt':
+      default:
+        comparison = toTimestamp(left.updatedAt) - toTimestamp(right.updatedAt)
+        break
+    }
+
+    if (comparison !== 0) return comparison * direction
+    return left.url.localeCompare(right.url) * direction
+  })
+}
+
+function buildJobsStats(records: JobRecord[]) {
+  const now = Date.now()
+  const byStatus: Record<string, number> = {}
+  const byCompany = new Map<string, number>()
+  let changedAfterDiscovery = 0
+  let neverUpdatedSinceDiscovery = 0
+  let lastUpdatedAt: string | null = null
+
+  for (const record of records) {
+    byStatus[record.status] = (byStatus[record.status] ?? 0) + 1
+    byCompany.set(record.company, (byCompany.get(record.company) ?? 0) + 1)
+    if (!lastUpdatedAt || toTimestamp(record.updatedAt) > toTimestamp(lastUpdatedAt)) {
+      lastUpdatedAt = record.updatedAt
+    }
+    if (toTimestamp(record.updatedAt) > toTimestamp(record.discoveredAt)) {
+      changedAfterDiscovery += 1
+    } else {
+      neverUpdatedSinceDiscovery += 1
+    }
+  }
+
+  const byCompanyList = Array.from(byCompany.entries())
+    .map(([company, total]) => ({ company, total }))
+    .sort((left, right) => {
+      if (right.total !== left.total) return right.total - left.total
+      return left.company.localeCompare(right.company)
+    })
+
+  const updatedInLast24h = records.filter((record) => now - toTimestamp(record.updatedAt) <= 24 * 60 * 60 * 1000).length
+  const updatedInLast7d = records.filter((record) => now - toTimestamp(record.updatedAt) <= 7 * 24 * 60 * 60 * 1000).length
+
+  return {
+    total: records.length,
+    byStatus,
+    lastUpdatedAt,
+    updatedInLast24h,
+    updatedInLast7d,
+    byCompany: byCompanyList,
+    traceability: {
+      changedAfterDiscovery,
+      neverUpdatedSinceDiscovery,
+    },
+  }
+}
+
+async function readJobsForApi(workspaceRoot: string, jobs: JobsService): Promise<JobRecord[]> {
+  const jobsStatePath = path.resolve(workspaceRoot, 'state/jobs/jobs.json')
+  if (!fs.existsSync(jobsStatePath)) {
+    const rows = await jobs.listRows()
+    return rows.map((row, index) => ({
+      id: `${index}:${row.url}`,
+      company: row.company,
+      title: row.title,
+      url: row.url,
+      status: isJobStatus(row.status) ? row.status : 'discovered',
+      discoveredAt: row.time,
+      updatedAt: row.time,
+    }))
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(jobsStatePath, 'utf-8'))
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed as JobRecord[]
+    }
+    const rows = await jobs.listRows()
+    return rows.map((row, index) => ({
+      id: `${index}:${row.url}`,
+      company: row.company,
+      title: row.title,
+      url: row.url,
+      status: isJobStatus(row.status) ? row.status : 'discovered',
+      discoveredAt: row.time,
+      updatedAt: row.time,
+    }))
+  } catch {
+    return []
+  }
 }
 
 function normalizeAgentState(state: string): AgentSession['state'] {
@@ -453,9 +690,57 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     }
   })
 
+  app.get('/api/resume/workflow', async (c) => {
+    try {
+      const service = new ResumeWorkflowService({
+        workspaceRoot,
+        configStatus: runtime.getConfigStatus(),
+        runtimeStatus: runtime.getRuntimeStatus?.(),
+        artifactStore,
+      })
+      const overview = await service.getOverview({
+        sessionId: c.req.query('sessionId') || undefined,
+      })
+      return c.json({ ok: true, overview })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/resume/artifacts', async (c) => {
+    try {
+      const limit = parsePositiveInt(c.req.query('limit'))
+      const service = new ResumeWorkflowService({
+        workspaceRoot,
+        configStatus: runtime.getConfigStatus(),
+        runtimeStatus: runtime.getRuntimeStatus?.(),
+        artifactStore,
+      })
+      const artifacts = await service.listArtifacts(limit)
+      return c.json({ ok: true, total: artifacts.length, artifacts })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
   app.get('/api/jobs', async (c) => {
     try {
-      return c.json(await jobs.listRows())
+      const records = await readJobsForApi(workspaceRoot, jobs)
+      const statuses = splitCsv(c.req.query('status')).filter(isJobStatus)
+      const company = c.req.query('company')?.trim()
+      const q = c.req.query('q')?.trim()
+      const changedSince = c.req.query('changedSince')?.trim()
+      const sortBy = parseJobSortField(c.req.query('sortBy'))
+      const order = parseSortOrder(c.req.query('order'))
+      const offset = parseNonNegativeInt(c.req.query('offset'), 0)
+      const limit = parsePositiveInt(c.req.query('limit'))
+      const filtered = sortJobRecords(
+        records.filter((record) => matchesJobQuery(record, { statuses, company, q, changedSince })),
+        sortBy,
+        order
+      )
+      const paged = limit ? filtered.slice(offset, offset + limit) : filtered.slice(offset)
+      return c.json(paged.map(toJobRow))
     } catch {
       return c.json([], 500)
     }
@@ -463,9 +748,103 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
 
   app.get('/api/stats', async (c) => {
     try {
-      return c.json(await jobs.getStats())
+      return c.json(buildJobsStats(await readJobsForApi(workspaceRoot, jobs)))
     } catch {
       return c.json({ total: 0, byStatus: {} })
+    }
+  })
+
+  app.get('/api/jobs/query', async (c) => {
+    try {
+      const records = await readJobsForApi(workspaceRoot, jobs)
+      const statuses = splitCsv(c.req.query('status')).filter(isJobStatus)
+      const company = c.req.query('company')?.trim()
+      const q = c.req.query('q')?.trim()
+      const changedSince = c.req.query('changedSince')?.trim()
+      const sortBy = parseJobSortField(c.req.query('sortBy'))
+      const order = parseSortOrder(c.req.query('order'))
+      const offset = parseNonNegativeInt(c.req.query('offset'), 0)
+      const limit = parsePositiveInt(c.req.query('limit')) ?? 50
+      const filtered = sortJobRecords(
+        records.filter((record) => matchesJobQuery(record, { statuses, company, q, changedSince })),
+        sortBy,
+        order
+      )
+      const paged = filtered.slice(offset, offset + limit)
+      return c.json({
+        ok: true,
+        total: filtered.length,
+        items: paged.map(toDetailedJob),
+        filters: {
+          status: statuses,
+          company: company || null,
+          q: q || null,
+          changedSince: changedSince || null,
+          sortBy,
+          order,
+        },
+        page: {
+          offset,
+          limit,
+          returned: paged.length,
+        },
+      })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/jobs/detail', async (c) => {
+    try {
+      const id = c.req.query('id')?.trim()
+      const url = c.req.query('url')?.trim()
+      if (!id && !url) {
+        return c.json({ ok: false, error: 'id or url is required' }, 400)
+      }
+
+      const record = (await readJobsForApi(workspaceRoot, jobs)).find((item) => (id ? item.id === id : item.url === url))
+      if (!record) {
+        return c.json({ ok: false, error: 'Job not found' }, 404)
+      }
+
+      return c.json({ ok: true, job: toDetailedJob(record) })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/jobs/stats', async (c) => {
+    try {
+      return c.json({ ok: true, stats: buildJobsStats(await readJobsForApi(workspaceRoot, jobs)) })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/jobs/changes', async (c) => {
+    try {
+      const records = await readJobsForApi(workspaceRoot, jobs)
+      const statuses = splitCsv(c.req.query('status')).filter(isJobStatus)
+      const changedSince = c.req.query('changedSince')?.trim()
+      const limit = parsePositiveInt(c.req.query('limit')) ?? 20
+      const items = sortJobRecords(
+        records.filter((record) => matchesJobQuery(record, { statuses, changedSince })),
+        'updatedAt',
+        'desc'
+      )
+        .slice(0, limit)
+        .map((record) => ({
+          ...toDetailedJob(record),
+          changedAt: record.updatedAt,
+        }))
+
+      return c.json({
+        ok: true,
+        total: items.length,
+        items,
+      })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
     }
   })
 
@@ -633,7 +1012,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     const mainAgent = runtime.getMainAgent()
     if (mainAgent) {
       mainAgent.submit('生成简历')
-      return c.json({ ok: true })
+      return c.json({ ok: true, workflow: '/api/resume/workflow', dispatch: 'main_agent' })
     }
 
     const factory = runtime.getFactory()
@@ -641,7 +1020,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
 
     const taskAgent = factory.createAgent({ persistent: false, profileName: 'resume' })
     taskAgent.run('生成简历').catch((err) => console.error('[Server] Resume build failed:', err))
-    return c.json({ ok: true })
+    return c.json({ ok: true, workflow: '/api/resume/workflow', dispatch: 'profile_agent' })
   })
 
   app.get('/api/resume/status', (c) => {
@@ -676,7 +1055,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     const mainAgent = runtime.getMainAgent()
     if (mainAgent) {
       mainAgent.submit(prompt)
-      return c.json({ ok: true, path: uploadedResumeRelPath })
+      return c.json({ ok: true, path: uploadedResumeRelPath, workflow: '/api/resume/workflow', dispatch: 'main_agent' })
     }
 
     const factory = runtime.getFactory()
@@ -684,7 +1063,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
 
     const taskAgent = factory.createAgent({ persistent: false, profileName: 'review' })
     taskAgent.run(prompt).catch((err) => console.error('[Server] Resume review failed:', err))
-    return c.json({ ok: true, path: uploadedResumeRelPath })
+    return c.json({ ok: true, path: uploadedResumeRelPath, workflow: '/api/resume/workflow', dispatch: 'profile_agent' })
   })
 
   app.post('/api/resume/upload', async (c) => {
@@ -733,6 +1112,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         name: file.name,
         size: file.size,
         type: file.type || 'application/pdf',
+        workflow: '/api/resume/workflow',
       })
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
@@ -754,7 +1134,13 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         return c.json({ ok: false, error: 'No valid updates provided' }, 400)
       }
 
-      const result = await jobs.updateStatuses(normalizedUpdates, { lockHolder: 'web-server' })
+      const result = await jobs.updateStatuses(normalizedUpdates, {
+        lockHolder: 'web-server',
+        mutation: {
+          source: 'manual',
+          actor: 'web-server',
+        },
+      })
       if (result.changed > 0) {
         eventBus.emit('job:updated', { company: 'system', title: 'jobs', status: 'updated' })
       }
@@ -775,7 +1161,13 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         return c.json({ ok: false, error: 'No valid urls provided' }, 400)
       }
 
-      const result = await jobs.deleteByUrls(urls, { lockHolder: 'web-server' })
+      const result = await jobs.deleteByUrls(urls, {
+        lockHolder: 'web-server',
+        mutation: {
+          source: 'manual',
+          actor: 'web-server',
+        },
+      })
       if (result.deleted > 0) {
         eventBus.emit('job:updated', { company: 'system', title: 'jobs', status: 'updated' })
       }
@@ -814,7 +1206,14 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
       const body = await c.req.json<{ content?: string }>()
       const content = typeof body.content === 'string' ? body.content : ''
       if (name === 'jobs.md') {
-        await jobs.importMarkdown(content, { lockHolder: 'web-server', mode: 'replace' })
+        await jobs.importMarkdown(content, {
+          lockHolder: 'web-server',
+          mode: 'replace',
+          mutation: {
+            source: 'manual',
+            actor: 'web-server',
+          },
+        })
       } else {
         const filePath = path.resolve(workspaceRoot, relPath)
         ensureFileExists(filePath)

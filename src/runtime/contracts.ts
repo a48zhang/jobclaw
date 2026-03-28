@@ -93,6 +93,23 @@ export interface UserFacts {
   sourceRefs: string[]
 }
 
+export type JobWriteSource = 'agent' | 'manual' | 'system'
+export type JobMutationOperation = 'created' | 'updated' | 'status_updated' | 'imported' | 'deleted'
+
+export interface JobMutationTrace {
+  source: JobWriteSource
+  actor: string
+  operation: JobMutationOperation
+  at: string
+  reason?: string
+}
+
+export interface JobTraceability {
+  revision: number
+  created: JobMutationTrace
+  lastUpdated: JobMutationTrace
+}
+
 export interface JobRecord {
   id: string
   company: string
@@ -103,6 +120,7 @@ export interface JobRecord {
   updatedAt: string
   fitSummary?: string
   notes?: string
+  trace?: JobTraceability
 }
 
 export type JobStatus = JobRecord['status']

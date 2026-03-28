@@ -1,8 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
-import { JobStore } from '../memory/jobStore.js'
-import { getJobsDataPath } from '../infra/workspace/paths.js'
+import { JobStore, type DeletedJobRecord, type JobMutationContext as StoreJobMutationContext } from '../memory/jobStore.js'
+import { ensureWorkspaceData, getJobsDataPath } from '../infra/workspace/paths.js'
 import { lockFile, unlockFile } from '../tools/lockFile.js'
-import type { JobRecord, JobStatus } from '../runtime/contracts.js'
+import type { JobRecord, JobStatus, JobWriteSource } from '../runtime/contracts.js'
 
 export interface JobViewRow {
   company: string
@@ -10,6 +10,8 @@ export interface JobViewRow {
   url: string
   status: string
   time: string
+  updatedAt: string
+  trace?: JobRecord['trace']
 }
 
 export interface JobUpsertInput {
@@ -25,7 +27,25 @@ export interface JobStatusUpdateInput {
   status: string
 }
 
+export interface JobMutationInput {
+  source?: JobWriteSource
+  actor?: string
+  reason?: string
+}
+
+interface JobMutationOptions {
+  lockHolder?: string
+  mutation?: JobMutationInput
+}
+
+interface LockedJobMutationResult<T> {
+  result: T
+  exportRecords?: JobRecord[]
+  markdownContent?: string
+}
+
 const DEFAULT_TIME = () => new Date().toISOString().split('T')[0]
+const DEFAULT_WRITE_SOURCE: JobWriteSource = 'system'
 const STATE_LOCK_PATH = 'state/jobs/jobs.json'
 
 export class JobsService {
@@ -59,43 +79,53 @@ export class JobsService {
 
   async upsert(
     input: JobUpsertInput,
-    options: { lockHolder?: string } = {}
+    options: JobMutationOptions = {}
   ): Promise<{ action: 'added' | 'updated' | 'skipped'; record?: JobRecord }> {
     const status = normalizeJobStatus(input.status)
     if (!status) {
       throw new Error(`Unsupported job status: ${input.status}`)
     }
 
-    return this.withStateLock(options.lockHolder, async () => {
-      const records = await this.store.list()
-      const existing = records.find((record) => record.url === input.url)
-      if (existing && existing.status === 'applied' && status === 'discovered') {
-        await this.store.exportToMarkdown()
-        return { action: 'skipped', record: existing }
-      }
+    return this.withLockedMutation<{ action: 'added' | 'updated' | 'skipped'; record?: JobRecord }>(
+      options,
+      async (mutation, currentRecords) => {
+        const existing = currentRecords.find((record) => record.url === input.url)
+        if (existing && existing.status === 'applied' && status === 'discovered') {
+          return {
+            result: { action: 'skipped', record: existing },
+            exportRecords: currentRecords,
+          }
+        }
 
-      const saved = await this.store.upsert({
-        id: existing?.id,
-        company: input.company,
-        title: input.title,
-        url: input.url,
-        status,
-        discoveredAt: existing?.discoveredAt ?? normalizeTime(input.time),
-      })
+        const saved = await this.store.upsert(
+          {
+            id: existing?.id,
+            company: input.company,
+            title: input.title,
+            url: input.url,
+            status,
+            discoveredAt: existing?.discoveredAt ?? normalizeTime(input.time),
+          },
+          mutation
+        )
 
-      await this.store.exportToMarkdown()
-      return {
-        action: existing ? 'updated' : 'added',
-        record: saved,
+        const nextRecords = await this.store.list()
+        return {
+          result: {
+            action: existing ? 'updated' : 'added',
+            record: saved,
+          },
+          exportRecords: nextRecords,
+        }
       }
-    })
+    )
   }
 
   async updateStatuses(
     updates: JobStatusUpdateInput[],
-    options: { lockHolder?: string } = {}
-  ): Promise<{ changed: number; requested: number; total: number }> {
-    return this.withStateLock(options.lockHolder, async () => {
+    options: JobMutationOptions = {}
+  ): Promise<{ changed: number; requested: number; total: number; updatedRecords: JobRecord[] }> {
+    return this.withLockedMutation(options, async (mutation) => {
       const normalized: Array<{ url: string; status: JobStatus }> = []
       for (const item of updates) {
         const url = item.url.trim()
@@ -104,40 +134,53 @@ export class JobsService {
         normalized.push({ url, status })
       }
 
-      const result = await this.store.updateStatuses(normalized)
-      await this.store.exportToMarkdown()
+      const result = await this.store.updateStatuses(normalized, mutation)
+      const nextRecords = await this.store.list()
       return {
-        changed: result.changed,
-        requested: updates.length,
-        total: result.total,
+        result: {
+          changed: result.changed,
+          requested: updates.length,
+          total: result.total,
+          updatedRecords: result.updatedRecords,
+        },
+        exportRecords: nextRecords,
       }
     })
   }
 
   async deleteByUrls(
     urls: string[],
-    options: { lockHolder?: string } = {}
-  ): Promise<{ deleted: number; requested: number; total: number }> {
-    return this.withStateLock(options.lockHolder, async () => {
+    options: JobMutationOptions = {}
+  ): Promise<{ deleted: number; requested: number; total: number; deletedRecords: DeletedJobRecord[] }> {
+    return this.withLockedMutation(options, async (mutation) => {
       const normalized = urls.map((url) => url.trim()).filter(Boolean)
-      const result = await this.store.deleteByUrls(normalized)
-      await this.store.exportToMarkdown()
+      const result = await this.store.deleteByUrls(normalized, mutation)
+      const nextRecords = await this.store.list()
       return {
-        deleted: result.deleted,
-        requested: normalized.length,
-        total: result.total,
+        result: {
+          deleted: result.deleted,
+          requested: normalized.length,
+          total: result.total,
+          deletedRecords: result.deletedRecords,
+        },
+        exportRecords: nextRecords,
       }
     })
   }
 
   async importMarkdown(
     content: string,
-    options: { lockHolder?: string; mode?: 'merge' | 'replace' } = {}
-  ): Promise<{ total: number }> {
-    return this.withStateLock(options.lockHolder, async () => {
-      const records = await this.store.importFromMarkdown(content, { mode: options.mode ?? 'replace' })
-      await this.writeMarkdownSource(content)
-      return { total: records.length }
+    options: JobMutationOptions & { mode?: 'merge' | 'replace' } = {}
+  ): Promise<{ total: number; records: JobRecord[] }> {
+    return this.withLockedMutation(options, async (mutation) => {
+      const records = await this.store.importFromMarkdown(content, {
+        mode: options.mode ?? 'replace',
+        mutation,
+      })
+      return {
+        result: { total: records.length, records },
+        markdownContent: content,
+      }
     })
   }
 
@@ -151,14 +194,47 @@ export class JobsService {
 
   async exportMarkdownView(options: { lockHolder?: string } = {}): Promise<string> {
     return this.withStateLock(options.lockHolder, async () => {
-      await this.store.exportToMarkdown()
+      const records = await this.store.list()
+      await this.store.exportToMarkdown({ preserveContent: await this.readMarkdownSource(), records })
       return this.readMarkdownSource()
     })
   }
 
+  private async withLockedMutation<T>(
+    options: JobMutationOptions,
+    run: (mutation: StoreJobMutationContext, currentRecords: JobRecord[]) => Promise<LockedJobMutationResult<T>>
+  ): Promise<T> {
+    return this.withStateLock(options.lockHolder, async (holder) => {
+      const beforeRecords = await this.store.list()
+      const beforeMarkdown = await this.readMarkdownSource()
+      const mutation = resolveMutationContext(options.mutation, holder)
+
+      try {
+        const outcome = await run(mutation, beforeRecords)
+        if (typeof outcome.markdownContent === 'string') {
+          await this.writeMarkdownSource(outcome.markdownContent)
+        } else {
+          await this.store.exportToMarkdown({
+            preserveContent: beforeMarkdown,
+            records: outcome.exportRecords ?? await this.store.list(),
+          })
+        }
+        return outcome.result
+      } catch (error) {
+        await this.restoreState(beforeRecords, beforeMarkdown)
+        throw error
+      }
+    })
+  }
+
+  private async restoreState(records: JobRecord[], markdown: string): Promise<void> {
+    await this.store.writeRecords(records)
+    await this.writeMarkdownSource(markdown)
+  }
+
   private async withStateLock<T>(
     lockHolder: string | undefined,
-    run: () => Promise<T>
+    run: (holder: string) => Promise<T>
   ): Promise<T> {
     // Ensure lock target exists because lockFile requires an existing file.
     await this.store.list()
@@ -166,7 +242,7 @@ export class JobsService {
     const holder = lockHolder?.trim() || this.defaultLockHolder
     await lockFile(STATE_LOCK_PATH, holder, this.workspaceRoot)
     try {
-      return await run()
+      return await run(holder)
     } finally {
       try {
         await unlockFile(STATE_LOCK_PATH, holder, this.workspaceRoot)
@@ -177,7 +253,18 @@ export class JobsService {
   }
 
   private async writeMarkdownSource(content: string): Promise<void> {
+    await ensureWorkspaceData(this.workspaceRoot)
     await writeFile(this.jobsDataPath, content, 'utf-8')
+  }
+}
+
+function resolveMutationContext(input: JobMutationInput | undefined, fallbackActor: string): StoreJobMutationContext {
+  const actor = input?.actor?.trim() || fallbackActor
+  const reason = input?.reason?.trim()
+  return {
+    source: input?.source ?? DEFAULT_WRITE_SOURCE,
+    actor,
+    reason: reason || undefined,
   }
 }
 
@@ -193,6 +280,8 @@ function toViewRow(record: JobRecord): JobViewRow {
     url: record.url,
     status: record.status,
     time: record.discoveredAt,
+    updatedAt: record.updatedAt,
+    trace: record.trace,
   }
 }
 

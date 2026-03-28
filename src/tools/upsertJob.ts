@@ -21,7 +21,13 @@ export async function upsertJob(
 
   try {
     const jobs = new JobsService(workspaceRoot, agentName)
-    const result = await jobs.upsert(args, { lockHolder: agentName })
+    const result = await jobs.upsert(args, {
+      lockHolder: agentName,
+      mutation: {
+        source: 'agent',
+        actor: agentName,
+      },
+    })
 
     if (result.action !== 'skipped' && result.record) {
       eventBus.emit('job:updated', {

@@ -1,4 +1,10 @@
-import type { JobRecord } from '../runtime/contracts.js'
+import type {
+  JobMutationOperation,
+  JobMutationTrace,
+  JobRecord,
+  JobTraceability,
+  JobWriteSource,
+} from '../runtime/contracts.js'
 import { JsonFileStore } from '../infra/store/json-store.js'
 import { getJobsStatePath, getJobsDataPath, ensureWorkspaceData } from '../infra/workspace/paths.js'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -6,7 +12,21 @@ import * as crypto from 'node:crypto'
 
 const JOBS_HEADER = '| 公司 | 职位 | 链接 | 状态 | 时间 |'
 const JOBS_DIVIDER = '| --- | --- | --- | --- | --- |'
+const LEGACY_TRACE_ACTOR = 'jobs-legacy'
+
 type JobStatus = JobRecord['status']
+
+export interface JobMutationContext {
+  source: JobWriteSource
+  actor: string
+  reason?: string
+  at?: string
+}
+
+export interface DeletedJobRecord {
+  record: JobRecord
+  trace: JobMutationTrace
+}
 
 export class JobStore {
   private store: JsonFileStore<JobRecord[]>
@@ -18,26 +38,37 @@ export class JobStore {
 
   async list(): Promise<JobRecord[]> {
     await this.ensureInitialized()
-    return this.store.read()
+    const records = await this.store.read()
+    return records.map((record) => normalizeStoredJobRecord(record))
   }
 
-  async upsert(job: Omit<JobRecord, 'id' | 'discoveredAt' | 'updatedAt'> & Partial<JobRecord>): Promise<JobRecord> {
+  async writeRecords(records: JobRecord[]): Promise<void> {
     await this.ensureInitialized()
-    const now = new Date().toISOString()
-    const existing = await this.store.read()
+    await this.store.write(records.map((record) => normalizeStoredJobRecord(record)))
+  }
+
+  async upsert(
+    job: Omit<JobRecord, 'id' | 'discoveredAt' | 'updatedAt' | 'trace'> & Partial<JobRecord>,
+    mutation: JobMutationContext
+  ): Promise<JobRecord> {
+    await this.ensureInitialized()
+    const now = mutation.at ?? new Date().toISOString()
+    const existing = await this.list()
 
     const matchIndex = existing.findIndex(
       (item) => (job.id && item.id === job.id) || (!job.id && job.url && item.url === job.url)
     )
 
     if (matchIndex >= 0) {
+      const current = existing[matchIndex]
       const updated: JobRecord = {
-        ...existing[matchIndex],
+        ...current,
         ...job,
         updatedAt: now,
+        trace: advanceTraceability(current.trace, mutation, 'updated', now),
       }
       existing[matchIndex] = updated
-      await this.store.write(existing)
+      await this.writeRecords(existing)
       return updated
     }
 
@@ -51,18 +82,23 @@ export class JobStore {
       updatedAt: now,
       fitSummary: job.fitSummary,
       notes: job.notes,
+      trace: createInitialTraceability(mutation, 'created', now),
     }
     existing.push(newRecord)
-    await this.store.write(existing)
+    await this.writeRecords(existing)
     return newRecord
   }
 
-  async updateStatuses(updates: Array<{ url: string; status: JobStatus }>): Promise<{ changed: number; total: number }> {
+  async updateStatuses(
+    updates: Array<{ url: string; status: JobStatus }>,
+    mutation: JobMutationContext
+  ): Promise<{ changed: number; total: number; updatedRecords: JobRecord[] }> {
     await this.ensureInitialized()
-    const existing = await this.store.read()
+    const existing = await this.list()
     const statusByUrl = new Map(updates.map((item) => [item.url, item.status]))
+    const updatedRecords: JobRecord[] = []
     let changed = 0
-    const now = new Date().toISOString()
+    const now = mutation.at ?? new Date().toISOString()
 
     const next = existing.map((record) => {
       const status = statusByUrl.get(record.url)
@@ -70,36 +106,53 @@ export class JobStore {
         return record
       }
       changed += 1
-      return {
+      const updatedRecord: JobRecord = {
         ...record,
         status,
         updatedAt: now,
+        trace: advanceTraceability(record.trace, mutation, 'status_updated', now),
       }
+      updatedRecords.push(updatedRecord)
+      return updatedRecord
     })
 
     if (changed > 0) {
-      await this.store.write(next)
+      await this.writeRecords(next)
     }
 
-    return { changed, total: next.length }
+    return { changed, total: next.length, updatedRecords }
   }
 
-  async deleteByUrls(urls: string[]): Promise<{ deleted: number; total: number }> {
+  async deleteByUrls(
+    urls: string[],
+    mutation: JobMutationContext
+  ): Promise<{ deleted: number; total: number; deletedRecords: DeletedJobRecord[] }> {
     await this.ensureInitialized()
-    const existing = await this.store.read()
+    const existing = await this.list()
     const urlSet = new Set(urls)
-    const next = existing.filter((record) => !urlSet.has(record.url))
+    const now = mutation.at ?? new Date().toISOString()
+    const deletedRecords: DeletedJobRecord[] = []
+    const next = existing.filter((record) => {
+      if (!urlSet.has(record.url)) {
+        return true
+      }
+      deletedRecords.push({
+        record,
+        trace: createTrace(mutation, 'deleted', now),
+      })
+      return false
+    })
     const deleted = existing.length - next.length
 
     if (deleted > 0) {
-      await this.store.write(next)
+      await this.writeRecords(next)
     }
 
-    return { deleted, total: next.length }
+    return { deleted, total: next.length, deletedRecords }
   }
 
-  async exportToMarkdown(options: { preserveContent?: string } = {}): Promise<void> {
-    const records = await this.list()
+  async exportToMarkdown(options: { preserveContent?: string; records?: JobRecord[] } = {}): Promise<void> {
+    const records = (options.records ?? await this.list()).map((record) => normalizeStoredJobRecord(record))
     await ensureWorkspaceData(this.workspaceRoot)
     const preservedRows = extractPreservedMarkdownRows(options.preserveContent ?? await this.readMarkdownSource())
     const markdownLines = [
@@ -114,28 +167,29 @@ export class JobStore {
     await this.writeMarkdown(markdownLines.join('\n'))
   }
 
-  private async writeMarkdown(content: string): Promise<void> {
-    await ensureWorkspaceData(this.workspaceRoot)
-    await writeFile(getJobsDataPath(this.workspaceRoot), content, 'utf-8')
-  }
-
   async importFromMarkdown(
     content: string,
-    options: { mode?: 'merge' | 'replace' } = {}
+    options: { mode?: 'merge' | 'replace'; mutation?: JobMutationContext } = {}
   ): Promise<JobRecord[]> {
     await this.ensureInitialized()
-    const records = parseJobsMarkdown(content)
+    const mutation = options.mutation ?? defaultMutationContext('system', 'jobs-import')
+    const records = parseJobsMarkdown(content, mutation)
     if (options.mode === 'merge') {
-      const stored = await this.store.read()
+      const stored = await this.list()
       const merged = mergeImportedJobs(stored, records)
-      await this.store.write(merged)
+      await this.writeRecords(merged)
       return merged
     }
 
-    const stored = await this.store.read()
+    const stored = await this.list()
     const replaced = replaceImportedJobs(stored, records)
-    await this.store.write(replaced)
+    await this.writeRecords(replaced)
     return replaced
+  }
+
+  private async writeMarkdown(content: string): Promise<void> {
+    await ensureWorkspaceData(this.workspaceRoot)
+    await writeFile(getJobsDataPath(this.workspaceRoot), content, 'utf-8')
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -146,7 +200,7 @@ export class JobStore {
   }
 
   private async bootstrapFromMarkdownIfNeeded(): Promise<void> {
-    const current = await this.store.read()
+    const current = (await this.store.read()).map((record) => normalizeStoredJobRecord(record))
     if (current.length > 0) {
       return
     }
@@ -156,7 +210,7 @@ export class JobStore {
       return
     }
 
-    const imported = parseJobsMarkdown(content)
+    const imported = parseJobsMarkdown(content, defaultMutationContext('system', 'jobs-bootstrap'))
     if (imported.length === 0) {
       return
     }
@@ -173,7 +227,7 @@ export class JobStore {
   }
 }
 
-function parseJobsMarkdown(content: string): JobRecord[] {
+function parseJobsMarkdown(content: string, mutation: JobMutationContext): JobRecord[] {
   const lines = content.split(/\r?\n/)
   const rows = lines.slice(2).filter((line) => line.trim().startsWith('|'))
   const parsed: JobRecord[] = []
@@ -184,40 +238,44 @@ function parseJobsMarkdown(content: string): JobRecord[] {
     if (!company || !title || !url) continue
     const status = normalizeStatus(statusText)
     if (!status) continue
+    const timestamp = timeText || mutation.at || new Date().toISOString()
     parsed.push({
       id: crypto.createHash('md5').update(`${company}|${title}|${url}`).digest('hex'),
       company,
       title,
       url,
       status,
-      discoveredAt: timeText || new Date().toISOString(),
-      updatedAt: timeText || new Date().toISOString(),
+      discoveredAt: timestamp,
+      updatedAt: timestamp,
+      trace: createInitialTraceability({ ...mutation, at: timestamp }, 'imported', timestamp),
     })
   }
   return parsed
 }
 
 function replaceImportedJobs(existing: JobRecord[], incoming: JobRecord[]): JobRecord[] {
-  const existingByUrl = new Map(existing.map((record) => [record.url, record]))
+  const existingByUrl = new Map(existing.map((record) => [record.url, normalizeStoredJobRecord(record)]))
   return incoming.map((record) => {
     const stored = existingByUrl.get(record.url)
     if (!stored) {
-      return record
+      return normalizeStoredJobRecord(record)
     }
+    const importTrace = record.trace?.lastUpdated ?? createTrace(defaultMutationContext('system', 'jobs-import'), 'imported', record.updatedAt)
     return {
       ...stored,
       ...record,
       id: stored.id,
       fitSummary: stored.fitSummary,
       notes: stored.notes,
+      trace: advanceTraceability(stored.trace, mutationContextFromTrace(importTrace), 'imported', record.updatedAt),
     }
   })
 }
 
 function mergeImportedJobs(existing: JobRecord[], incoming: JobRecord[]): JobRecord[] {
-  const mergedByUrl = new Map(existing.map((record) => [record.url, record]))
+  const mergedByUrl = new Map(existing.map((record) => [record.url, normalizeStoredJobRecord(record)]))
   for (const record of replaceImportedJobs(existing, incoming)) {
-    mergedByUrl.set(record.url, record)
+    mergedByUrl.set(record.url, normalizeStoredJobRecord(record))
   }
   return Array.from(mergedByUrl.values())
 }
@@ -256,4 +314,110 @@ function extractPreservedMarkdownRows(content: string): string[] {
     if (!company || !title || !url) return true
     return !normalizeStatus(statusText)
   })
+}
+
+function normalizeStoredJobRecord(record: JobRecord): JobRecord {
+  const discoveredAt = normalizeTimestamp(record.discoveredAt)
+  const updatedAt = normalizeTimestamp(record.updatedAt || discoveredAt)
+  const legacyCreated = createTrace(defaultMutationContext('system', LEGACY_TRACE_ACTOR), 'imported', discoveredAt)
+  const legacyUpdated = createTrace(defaultMutationContext('system', LEGACY_TRACE_ACTOR), 'updated', updatedAt)
+  const trace = normalizeTraceability(record.trace, legacyCreated, legacyUpdated)
+
+  return {
+    ...record,
+    discoveredAt,
+    updatedAt,
+    trace,
+  }
+}
+
+function normalizeTraceability(
+  trace: JobRecord['trace'],
+  fallbackCreated: JobMutationTrace,
+  fallbackLastUpdated: JobMutationTrace
+): JobTraceability {
+  const created = normalizeTrace(trace?.created, fallbackCreated)
+  const lastUpdated = normalizeTrace(trace?.lastUpdated, fallbackLastUpdated)
+  return {
+    revision: Math.max(trace?.revision ?? 1, 1),
+    created,
+    lastUpdated,
+  }
+}
+
+function normalizeTrace(trace: JobMutationTrace | undefined, fallback: JobMutationTrace): JobMutationTrace {
+  if (!trace) {
+    return fallback
+  }
+  return {
+    source: trace.source ?? fallback.source,
+    actor: trace.actor?.trim() || fallback.actor,
+    operation: trace.operation ?? fallback.operation,
+    at: normalizeTimestamp(trace.at || fallback.at),
+    reason: trace.reason?.trim() || fallback.reason,
+  }
+}
+
+function createInitialTraceability(
+  mutation: JobMutationContext,
+  operation: Extract<JobMutationOperation, 'created' | 'imported'>,
+  at: string
+): JobTraceability {
+  const trace = createTrace(mutation, operation, at)
+  return {
+    revision: 1,
+    created: trace,
+    lastUpdated: trace,
+  }
+}
+
+function advanceTraceability(
+  current: JobRecord['trace'],
+  mutation: JobMutationContext,
+  operation: Exclude<JobMutationOperation, 'created' | 'deleted'>,
+  at: string
+): JobTraceability {
+  const normalized = normalizeTraceability(
+    current,
+    createTrace(defaultMutationContext('system', LEGACY_TRACE_ACTOR), 'imported', at),
+    createTrace(defaultMutationContext('system', LEGACY_TRACE_ACTOR), 'updated', at)
+  )
+
+  return {
+    revision: normalized.revision + 1,
+    created: normalized.created,
+    lastUpdated: createTrace(mutation, operation, at),
+  }
+}
+
+function createTrace(
+  mutation: JobMutationContext,
+  operation: JobMutationOperation,
+  at: string
+): JobMutationTrace {
+  return {
+    source: mutation.source,
+    actor: mutation.actor,
+    operation,
+    at: normalizeTimestamp(at),
+    reason: mutation.reason?.trim() || undefined,
+  }
+}
+
+function mutationContextFromTrace(trace: JobMutationTrace): JobMutationContext {
+  return {
+    source: trace.source,
+    actor: trace.actor,
+    reason: trace.reason,
+    at: trace.at,
+  }
+}
+
+function defaultMutationContext(source: JobWriteSource, actor: string): JobMutationContext {
+  return { source, actor }
+}
+
+function normalizeTimestamp(value?: string): string {
+  const trimmed = value?.trim()
+  return trimmed || new Date().toISOString()
 }
