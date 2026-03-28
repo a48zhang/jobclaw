@@ -298,6 +298,8 @@ describe('/api/settings', () => {
       connected: false,
       message: 'MCP 连接失败: timeout',
     })
+    expect((json as any).status.setup).toBeTruthy()
+    expect((json as any).status.capabilities.mcp).toBeTruthy()
   })
 })
 
@@ -399,6 +401,113 @@ describe('/api/runtime/*', () => {
     expect(interventionJson.ok).toBe(true)
     expect(interventionJson.interventions.map((record) => record.id)).toEqual(['ivr-1'])
   })
+
+  test('returns unified runtime tasks and results from structured stores', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-runtime-tasks-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'session'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'conversation'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'delegation'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'interventions'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'output'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'data', 'uploads'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'session', 'main.json'),
+      JSON.stringify({
+        id: 'main',
+        agentName: 'main',
+        profile: 'main',
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:10.000Z',
+        state: 'running',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'conversation', 'main.json'),
+      JSON.stringify({
+        sessionId: 'main',
+        summary: 'SYSTEM_SUMMARY: 正在处理搜索。',
+        recentMessages: [
+          { role: 'user', content: '帮我找工作', timestamp: '2026-03-27T00:00:00.000Z' },
+          { role: 'assistant', content: '开始搜索。', timestamp: '2026-03-27T00:00:05.000Z' },
+        ],
+        lastActivityAt: '2026-03-27T00:00:05.000Z',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'delegation', 'run-1.json'),
+      JSON.stringify({
+        id: 'run-1',
+        parentSessionId: 'main',
+        profile: 'search',
+        state: 'failed',
+        instruction: 'search jobs',
+        createdAt: '2026-03-27T00:00:01.000Z',
+        updatedAt: '2026-03-27T00:00:11.000Z',
+        error: 'network timeout',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'interventions', 'ivr-1.json'),
+      JSON.stringify({
+        id: 'ivr-1',
+        ownerType: 'session',
+        ownerId: 'main',
+        kind: 'text',
+        prompt: 'Need confirmation',
+        status: 'pending',
+        createdAt: '2026-03-27T00:00:02.000Z',
+        updatedAt: '2026-03-27T00:00:12.000Z',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(path.join(workspace, 'output', 'resume.pdf'), 'pdf')
+    fs.writeFileSync(path.join(workspace, 'data', 'uploads', 'resume-upload.pdf'), 'upload')
+
+    const app = createApp(workspace)
+
+    try {
+      const [tasksRes, resultsRes] = await Promise.all([
+        app.request('/api/runtime/tasks?sessionId=main'),
+        app.request('/api/runtime/results?sessionId=main'),
+      ])
+      expect(tasksRes.status).toBe(200)
+      expect(resultsRes.status).toBe(200)
+
+      const tasksJson = await tasksRes.json() as {
+        ok: boolean
+        tasks: Array<{ id: string; kind: string; state: string }>
+      }
+      const resultsJson = await resultsRes.json() as {
+        ok: boolean
+        resultSummary: { totalTasks: number }
+        recentFailures: Array<{ id: string }>
+        recentArtifacts: Array<{ path: string }>
+      }
+
+      expect(tasksJson.ok).toBe(true)
+      expect(tasksJson.tasks.map((task) => task.id)).toEqual([
+        'delegation:run-1',
+        'session:main',
+      ])
+      expect(tasksJson.tasks.map((task) => task.state)).toEqual([
+        'failed',
+        'waiting',
+      ])
+
+      expect(resultsJson.ok).toBe(true)
+      expect(resultsJson.resultSummary.totalTasks).toBe(2)
+      expect(resultsJson.recentFailures.map((task) => task.id)).toContain('delegation:run-1')
+      expect(resultsJson.recentArtifacts.map((item) => item.path)).toEqual([
+        'data/uploads/resume-upload.pdf',
+        'output/resume.pdf',
+      ])
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('/api/settings', () => {
@@ -447,6 +556,73 @@ describe('/api/settings', () => {
     expect(json.status.mcp.enabled).toBe(false)
     expect(json.status.mcp.connected).toBe(false)
     expect(json.status.mcp.message).toContain('MCP disabled')
+  })
+
+  test('returns setup summary and capability hints for frontend onboarding', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-settings-summary-'))
+    fs.mkdirSync(path.join(workspace, 'data'), { recursive: true })
+    fs.writeFileSync(path.join(workspace, 'data', 'targets.md'), '# 监测目标\n', 'utf-8')
+    fs.writeFileSync(path.join(workspace, 'data', 'userinfo.md'), '# 个人信息\n- 姓名：\n', 'utf-8')
+
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: false,
+        missingFields: ['API_KEY', 'MODEL_ID', 'BASE_URL'],
+        config: {
+          API_KEY: '',
+          MODEL_ID: '',
+          LIGHT_MODEL_ID: '',
+          BASE_URL: '',
+          SERVER_PORT: 3000,
+        },
+      }),
+      getRuntimeStatus: () => ({
+        mcp: {
+          enabled: true,
+          connected: false,
+          message: 'MCP unavailable',
+        },
+      }),
+      reloadFromConfig: async () => {},
+    }
+
+    try {
+      const app = createApp(workspace, runtime as any)
+      const res = await app.request('/api/runtime/capabilities')
+
+      expect(res.status).toBe(200)
+      const json = await res.json() as {
+        ok: boolean
+        summary: {
+          ready: boolean
+          mode: string
+          missingFields: string[]
+          nextSteps: string[]
+          config: { ready: boolean }
+          workspace: {
+            targets: { area: string; ready: boolean }
+            userinfo: { area: string; ready: boolean }
+          }
+          capabilities: {
+            mcp: { available: boolean }
+            browser: { available: boolean }
+          }
+        }
+      }
+
+      expect(json.ok).toBe(true)
+      expect(json.summary.ready).toBe(false)
+      expect(json.summary.mode).toBe('setup_required')
+      expect(json.summary.missingFields).toEqual(['API_KEY', 'MODEL_ID', 'BASE_URL'])
+      expect(json.summary.workspace.targets.ready).toBe(false)
+      expect(json.summary.workspace.userinfo.ready).toBe(false)
+      expect(json.summary.capabilities.browser.available).toBe(false)
+      expect(json.summary.nextSteps.length).toBeGreaterThan(0)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
   })
 })
 

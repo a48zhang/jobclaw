@@ -7,6 +7,7 @@ import * as path from 'node:path'
 import { eventBus, mapRuntimeEventToLegacyEvent } from '../eventBus.js'
 import type { EventBusMap } from '../eventBus.js'
 import { JobsService } from '../domain/jobs-service.js'
+import { ArtifactStore } from '../memory/artifactStore.js'
 import { ConversationStore } from '../memory/conversationStore.js'
 import { DelegationStore } from '../memory/delegationStore.js'
 import { InterventionStore } from '../memory/interventionStore.js'
@@ -18,6 +19,8 @@ import type { Config, ConfigStatus } from '../config.js'
 import { getConfigStatus as readConfigStatus, readConfigFile, saveConfigFile } from '../config.js'
 import type { MCPClientStatus } from '../mcp.js'
 import type { AgentSession, DelegatedRun, EventStream, InterventionRecord, JobStatus, RuntimeEvent } from '../runtime/contracts.js'
+import { buildSetupCapabilitySummary } from '../runtime/setup-summary.js'
+import { RuntimeTaskResultsService } from '../runtime/task-results-service.js'
 
 const agentRegistry = new Map<string, BaseAgent>()
 
@@ -279,12 +282,17 @@ function attachRuntimeBroadcast(runtime: ServerRuntime): () => void {
   })
 }
 
-function buildConfigPayload(
+async function buildConfigPayload(
   workspaceRoot: string,
   status: ConfigStatus,
   runtimeStatus?: RuntimeStatusPayload
 ) {
   const stored = readConfigFile(workspaceRoot)
+  const setup = await buildSetupCapabilitySummary({
+    workspaceRoot,
+    configStatus: status,
+    runtimeStatus,
+  })
   return {
     ok: true,
     settings: {
@@ -297,6 +305,8 @@ function buildConfigPayload(
     status: {
       ready: status.ready,
       missingFields: status.missingFields,
+      setup,
+      capabilities: setup.capabilities,
       mcp: runtimeStatus?.mcp ?? {
         enabled: process.env.MCP_DISABLED !== '1',
         connected: false,
@@ -345,12 +355,13 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
   const sessionStore = new SessionStore(workspaceRoot)
   const delegationStore = new DelegationStore(workspaceRoot)
   const interventionStore = new InterventionStore(workspaceRoot)
+  const artifactStore = new ArtifactStore(workspaceRoot)
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
   const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
 
-  app.get('/api/settings', (c) => {
+  app.get('/api/settings', async (c) => {
     const status = runtime.getConfigStatus()
-    return c.json(buildConfigPayload(workspaceRoot, status, runtime.getRuntimeStatus?.()))
+    return c.json(await buildConfigPayload(workspaceRoot, status, runtime.getRuntimeStatus?.()))
   })
 
   app.post('/api/settings', async (c) => {
@@ -366,7 +377,77 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
 
       saveConfigFile(workspaceRoot, updates)
       await runtime.reloadFromConfig()
-      return c.json(buildConfigPayload(workspaceRoot, runtime.getConfigStatus(), runtime.getRuntimeStatus?.()))
+      return c.json(await buildConfigPayload(workspaceRoot, runtime.getConfigStatus(), runtime.getRuntimeStatus?.()))
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/runtime/capabilities', async (c) => {
+    try {
+      const status = runtime.getConfigStatus()
+      const collected = await buildSetupCapabilitySummary({
+        workspaceRoot,
+        configStatus: status,
+        runtimeStatus: runtime.getRuntimeStatus?.(),
+      })
+      const summary = {
+        ready: collected.overall.ready,
+        mode: collected.overall.mode,
+        message: collected.overall.message,
+        missingFields: collected.config.missingFields,
+        nextSteps: collected.recoverySuggestions,
+        workspace: collected.workspace,
+        capabilities: collected.capabilities,
+        issues: collected.issues,
+      }
+      return c.json({ ok: true, summary })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/runtime/tasks', async (c) => {
+    try {
+      const sessionId = c.req.query('sessionId') || undefined
+      const service = new RuntimeTaskResultsService(workspaceRoot)
+      const snapshot = await service.aggregate({ sessionId })
+      const tasks = snapshot.tasks.map((task) => ({
+        id: `${task.kind}:${task.id}`,
+        kind: task.kind,
+        profile: task.profile,
+        title: task.title,
+        state: task.lifecycle,
+        rawState: task.state,
+        sessionId: task.sessionId,
+        agentName: task.agentName,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+        summary: task.summary,
+        resultSummary: task.resultSummary,
+        error: task.error,
+      }))
+      return c.json({ ok: true, tasks })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/runtime/results', async (c) => {
+    try {
+      const sessionId = c.req.query('sessionId') || undefined
+      const service = new RuntimeTaskResultsService(workspaceRoot)
+      const snapshot = await service.aggregate({ sessionId })
+      return c.json({
+        ok: true,
+        generatedAt: snapshot.generatedAt,
+        resultSummary: snapshot.resultSummary,
+        recentFailures: snapshot.recentFailures.map((failure) => ({
+          ...failure,
+          id: `${failure.kind}:${failure.id}`,
+        })),
+        recentArtifacts: snapshot.recentArtifacts,
+      })
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }
@@ -638,6 +719,13 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
       } finally {
         await unlockFile(uploadedResumeRelPath, 'web-server', workspaceRoot)
       }
+
+      await artifactStore.recordGenerated(file.name, 'uploaded', uploadedResumeRelPath, {
+        mimeType: file.type || 'application/pdf',
+        size: file.size,
+        ownerId: 'main',
+        sessionId: 'main',
+      })
 
       return c.json({
         ok: true,
