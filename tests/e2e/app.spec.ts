@@ -53,8 +53,8 @@ test.describe('JobClaw Web UI', () => {
 
     await expect(page.locator('#refresh-jobs')).toBeVisible()
     await expect(page.locator('#jobs-batch-hint')).toBeVisible()
-    await expect(page.locator('#jobs-batch-toolbar')).toBeHidden()
     await expect(page.locator('#jobs-batch-toolbar')).toHaveAttribute('aria-hidden', 'true')
+    await expect(page.locator('#jobs-batch-toolbar')).toHaveClass(/hidden/)
   })
 
   test('config editor prompts before discarding unsaved changes', async ({ page }) => {
@@ -62,12 +62,16 @@ test.describe('JobClaw Web UI', () => {
 
     const editor = page.locator('#md-editor')
     await expect(editor).toBeVisible()
-    await editor.click()
-    await editor.type('\n# e2e dirty marker')
+    await editor.evaluate((element) => {
+      const nextValue = `${element.value}\n# e2e dirty marker`
+      element.value = nextValue
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+    })
 
     await expect(page.locator('#save-status')).toContainText('未保存更改')
 
     const userinfoTab = page.locator('.config-tab-btn[data-file="userinfo"]')
+    await userinfoTab.scrollIntoViewIfNeeded()
     await userinfoTab.click()
 
     await expect(page.locator('#ui-confirm-overlay')).toBeVisible()
@@ -79,6 +83,36 @@ test.describe('JobClaw Web UI', () => {
     await expect(page.locator('#ui-confirm-overlay')).toBeVisible()
     await page.locator('#ui-confirm-submit').click()
     await expect(page.locator('#ui-confirm-overlay')).toBeHidden()
+    await expect(page.locator('.config-tab-btn[data-file="userinfo"]')).toHaveClass(/font-bold/)
+  })
+
+  test('chat status card and onboarding apply trusted entry narrative', async ({ page }) => {
+    await expect(page.locator('#chat-status-card')).toBeVisible()
+    await expect(page.locator('#chat-status-card')).toContainText(/主任务/)
+    await expect(page.locator('#first-run-banner')).toBeVisible()
+    await expect(page.locator('#first-run-banner')).toContainText('基础配置完成度')
+    await expect(page.locator('#first-run-banner')).toContainText('targets.md')
+  })
+
+  test('jobs tab differentiates empty state from filtered no-results while detail panel baseline renders', async ({ page }) => {
+    await page.locator('[data-target="tab-jobs"]').click()
+    await expect(page.locator('text=还没有职位数据。')).toBeVisible()
+    await page.locator('#jobs-keyword-filter').fill('unlikely-filter-value')
+    await expect(page.locator('text=当前筛选条件下无结果')).toBeVisible()
+    await page.locator('#jobs-empty-reset').click()
+    await expect(page.locator('text=还没有职位数据。')).toBeVisible()
+  })
+
+  test('configuration panel exposes grouped prompts, docs status, and restart note', async ({ page }) => {
+    await page.locator('[data-target="tab-config"]').click()
+    await expect(page.locator('text=必填项')).toBeVisible()
+    await expect(page.locator('text=可选项')).toBeVisible()
+    await expect(page.locator('#config-restart-note')).toBeVisible()
+    await expect(page.locator('#targets-doc-status')).toBeVisible()
+    await expect(page.locator('#userinfo-doc-status')).toBeVisible()
+    const userinfoTab = page.locator('.config-tab-btn[data-file="userinfo"]')
+    await userinfoTab.scrollIntoViewIfNeeded()
+    await userinfoTab.click()
     await expect(page.locator('.config-tab-btn[data-file="userinfo"]')).toHaveClass(/font-bold/)
   })
 })

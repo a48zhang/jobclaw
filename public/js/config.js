@@ -7,6 +7,47 @@ const configEditorRuntime = {
   clearStatusTimer: null,
 }
 
+const CONFIG_DOC_PATTERNS = {
+  targets: ['示例公司', '每行一条目标'],
+  userinfo: ['姓名：', '求职意向'],
+}
+
+function isDocReady(name, content) {
+  const text = String(content || '').trim()
+  if (!text) return false
+  const patterns = CONFIG_DOC_PATTERNS[name]
+  if (!Array.isArray(patterns)) return false
+  return !patterns.some((part) => text.includes(part))
+}
+
+function setDocStatusLabel(name, ready) {
+  const label = document.getElementById(`${name}-doc-status`)
+  if (!label) return
+  label.textContent = ready ? '已完成' : '待补全'
+  label.classList.toggle('text-emerald-300', ready)
+  label.classList.toggle('text-amber-300', !ready)
+}
+
+function syncDocStatus(name, content) {
+  const ready = isDocReady(name, content)
+  setDocStatusLabel(name, ready)
+  if (name === 'targets') {
+    window.appState.targetsReady = ready
+  }
+  if (name === 'userinfo') {
+    window.appState.userinfoReady = ready
+  }
+}
+
+function reapplyOnboardingState() {
+  if (typeof window.applyOnboardingState !== 'function') return
+  window.applyOnboardingState({
+    baseReady: Boolean(window.appState.appReady),
+    targetsComplete: window.appState.targetsReady,
+    userinfoComplete: window.appState.userinfoReady,
+  })
+}
+
 function setSaveStatus(message, tone = 'neutral', autoClearMs = 0) {
   const status = document.getElementById('save-status')
   if (!status) return
@@ -84,6 +125,8 @@ function setEditorLoadedState(fileName, content) {
     saving: false,
   }
   setSaveStatus('', 'neutral')
+  syncDocStatus(fileName, content)
+  reapplyOnboardingState()
 }
 
 async function confirmDiscardUnsavedChanges(nextFileName) {
@@ -126,6 +169,7 @@ function renderSetupSummary() {
     summary.className = 'text-sm text-emerald-300'
     missing.textContent = '当前模型配置已生效。若修改端口，需要重启服务。'
     missing.className = 'text-xs text-slate-400 mt-2'
+    reapplyOnboardingState()
     return
   }
 
@@ -133,6 +177,7 @@ function renderSetupSummary() {
   summary.className = 'text-sm text-amber-300'
   missing.textContent = `缺少：${window.appState.missingFields.join(', ') || 'API_KEY, MODEL_ID, BASE_URL'}`
   missing.className = 'text-xs text-amber-200 mt-2'
+  reapplyOnboardingState()
 }
 
 function applyFeatureAvailability() {
@@ -262,7 +307,9 @@ document.getElementById('save-md').addEventListener('click', async () => {
       dirty: false,
       saving: false,
     }
+    syncDocStatus(window.appState.currentFile, content)
     setSaveStatus('✓ 保存成功', 'success', 3000)
+    reapplyOnboardingState()
   } catch (error) {
     window.appState.configEditor = { saving: false }
     syncEditorDirtyState({ showStatus: false })
@@ -305,6 +352,7 @@ document.getElementById('save-settings').addEventListener('click', async () => {
     window.appState.appReady = Boolean(json.status?.ready)
     window.appState.missingFields = json.status?.missingFields || []
     applyFeatureAvailability()
+    reapplyOnboardingState()
     status.textContent = window.appState.appReady ? '✓ 设置已保存并生效' : '✓ 设置已保存，请继续补全缺失项'
     status.className = window.appState.appReady ? 'text-sm text-green-400' : 'text-sm text-amber-300'
 

@@ -24,6 +24,10 @@ const jobBoardState = {
   donutSegments: [],
   donutGeometry: null,
   donutClickBound: false,
+  detail: {
+    panel: null,
+    activeKey: null,
+  },
 }
 
 function notify(type, message) {
@@ -159,6 +163,151 @@ function updateSelectionSummary(visibleKeys) {
   setBatchButtonsDisabled(selectedTotal === 0)
 }
 
+function ensureJobDetailPanel() {
+  if (jobBoardState.detail.panel) return jobBoardState.detail.panel
+  const tableContainer = document.querySelector('#tab-jobs .overflow-y-auto')
+  if (!tableContainer) return null
+  const panel = document.createElement('div')
+  panel.id = 'job-detail-panel'
+  panel.className =
+    'mt-4 rounded-xl border border-slate-700 bg-slate-900/80 p-4 text-sm text-slate-200 shadow-inner min-h-[150px]'
+  panel.innerHTML = `
+    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">职位详情</p>
+    <div id="job-detail-body" class="flex flex-col gap-3 text-slate-300">
+      <p>点击任意职位行查看公司、角色、状态、更新时间以及可点击的原始链接。</p>
+      <div class="flex flex-wrap gap-2 text-xs text-slate-400">
+        <span id="job-detail-status" class="rounded-full border border-slate-600 px-2 py-0.5">状态加载中</span>
+        <span id="job-detail-time">-</span>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-2 mt-3" id="job-detail-actions"></div>
+  `
+  tableContainer.insertAdjacentElement('afterend', panel)
+  jobBoardState.detail.panel = panel
+  return panel
+}
+
+function formatDetailValue(value) {
+  if (value === undefined || value === null || value === '') return '未提供'
+  return String(value)
+}
+
+function clearJobDetailPanel() {
+  jobBoardState.detail.activeKey = null
+  const panel = ensureJobDetailPanel()
+  if (!panel) return
+  const body = panel.querySelector('#job-detail-body')
+  const statusBadge = panel.querySelector('#job-detail-status')
+  const time = panel.querySelector('#job-detail-time')
+  const actions = panel.querySelector('#job-detail-actions')
+  if (body) {
+    body.innerHTML = '<p class="text-slate-400">当前没有可用职位，请先刷新或调整筛选。</p>'
+  }
+  if (statusBadge) statusBadge.textContent = '暂无状态'
+  if (time) time.textContent = '更新时间：-'
+  if (actions) actions.innerHTML = ''
+  document
+    .querySelectorAll('#job-tbody tr.job-row.selected')
+    .forEach((row) => row.classList.remove('selected', 'bg-slate-700/30'))
+}
+
+function highlightJobRow(key) {
+  document
+    .querySelectorAll('#job-tbody tr.job-row.selected')
+    .forEach((row) => row.classList.remove('selected', 'bg-slate-700/30'))
+  if (!key) return
+  const selectorValue =
+    typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(key)
+      : String(key).replace(/["\\\\#.:\\[\\]]/g, '\\\\$&')
+  const row = document.querySelector(`#job-tbody tr.job-row[data-job-key="${selectorValue}"]`)
+  if (row) row.classList.add('selected', 'bg-slate-700/30')
+}
+
+function updateJobDetailPanel(row) {
+  const panel = ensureJobDetailPanel()
+  if (!panel) return
+  const body = panel.querySelector('#job-detail-body')
+  const statusBadge = panel.querySelector('#job-detail-status')
+  const time = panel.querySelector('#job-detail-time')
+  const actions = panel.querySelector('#job-detail-actions')
+  if (!row) {
+    clearJobDetailPanel()
+    return
+  }
+  jobBoardState.detail.activeKey = row._key
+  if (body) {
+    body.innerHTML = ''
+
+    const companyEl = document.createElement('h3')
+    companyEl.className = 'text-base font-semibold text-slate-100'
+    companyEl.textContent = formatDetailValue(row.company)
+    body.appendChild(companyEl)
+
+    const titleEl = document.createElement('p')
+    titleEl.className = 'text-sm text-slate-300'
+    titleEl.textContent = formatDetailValue(row.title)
+    body.appendChild(titleEl)
+
+    const linkEl = document.createElement('p')
+    linkEl.className = 'text-xs text-slate-400 break-words'
+    const linkLabel = document.createElement('span')
+    linkLabel.textContent = '来源链接：'
+    linkEl.appendChild(linkLabel)
+    if (row.url) {
+      const linkAnchor = document.createElement('a')
+      linkAnchor.href = row.url
+      linkAnchor.target = '_blank'
+      linkAnchor.rel = 'noopener noreferrer'
+      linkAnchor.textContent = row.url
+      linkAnchor.className = 'text-blue-300 underline decoration-dashed'
+      linkEl.appendChild(linkAnchor)
+    } else {
+      const placeholder = document.createElement('span')
+      placeholder.textContent = '暂无'
+      linkEl.appendChild(placeholder)
+    }
+    body.appendChild(linkEl)
+
+    const extraNote = (row.description || row.notes || '').trim()
+    if (extraNote) {
+      const detailParagraph = document.createElement('p')
+      detailParagraph.className = 'text-[13px] text-slate-400 break-words'
+      detailParagraph.textContent = extraNote
+      body.appendChild(detailParagraph)
+    }
+  }
+  if (statusBadge) {
+    statusBadge.textContent = STATUS_LABELS[row.status] || row.status || '未知'
+  }
+  if (time) {
+    const parsed = Date.parse(row.time || '')
+    time.textContent =
+      Number.isFinite(parsed) ? `更新时间：${new Date(parsed).toLocaleString()}` : `更新时间：${row.time || '未知'}`
+  }
+  if (actions) {
+    actions.innerHTML = ''
+    const link = document.createElement('a')
+    const baseClass =
+      'text-xs rounded-md border border-slate-600 px-3 py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400'
+    if (row.url) {
+      link.href = row.url
+      link.target = '_blank'
+      link.rel = 'noopener noreferrer'
+      link.textContent = '打开职位原文'
+      link.className = `${baseClass} hover:border-blue-400 hover:text-blue-200`
+    } else {
+      link.href = 'javascript:void(0)'
+      link.textContent = '暂无链接'
+      link.className = `${baseClass} text-slate-500 border-slate-700 cursor-not-allowed`
+      link.setAttribute('aria-disabled', 'true')
+      link.tabIndex = -1
+    }
+    actions.appendChild(link)
+  }
+  highlightJobRow(row._key)
+}
+
 function ensureFilterControls() {
   if (jobBoardState.controlsMounted) return
 
@@ -230,14 +379,17 @@ function updateFilterSummary(total, visible) {
   const summary = document.getElementById('jobs-filter-summary')
   if (!summary) return
   if (!total) {
-    summary.textContent = '当前没有职位数据'
+    summary.textContent = '当前没有职位数据，请刷新或运行职位搜索任务后再回来查看'
     return
   }
+  const statusLabel = STATUS_LABELS[jobBoardState.filters.status] || '全部'
+  const keyword = (jobBoardState.filters.keyword || '').trim()
+  const filterSuffix = keyword ? ` + 关键词 "${keyword}"` : ''
   if (visible === total) {
-    summary.textContent = `共 ${total} 条`
+    summary.textContent = `共 ${total} 条（${statusLabel}${filterSuffix}）`
     return
   }
-  summary.textContent = `筛出 ${visible}/${total} 条`
+  summary.textContent = `筛出 ${visible}/${total} 条（${statusLabel}${filterSuffix}）`
 }
 
 function syncFilterInputs() {
@@ -311,12 +463,14 @@ function renderJobs() {
       <tr>
         <td colspan="6" class="py-8 text-center text-slate-400">
           <p class="text-sm">还没有职位数据。</p>
-          <p class="mt-1 text-xs text-slate-500">点击“刷新”或先运行职位搜索任务。</p>
+          <p class="mt-1 text-xs text-slate-500">点击“刷新”或先运行职位搜索任务后再回来查看。</p>
+          <p class="text-xs text-slate-400">建议先完善 targets.md，然后运行职位搜索获取职位列表。</p>
         </td>
       </tr>
     `
     updateSelectionSummary([])
     window.appState.selectedJobs = { rows: [], selectedRows: () => [], keys: () => [] }
+    clearJobDetailPanel()
     return
   }
 
@@ -331,6 +485,7 @@ function renderJobs() {
         </td>
       </tr>
     `
+    clearJobDetailPanel()
     document.getElementById('jobs-empty-reset')?.addEventListener('click', resetFilters)
     updateSelectionSummary([])
     window.appState.selectedJobs = { rows: sortedRows, selectedRows: () => getSelectedRows(), keys: () => [...jobBoardState.selectedKeys] }
@@ -338,7 +493,7 @@ function renderJobs() {
   }
 
   tbody.innerHTML = filteredRows.map((row) => `
-    <tr class="group transition-colors hover:bg-slate-700/30">
+    <tr class="job-row group transition-colors hover:bg-slate-700/30" data-job-key="${escHtml(row._key)}" tabindex="0">
       <td class="py-3 px-4">
         <input type="checkbox" class="job-select accent-blue-500" data-key="${escHtml(row._key)}" ${jobBoardState.selectedKeys.has(row._key) ? 'checked' : ''} />
       </td>
@@ -362,6 +517,41 @@ function renderJobs() {
     selectedRows: () => getSelectedRows(),
     keys: () => [...jobBoardState.selectedKeys],
   }
+  attachJobRowHandlers(filteredRows)
+}
+
+function attachJobRowHandlers(filteredRows) {
+  const tbody = document.getElementById('job-tbody')
+  if (!tbody) return
+  const rows = [...tbody.querySelectorAll('tr.job-row')]
+  rows.forEach((rowElement) => {
+    const activateRow = () => {
+      const key = rowElement.dataset.jobKey
+      if (!key) return
+      const record = jobBoardState.allRowsMap.get(key)
+      updateJobDetailPanel(record)
+    }
+    rowElement.tabIndex = 0
+    rowElement.onclick = activateRow
+    rowElement.onkeydown = (event) => {
+      if (document.activeElement !== rowElement) return
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        activateRow()
+      }
+    }
+  })
+
+  const activeKey = jobBoardState.detail.activeKey
+  if (activeKey) {
+    const activeRow = jobBoardState.allRowsMap.get(activeKey)
+    if (activeRow && filteredRows.some((entry) => entry._key === activeRow._key)) {
+      updateJobDetailPanel(activeRow)
+      return
+    }
+  }
+
+  updateJobDetailPanel(filteredRows[0])
 }
 
 function bindSelectionHandlers(visibleRows) {

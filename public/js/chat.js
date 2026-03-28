@@ -15,18 +15,198 @@ const CHAT_TASK_STATE = {
   FAILED: 'failed',
 }
 
+const CHAT_HINTS = [
+  { text: '/new 重新开始会话', tone: 'info' },
+  { text: '/clear 清空会话历史', tone: 'info' },
+  { text: 'run search 搜索目标职位', tone: 'info' },
+]
+
+const CHAT_STATE_METADATA = {
+  idle: {
+    label: '等待指令',
+    detail: '主 Agent 准备接收你的指令。',
+    pill: 'bg-slate-800 text-slate-300 border border-slate-700',
+  },
+  blocked: {
+    label: '功能受限',
+    detail: '请先完成基础设置，主任务才会继续。',
+    pill: 'bg-amber-900 text-amber-200 border border-amber-700',
+  },
+  submitting: {
+    label: '提交中',
+    detail: '消息正在提交，等待 Agent 响应。',
+    pill: 'bg-blue-900 text-blue-200 border border-blue-700',
+  },
+  queued: {
+    label: '排队中',
+    detail: '当前请求已入队，稍等片刻。',
+    pill: 'bg-blue-800 text-blue-100 border border-blue-600',
+  },
+  running: {
+    label: '执行中',
+    detail: 'Agent 正在执行任务，生成回复中。',
+    pill: 'bg-blue-900 text-blue-100 border border-blue-600',
+  },
+  completed: {
+    label: '已完成',
+    detail: 'Agent 已生成最新回复，可以继续提问。',
+    pill: 'bg-emerald-900 text-emerald-200 border border-emerald-600',
+  },
+  failed: {
+    label: '失败',
+    detail: '请求异常，请检查网络或重新发送。',
+    pill: 'bg-rose-900 text-rose-200 border border-rose-600',
+  },
+}
+
+const CHAT_INPUT_PLACEHOLDER = '试试“run search”保留主任务路径（Enter 发送，Shift+Enter 换行）'
+
+let chatStatusCard = null
+let chatStatusPill = null
+let chatStatusDetail = null
+let chatQueueNote = null
+
+function ensureChatStatusCard() {
+  if (chatStatusCard) return chatStatusCard
+  const container = document.querySelector('#tab-chat .bg-slate-800.rounded-xl')
+  if (!container) return null
+
+  const card = document.createElement('div')
+  card.id = 'chat-status-card'
+  card.className = 'mb-3 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-inner flex flex-col gap-3'
+
+  const header = document.createElement('div')
+  header.className = 'flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between'
+
+  const labelBlock = document.createElement('div')
+  const title = document.createElement('p')
+  title.className = 'text-xs font-semibold uppercase tracking-wider text-slate-400'
+  title.textContent = '主任务状态'
+
+  chatStatusPill = document.createElement('span')
+  chatStatusPill.id = 'chat-status-pill'
+  chatStatusPill.className = `inline-flex items-center rounded-full px-3 py-0.5 text-xs font-semibold ${CHAT_STATE_METADATA.idle.pill}`
+  chatStatusPill.textContent = CHAT_STATE_METADATA.idle.label
+
+  const statusRow = document.createElement('div')
+  statusRow.className = 'mt-1 flex flex-wrap items-center gap-3'
+  statusRow.appendChild(chatStatusPill)
+
+  chatStatusDetail = document.createElement('p')
+  chatStatusDetail.id = 'chat-status-detail'
+  chatStatusDetail.className = 'text-xs text-slate-300'
+  chatStatusDetail.textContent = CHAT_STATE_METADATA.idle.detail
+  statusRow.appendChild(chatStatusDetail)
+
+  labelBlock.appendChild(title)
+  labelBlock.appendChild(statusRow)
+  header.appendChild(labelBlock)
+
+  chatQueueNote = document.createElement('p')
+  chatQueueNote.id = 'chat-status-queue'
+  chatQueueNote.className = 'text-xs text-slate-200 lg:text-right lg:ml-4 hidden'
+  chatQueueNote.textContent = ''
+  header.appendChild(chatQueueNote)
+
+  card.appendChild(header)
+
+  const welcome = document.createElement('p')
+  welcome.id = 'chat-status-welcome'
+  welcome.className = 'text-xs text-slate-500'
+  welcome.textContent = '欢迎回来，主 Agent 正在守护你的求职主路径。'
+  card.appendChild(welcome)
+
+  const hintWrapper = document.createElement('div')
+  hintWrapper.id = 'chat-status-hints'
+  hintWrapper.className = 'flex flex-wrap gap-2 text-xs text-slate-400'
+  for (const hint of CHAT_HINTS) {
+    const chip = document.createElement('span')
+    chip.className = 'hint-chip'
+    chip.textContent = hint.text
+    hintWrapper.appendChild(chip)
+  }
+  card.appendChild(hintWrapper)
+
+  const firstBanner = document.getElementById('first-run-banner')
+  if (firstBanner?.parentElement === container) {
+    container.insertBefore(card, firstBanner)
+  } else if (container.firstChild) {
+    container.insertBefore(card, container.firstChild)
+  } else {
+    container.appendChild(card)
+  }
+
+  chatStatusCard = card
+  setUnifiedPlaceholder()
+  ensureApplyFeatureWrapper()
+  return card
+}
+
+function setUnifiedPlaceholder() {
+  if (!chatInput) return
+  chatInput.placeholder = CHAT_INPUT_PLACEHOLDER
+}
+
+function ensureApplyFeatureWrapper() {
+  if (!window.applyFeatureAvailability || window.applyFeatureAvailability.__chatWrapped) return
+  const original = window.applyFeatureAvailability
+  window.applyFeatureAvailability = function wrappedApplyFeatureAvailability(...args) {
+    const result = original.apply(this, args)
+    setUnifiedPlaceholder()
+    return result
+  }
+  window.applyFeatureAvailability.__chatWrapped = true
+}
+
+function renderChatStatus(state = window.appState.chatTask.state, detailMessage = window.appState.chatTask.message) {
+  const card = ensureChatStatusCard()
+  if (!card || !chatStatusPill || !chatStatusDetail) return
+  const key = state && CHAT_STATE_METADATA[state] ? state : 'idle'
+  const meta = CHAT_STATE_METADATA[key]
+  chatStatusPill.textContent = detailMessage ? meta.label : meta.label
+  chatStatusPill.className = `inline-flex items-center rounded-full px-3 py-0.5 text-xs font-semibold ${meta.pill}`
+  chatStatusDetail.textContent = detailMessage || meta.detail
+}
+
+function bootstrapChatStatusCard() {
+  ensureChatStatusCard()
+  ensureApplyFeatureWrapper()
+  renderChatStatus(CHAT_TASK_STATE.IDLE, CHAT_STATE_METADATA.idle.detail)
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrapChatStatusCard)
+} else {
+  bootstrapChatStatusCard()
+}
+
+function internalizeQueueNote(info) {
+  if (!chatQueueNote) return
+  if (!info) {
+    chatQueueNote.classList.add('hidden')
+    chatQueueNote.textContent = ''
+    return
+  }
+  chatQueueNote.classList.remove('hidden')
+  chatQueueNote.textContent = info.message
+}
+
 function setQueueStatus(info) {
   const el = document.getElementById('queue-status')
   if (!el) return
+  ensureChatStatusCard()
   if (!info) {
     el.classList.add('hidden')
     el.textContent = ''
     window.appState.queueInfo = null
+    internalizeQueueNote(null)
     return
   }
   window.appState.queueInfo = info
   el.classList.remove('hidden')
   el.textContent = info.message
+  internalizeQueueNote(info)
+  renderChatStatus(window.appState.chatTask.state, info.message || window.appState.chatTask.message)
 }
 
 function setChatTaskState(state, message = '') {
@@ -35,6 +215,7 @@ function setChatTaskState(state, message = '') {
     message,
     updatedAt: new Date().toISOString(),
   }
+  renderChatStatus(state, message)
 }
 
 function createMessageMeta(ts, agent) {

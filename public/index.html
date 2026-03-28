@@ -49,16 +49,49 @@
         <span class="hint-chip">/clear 清空会话</span>
         <span class="hint-chip">run search 搜索职位</span>
       </div>
-      <div id="first-run-banner" class="mb-3 rounded-lg border border-blue-500/40 bg-blue-950/30 px-4 py-3 text-sm text-slate-200 hidden">
-        <div id="first-run-title" class="font-semibold text-blue-300 mb-1">欢迎使用 JobClaw</div>
-        <div id="first-run-text" class="text-slate-300">请先完成基础设置，再继续填写求职资料并开始搜索职位。</div>
+      <div id="first-run-banner" class="onboarding-card mb-3 rounded-lg border border-blue-500/40 bg-blue-950/30 px-4 py-3 text-sm text-slate-200 hidden" role="region" aria-live="polite" aria-label="可信入口">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">可信入口</p>
+            <h3 class="text-sm font-bold text-slate-200 leading-tight">完成基础设置，打开主路径</h3>
+          </div>
+          <span id="onboarding-base-status" class="onboarding-badge text-xs font-semibold text-slate-100">加载中</span>
+        </div>
+        <div class="onboarding-progress mt-3">
+          <div class="onboarding-progress-track" aria-hidden="true">
+            <span id="onboarding-progress-bar" class="onboarding-progress-bar"></span>
+          </div>
+          <div id="onboarding-progress-label" class="mt-1 text-xs text-slate-400">基础配置完成度 0/3</div>
+        </div>
+        <div class="onboarding-status-grid mt-4">
+          <div class="onboarding-status">
+            <p class="text-xs text-slate-400">基础设置</p>
+            <p id="onboarding-settings-detail" class="text-sm font-semibold text-slate-100">正在检查</p>
+          </div>
+          <div class="onboarding-status">
+            <p class="text-xs text-slate-400">targets.md</p>
+            <p id="onboarding-targets-detail" class="text-sm font-semibold text-slate-100">待补全</p>
+          </div>
+          <div class="onboarding-status">
+            <p class="text-xs text-slate-400">userinfo.md</p>
+            <p id="onboarding-userinfo-detail" class="text-sm font-semibold text-slate-100">待补全</p>
+          </div>
+        </div>
+        <div class="onboarding-feature-unlocks mt-4">
+          <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">功能解锁</p>
+          <ul id="onboarding-feature-list" class="mt-2 space-y-2 text-sm text-slate-200"></ul>
+        </div>
+        <div class="onboarding-next-steps mt-4">
+          <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">下一步</p>
+          <ol id="onboarding-next-steps" class="mt-2 space-y-2 text-sm list-decimal list-inside text-slate-200"></ol>
+        </div>
       </div>
       <div class="chat-container flex-1 min-h-0" style="height: auto;">
         <div id="chat-history" class="chat-history">
           <div class="text-center text-slate-500 text-xs my-4">--- 连接已建立 ---</div>
         </div>
         <div id="queue-status" class="queue-status hidden" role="status" aria-live="polite"></div>
-        <div class="flex gap-2 items-end">
+        <div class="chat-actions flex gap-2 items-end">
           <textarea id="chat-input"
                     class="flex-1 bg-slate-900 text-slate-200 text-sm p-3 rounded-lg resize-none outline-none border border-slate-700 focus:border-blue-500 shadow-inner"
                     rows="3"
@@ -68,6 +101,7 @@
             发送
           </button>
         </div>
+        <p id="chat-disabled-hint" class="onboarding-disabled-text hidden" aria-live="polite"></p>
       </div>
       <div class="log-panel" id="tool-log-panel">
         <div class="log-header">
@@ -149,42 +183,56 @@
 
   <section id="tab-config" class="tab-content min-h-0 flex-1" role="tabpanel" aria-labelledby="tab-config-title">
     <div class="bg-slate-800 rounded-xl p-4 h-full min-h-0 flex flex-col gap-4 shadow-lg overflow-y-auto">
-      <div class="bg-slate-900 border border-slate-700 rounded-xl p-5">
+      <div class="bg-slate-900 border border-slate-700 rounded-xl p-5 space-y-4">
         <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
           <div>
             <h2 id="tab-config-title" class="text-sm font-semibold text-slate-400 uppercase tracking-wider">基础设置</h2>
             <p id="settings-summary" class="text-sm text-slate-300 mt-2">正在加载设置...</p>
             <p id="settings-missing" class="text-xs text-slate-500 mt-2">填写后即可启用聊天与简历功能。</p>
+            <p id="config-missing-hint" class="text-xs text-amber-200 mt-2">缺少设置时，聊天与简历入口会被暂时禁用。</p>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-col items-end gap-3">
             <span id="save-settings-status" class="text-sm text-slate-400" role="status" aria-live="polite"></span>
             <button id="save-settings" type="button" class="text-sm bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg font-bold shadow">
               保存设置
             </button>
           </div>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
-          <label class="text-sm text-slate-300 flex flex-col gap-2">
-            <span>API_KEY</span>
-            <input id="setting-api_key" type="password" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200" placeholder="sk-..." />
-          </label>
-          <label class="text-sm text-slate-300 flex flex-col gap-2">
-            <span>MODEL_ID</span>
-            <input id="setting-model_id" type="text" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200" placeholder="gpt-4.1 / o4-mini 等" />
-          </label>
-          <label class="text-sm text-slate-300 flex flex-col gap-2">
-            <span>LIGHT_MODEL_ID</span>
-            <input id="setting-light_model_id" type="text" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200" placeholder="可选，不填则跟随 MODEL_ID" />
-          </label>
-          <label class="text-sm text-slate-300 flex flex-col gap-2">
-            <span>BASE_URL</span>
-            <input id="setting-base_url" type="url" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200" placeholder="https://.../v1" />
-          </label>
-          <label class="text-sm text-slate-300 flex flex-col gap-2 md:col-span-2">
-            <span>SERVER_PORT</span>
-            <input id="setting-server_port" type="number" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 max-w-[220px]" placeholder="3000" />
-            <span class="text-xs text-slate-500">修改端口会写入配置文件，但当前运行中的服务端口需要重启后才会切换。</span>
-          </label>
+        <p id="config-restart-note" class="text-xs text-slate-400">修改端口会写入配置文件，但当前运行的服务需要重启后才会切换。</p>
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="config-field-group flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-950/40 p-4">
+            <div class="flex items-center justify-between">
+              <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">必填项</p>
+              <span class="text-xs text-emerald-300">聊天/简历必需</span>
+            </div>
+            <label class="text-sm text-slate-200 flex flex-col gap-2">
+              <span>API_KEY</span>
+              <input id="setting-api_key" type="password" class="config-input" placeholder="sk-..." />
+            </label>
+            <label class="text-sm text-slate-200 flex flex-col gap-2">
+              <span>MODEL_ID</span>
+              <input id="setting-model_id" type="text" class="config-input" placeholder="gpt-4.1 / o4-mini 等" />
+            </label>
+            <label class="text-sm text-slate-200 flex flex-col gap-2">
+              <span>BASE_URL</span>
+              <input id="setting-base_url" type="url" class="config-input" placeholder="https://.../v1" />
+            </label>
+          </div>
+          <div class="config-field-group flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-950/20 p-4">
+            <div class="flex items-center justify-between">
+              <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">可选项</p>
+              <span class="text-xs text-slate-400">视具体场景调整</span>
+            </div>
+            <label class="text-sm text-slate-200 flex flex-col gap-2">
+              <span>LIGHT_MODEL_ID</span>
+              <input id="setting-light_model_id" type="text" class="config-input" placeholder="可选，不填则跟随 MODEL_ID" />
+            </label>
+            <label class="text-sm text-slate-200 flex flex-col gap-2">
+              <span>SERVER_PORT</span>
+              <input id="setting-server_port" type="number" class="config-input" placeholder="3000" />
+            </label>
+            <p class="text-xs text-slate-500">仅在运行多个环境或偏好自定义端口时修改；变更需要重启服务并重新连接。</p>
+          </div>
         </div>
       </div>
 
@@ -198,9 +246,13 @@
             </button>
           </div>
         </div>
-        <div class="flex gap-2 mb-3">
+        <div class="flex gap-2 mb-1">
           <button type="button" class="config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-900 text-blue-400 border-t border-l border-r border-slate-700 font-bold" data-file="targets">targets.md</button>
           <button type="button" class="config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-200 border-t border-l border-r border-transparent transition-colors" data-file="userinfo">userinfo.md</button>
+        </div>
+        <div class="config-tab-statuses flex flex-wrap gap-4 text-xs text-slate-400 mb-3">
+          <span>targets.md：<span id="targets-doc-status" class="config-doc-status">加载中</span></span>
+          <span>userinfo.md：<span id="userinfo-doc-status" class="config-doc-status">加载中</span></span>
         </div>
         <textarea id="md-editor" class="flex-1 w-full bg-slate-900 text-slate-200 text-sm p-4 rounded-b-lg rounded-tr-lg resize-none outline-none border border-slate-700 focus:border-blue-500 shadow-inner font-mono leading-relaxed" placeholder="加载中..."></textarea>
       </div>

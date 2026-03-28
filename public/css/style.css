@@ -262,6 +262,34 @@ input:focus-visible {
   border-color: color-mix(in srgb, var(--brand-400) 76%, transparent) !important;
 }
 
+.config-input {
+  min-height: 44px;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--surface-1) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-strong) 64%, transparent);
+  padding: 0.65rem 0.85rem;
+  color: var(--text-primary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.config-input:focus-visible {
+  border-color: var(--brand-300);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand-300) 60%, transparent);
+}
+
+.config-field-group {
+  min-height: 240px;
+}
+
+.config-tab-statuses {
+  font-family: var(--font-body);
+}
+
+.config-doc-status {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 .ws-dot {
   width: 10px;
   height: 10px;
@@ -365,6 +393,57 @@ input:focus-visible {
 
 .queue-status.hidden {
   display: none;
+}
+
+.onboarding-card {
+  background: color-mix(in srgb, #0c1b26 64%, transparent);
+  backdrop-filter: blur(10px);
+  border-color: color-mix(in srgb, var(--brand-400) 64%, transparent);
+}
+
+.onboarding-card h3 {
+  margin: 0;
+}
+
+.onboarding-progress-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border-subtle) 80%, transparent);
+  overflow: hidden;
+}
+
+.onboarding-progress-bar {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--brand-500), var(--brand-400));
+  border-radius: inherit;
+  transition: width var(--transition-std);
+}
+
+.onboarding-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 1rem;
+}
+
+.onboarding-status {
+  border: 1px solid color-mix(in srgb, var(--border-strong) 50%, transparent);
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-2) 50%, transparent);
+}
+
+.onboarding-feature-unlocks ul,
+.onboarding-next-steps ol {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.onboarding-disabled-text {
+  font-size: 0.75rem;
+  color: var(--danger-500);
+  padding-top: 0.5rem;
 }
 
 .chat-history {
