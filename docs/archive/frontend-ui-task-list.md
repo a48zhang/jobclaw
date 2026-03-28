@@ -1,7 +1,7 @@
 # JobClaw 前端开发任务清单
 
 > 更新日期：2026-03-27  
-> 来源：`docs/frontend-ui-review.md`  
+> 来源：`frontend-ui-review.md`  
 > 用途：将前端问题审查结果拆解为可直接执行的开发任务列表，便于逐项推进与验收。
 
 ## 1. P0 基础收敛

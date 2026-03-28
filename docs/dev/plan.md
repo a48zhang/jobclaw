@@ -1,6 +1,6 @@
 # JobClaw 当前收口状态
 
-> 最近更新：2026-03-27  
+> 最近更新：2026-03-28  
 > 说明：本文件只保留“当前真实状态”和“未来可选扩展方向”。截至本次收口，前一轮架构治理计划已完成，不再保留为活跃 backlog。
 
 ## 1. 当前已收口的架构结论
@@ -26,6 +26,7 @@
 - 工具调用支持自动重试与更清晰的降级提示。
 - 长会话持久化不再让 `session.json` 无限膨胀。
 - intervention timeout sweep、delegation recovery 和 runtime reload / restart 语义已经收口。
+- 全量回归在本轮收口后已通过 `npm test`。
 
 ### 2.3 Runtime / Web 接口
 

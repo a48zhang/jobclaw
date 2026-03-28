@@ -23,8 +23,6 @@
 |------|------|
 | [dev/plan.md](dev/plan.md) | 当前仍未完成或需要继续演进的开发项。 |
 | [agent-first-architecture.md](agent-first-architecture.md) | 面向未来的架构设计文档，不等同于当前代码事实。 |
-| [frontend-ui-review.md](frontend-ui-review.md) | 当前 Web 前端的问题审查与分阶段修复计划，覆盖响应式、可访问性、视觉统一和任务闭环。 |
-| [frontend-ui-task-list.md](frontend-ui-task-list.md) | 前端开发任务清单，按优先级拆分为可直接执行的改造项。 |
 
 ## 产品文档
 
@@ -38,9 +36,12 @@
 
 | 文件 | 说明 |
 |------|------|
-| [user-logic-review.md](user-logic-review.md) | 2026-03-27 的用户链路审查，部分问题已修复，现仅保留历史结论与遗留启发。 |
-| [architecture-refactor-tasks.md](architecture-refactor-tasks.md) | 历史阶段的重构任务清单，不再作为当前执行 backlog。 |
-| [dev/agent-first-handoff/README.md](dev/agent-first-handoff/README.md) | 历史交接包入口，反映某次 `agent-first` 重构阶段的切分与问题判断。 |
+| [archive/README.md](archive/README.md) | 历史归档文档入口。 |
+| [archive/frontend-ui-review.md](archive/frontend-ui-review.md) | 2026-03-27 的前端问题审查与修复计划，相关项已完成。 |
+| [archive/frontend-ui-task-list.md](archive/frontend-ui-task-list.md) | 基于当时前端审查拆出的任务清单，现仅保留历史记录。 |
+| [archive/user-logic-review.md](archive/user-logic-review.md) | 2026-03-27 的用户链路审查，部分问题已修复，现仅保留历史结论与遗留启发。 |
+| [archive/architecture-refactor-tasks.md](archive/architecture-refactor-tasks.md) | 历史阶段的重构任务清单，不再作为当前执行 backlog。 |
+| [archive/dev/agent-first-handoff/README.md](archive/dev/agent-first-handoff/README.md) | 历史交接包入口，反映某次 `agent-first` 重构阶段的切分与问题判断。 |
 
 ## 已知原则
 
@@ -49,3 +50,4 @@
 - `MainAgent` 是用户唯一长期入口；子任务通过 `AgentFactory + run_agent` 按 profile 创建 `ProfileAgent`。
 - 职位数据以后端结构化存储 `workspace/state/jobs/jobs.json` 为事实来源；`workspace/data/jobs.md` 是可读、可编辑的导入导出视图。
 - `workspace/state/session` 与 `workspace/state/conversation` 是 Runtime / Web 的正式读模型；`workspace/agents/*/session.json` 是 Agent 私有 checkpoint。
+- Runtime reload / restart 后，不会伪恢复未完成子任务；系统会把无法继续的 in-flight 状态收敛到可解释终态。

@@ -95,6 +95,13 @@ BaseAgent
 - `resetSession()` 会同时清理 checkpoint 对应的 conversation snapshot
 - `ContextCompressor` 负责长会话压缩；运行中持久化会使用截断快照避免 `session.json` 持续膨胀
 
+### 2.6 人工干预与恢复语义
+
+- `request` 仍是正式的人机协作入口
+- Runtime 会持久化 pending intervention，并负责 timeout sweep
+- 页面重连时，server 会把仍 pending 的 intervention 重新补发给前端
+- Runtime reload / restart 后，不能安全继续的 in-flight delegated run 会被收敛为 `cancelled`
+
 ## 3. ProfileAgent
 
 `src/agents/profile-agent.ts` 是 profile 驱动的通用 Agent。
@@ -204,7 +211,7 @@ Agent 与前端并不直接耦合。
 当前协作层次：
 
 - `RuntimeKernel`
-  管理主 Agent、配置重载、MCP、事件流和干预状态
+  管理主 Agent、配置重载、MCP、事件流、干预状态和运行时恢复语义
 - `channel`
   将 agent 响应、工具调用和输出转换成外部消息
 - `eventBus`
@@ -230,6 +237,7 @@ Agent 与前端并不直接耦合。
 - Web 是主路径；TUI 仍保留，但定位为兼容 / 调试入口。
 - `state/session` 与 `state/conversation` 是 Runtime / Web 的正式会话读模型。
 - `workspace/agents/{agentName}/session.json` 不是对外 API 契约，而是 BaseAgent 自己的执行恢复文件。
+- delegated run 与 intervention 的恢复策略当前是“收敛到可解释终态”，不是“重启后继续执行未完成任务”。
 
 ## 9. 容易混淆的点
 

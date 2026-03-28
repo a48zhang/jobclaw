@@ -1,7 +1,7 @@
 # JobClaw 技术规格说明书
 
 > 版本：0.2  
-> 更新日期：2026-03-27
+> 更新日期：2026-03-28
 
 ## 1. 项目概述
 
@@ -224,6 +224,9 @@ profile 决定：
 - `workspace/agents/{agentName}/session.json` 是 Agent 私有 checkpoint
 - `workspace/state/session/{sessionId}.json` 是 Runtime / Web 的会话读模型
 - `workspace/state/conversation/{sessionId}.json` 保存最近对话与摘要，供 Web 恢复历史消息
+- Runtime 启动 / reload 时会清理无法继续恢复的 in-flight state：
+  - 已超时 intervention 会被标记为 `timeout`
+  - 仍处于活动态的 delegated run 会被标记为 `cancelled`
 
 ## 7. 工具与能力控制
 
@@ -317,6 +320,7 @@ profile 决定：
 - WebSocket 的真实上游已经是 runtime event stream 与 structured stores。
 - 为了维持前端兼容，server 会把 runtime 事件适配为现有的 `agent:*` / `intervention:*` / `context:usage` 事件。
 - 连接建立时的 `snapshot` 来自 `state/session`；若存在 pending intervention，也会在连接时补发对应的 `intervention:required`。
+- runtime 内部会区分 `runtime.log` / `runtime.warning` / `runtime.error` 与 `context.usage`，server 与桥接层再把它们适配为现有前端事件。
 
 ## 9. 数据文件
 
@@ -345,7 +349,7 @@ profile 决定：
 
 - `docs/agent-first-architecture.md`
   这是方向性设计文档
-- `docs/architecture-refactor-tasks.md`
+- `docs/archive/architecture-refactor-tasks.md`
   这是历史阶段任务清单
-- `docs/dev/agent-first-handoff/**`
+- `docs/archive/dev/agent-first-handoff/**`
   这是历史交接包

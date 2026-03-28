@@ -3,7 +3,7 @@
 > 版本：0.1  
 > 日期：2026-03-27  
 > 角色视角：产品经理  
-> 参考资料：`docs/SPEC.md`、`docs/user-logic-review.md`、`docs/frontend-ui-review.md`、`docs/frontend-ui-task-list.md`、`docs/dev/plan.md`、`docs/agent-first-architecture.md`
+> 参考资料：`docs/SPEC.md`、`docs/archive/user-logic-review.md`、`docs/archive/frontend-ui-review.md`、`docs/archive/frontend-ui-task-list.md`、`docs/dev/plan.md`、`docs/agent-first-architecture.md`
 
 ## 1. 文档目的
 
