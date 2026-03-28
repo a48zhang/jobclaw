@@ -30,6 +30,7 @@ import type {
 import { ResumeWorkflowService } from '../runtime/resume-workflow-service.js'
 import { buildSetupCapabilitySummary } from '../runtime/setup-summary.js'
 import { RuntimeTaskResultsService } from '../runtime/task-results-service.js'
+import { createRuntimeId, nowIso } from '../runtime/utils.js'
 
 const agentRegistry = new Map<string, BaseAgent>()
 
@@ -388,6 +389,12 @@ function toConversationSummary(agent: BaseAgent): string {
   return typeof summaryMessage?.content === 'string' ? summaryMessage.content : ''
 }
 
+function summarizeDelegatedResult(result: string): string {
+  const normalized = result.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= 180) return normalized
+  return `${normalized.slice(0, 177)}...`
+}
+
 function buildLiveSession(agent: BaseAgent): AgentSession {
   const snapshot = agent.getState()
   const now = new Date().toISOString()
@@ -595,6 +602,65 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
   const artifactStore = new ArtifactStore(workspaceRoot)
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
   const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
+
+  function dispatchTrackedProfileTask(
+    profile: DelegatedRun['profile'],
+    instruction: string
+  ): { runId: string; dispatch: 'profile_agent' } | null {
+    const factory = runtime.getFactory()
+    if (!factory) return null
+
+    const taskAgent = factory.createAgent({ persistent: false, profileName: profile })
+    const createdAt = nowIso()
+    const runId = createRuntimeId('delegation')
+    const baseRun: DelegatedRun = {
+      id: runId,
+      parentSessionId: 'main',
+      profile,
+      state: 'queued',
+      instruction,
+      createdAt,
+      updatedAt: createdAt,
+      agentName: taskAgent.agentName,
+    }
+
+    void delegationStore.save(baseRun)
+    eventBus.emit('delegation.created', baseRun)
+
+    void (async () => {
+      const runningRun: DelegatedRun = {
+        ...baseRun,
+        state: 'running',
+        updatedAt: nowIso(),
+      }
+      await delegationStore.save(runningRun)
+      eventBus.emit('delegation.state_changed', runningRun)
+
+      try {
+        const result = await taskAgent.run(instruction)
+        const completedRun: DelegatedRun = {
+          ...runningRun,
+          state: 'completed',
+          updatedAt: nowIso(),
+          resultSummary: summarizeDelegatedResult(result),
+        }
+        await delegationStore.save(completedRun)
+        eventBus.emit('delegation.completed', completedRun)
+      } catch (err) {
+        const failedRun: DelegatedRun = {
+          ...runningRun,
+          state: 'failed',
+          updatedAt: nowIso(),
+          error: (err as Error).message,
+        }
+        await delegationStore.save(failedRun)
+        eventBus.emit('delegation.failed', failedRun)
+        console.error(`[Server] ${profile} task failed:`, err)
+      }
+    })()
+
+    return { runId, dispatch: 'profile_agent' }
+  }
 
   app.get('/api/settings', async (c) => {
     const status = runtime.getConfigStatus()
@@ -1009,18 +1075,16 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
       return c.json(getUnavailableResponse(status), 409)
     }
 
-    const mainAgent = runtime.getMainAgent()
-    if (mainAgent) {
-      mainAgent.submit('生成简历')
-      return c.json({ ok: true, workflow: '/api/resume/workflow', dispatch: 'main_agent' })
+    const trackedRun = dispatchTrackedProfileTask('resume', '生成简历')
+    if (trackedRun) {
+      return c.json({ ok: true, workflow: '/api/resume/workflow', dispatch: trackedRun.dispatch, runId: trackedRun.runId })
     }
 
-    const factory = runtime.getFactory()
-    if (!factory) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+    const mainAgent = runtime.getMainAgent()
+    if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
 
-    const taskAgent = factory.createAgent({ persistent: false, profileName: 'resume' })
-    taskAgent.run('生成简历').catch((err) => console.error('[Server] Resume build failed:', err))
-    return c.json({ ok: true, workflow: '/api/resume/workflow', dispatch: 'profile_agent' })
+    mainAgent.submit('生成简历')
+    return c.json({ ok: true, workflow: '/api/resume/workflow', dispatch: 'main_agent' })
   })
 
   app.get('/api/resume/status', (c) => {
@@ -1052,18 +1116,22 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     const prompt =
       '评价刚上传的简历。若 data/uploads/resume-upload.pdf 存在，请优先使用 read_pdf 读取内容，并严格按 resume-clinic skill 输出评价、问题分析、改写建议和可直接替换的表达。'
 
-    const mainAgent = runtime.getMainAgent()
-    if (mainAgent) {
-      mainAgent.submit(prompt)
-      return c.json({ ok: true, path: uploadedResumeRelPath, workflow: '/api/resume/workflow', dispatch: 'main_agent' })
+    const trackedRun = dispatchTrackedProfileTask('review', prompt)
+    if (trackedRun) {
+      return c.json({
+        ok: true,
+        path: uploadedResumeRelPath,
+        workflow: '/api/resume/workflow',
+        dispatch: trackedRun.dispatch,
+        runId: trackedRun.runId,
+      })
     }
 
-    const factory = runtime.getFactory()
-    if (!factory) return c.json({ ok: false, error: 'Main agent not found' }, 500)
+    const mainAgent = runtime.getMainAgent()
+    if (!mainAgent) return c.json({ ok: false, error: 'Main agent not found' }, 500)
 
-    const taskAgent = factory.createAgent({ persistent: false, profileName: 'review' })
-    taskAgent.run(prompt).catch((err) => console.error('[Server] Resume review failed:', err))
-    return c.json({ ok: true, path: uploadedResumeRelPath, workflow: '/api/resume/workflow', dispatch: 'profile_agent' })
+    mainAgent.submit(prompt)
+    return c.json({ ok: true, path: uploadedResumeRelPath, workflow: '/api/resume/workflow', dispatch: 'main_agent' })
   })
 
   app.post('/api/resume/upload', async (c) => {

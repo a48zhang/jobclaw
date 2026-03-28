@@ -742,6 +742,78 @@ describe('/api/resume/review', () => {
   })
 })
 
+describe('/api/resume/build', () => {
+  test('dispatches a tracked profile task when factory is available', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-resume-build-'))
+    const run = vi.fn(async () => 'Resume generated successfully')
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => ({
+        createAgent: vi.fn(() => ({
+          agentName: 'resume-agent-1',
+          run,
+        })),
+      }),
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+    }
+
+    try {
+      const app = createApp(workspace, runtime as any)
+      const res = await app.request('/api/resume/build', { method: 'POST' })
+      expect(res.status).toBe(200)
+      const json = await res.json() as { ok: boolean; dispatch: string; runId: string }
+      expect(json.ok).toBe(true)
+      expect(json.dispatch).toBe('profile_agent')
+      expect(json.runId).toBeTruthy()
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      const tasksRes = await app.request('/api/runtime/tasks?sessionId=main')
+      expect(tasksRes.status).toBe(200)
+      const tasksJson = await tasksRes.json() as {
+        ok: boolean
+        tasks: Array<{ id: string; kind: string; state: string; profile: string }>
+      }
+      expect(tasksJson.ok).toBe(true)
+      expect(tasksJson.tasks).toContainEqual(
+        expect.objectContaining({
+          id: `delegation:${json.runId}`,
+          kind: 'delegation',
+          state: 'completed',
+          profile: 'resume',
+        })
+      )
+
+      const workflowRes = await app.request('/api/resume/workflow')
+      expect(workflowRes.status).toBe(200)
+      const workflowJson = await workflowRes.json() as {
+        ok: boolean
+        overview: { recentTasks: Array<{ profile: string; state: string }> }
+      }
+      expect(workflowJson.ok).toBe(true)
+      expect(workflowJson.overview.recentTasks).toContainEqual(
+        expect.objectContaining({
+          profile: 'resume',
+          state: 'completed',
+        })
+      )
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('/api/resume/workflow', () => {
   test('returns a unified resume workflow overview with artifacts and action gates', async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-resume-workflow-'))
