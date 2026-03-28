@@ -1918,7 +1918,7 @@ describe('/api/applications*', () => {
       }
       expect(progressJson.ok).toBe(true)
       expect(progressJson.focus.type).toBe('application')
-      expect(progressJson.relatedTasks[0]?.task.id).toBe('run-1')
+      expect(progressJson.relatedTasks[0]?.task.id).toBe('delegation:run-1')
       expect(progressJson.relatedTasks[0]?.task.status).toBe('requires_input')
       expect(progressJson.blockers.some((item) => item.includes('verification code'))).toBe(true)
       expect(progressJson.nextSteps.length).toBeGreaterThan(0)
@@ -1932,6 +1932,7 @@ describe('/api/applications*', () => {
       }
       expect(traceJson.ok).toBe(true)
       expect(traceJson.focus.type).toBe('task')
+      expect(traceJson.focus.id).toBe('delegation:run-1')
       expect(traceJson.relatedApplications.map((item) => item.id)).toContain(createJson.application.id)
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
@@ -2061,6 +2062,34 @@ describe('/api/learning*', () => {
     }
   })
 
+  test('returns 400 for invalid nested learning payloads', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-learning-validation-'))
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/learning/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'resume_review',
+          title: 'Resume review',
+          summary: 'Validate nested input handling.',
+          findings: [{
+            title: '',
+            summary: 'Missing title should be treated as bad input.',
+          }],
+        }),
+      })
+
+      expect(res.status).toBe(400)
+      const json = await res.json() as { ok: boolean; error: string }
+      expect(json.ok).toBe(false)
+      expect(json.error).toBe('finding.title is required')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('enriches execution traces with recommendation, learning records, and explanation data', async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-learning-trace-'))
     fs.mkdirSync(path.join(workspace, 'state', 'delegation'), { recursive: true })
@@ -2165,7 +2194,7 @@ describe('/api/learning*', () => {
         learningRecords: Array<{ id: string }>
         explanation: {
           whyThisWork: string[]
-          pendingAuthorizations: Array<{ prompt: string }>
+          pendingAuthorizations: Array<{ prompt: string; ownerId: string }>
           nextPlannedSteps: string[]
         }
       }
@@ -2174,7 +2203,7 @@ describe('/api/learning*', () => {
       expect(traceJson.recommendation?.summary).toContain('Acme')
       expect(traceJson.learningRecords).toHaveLength(1)
       expect(traceJson.explanation.pendingAuthorizations).toEqual([
-        expect.objectContaining({ prompt: 'Need verification code' }),
+        expect.objectContaining({ prompt: 'Need verification code', ownerId: 'delegation:run-2' }),
       ])
       expect(traceJson.explanation.whyThisWork.some((item) => item.includes('Application Acme / Platform Engineer'))).toBe(true)
       expect(traceJson.explanation.nextPlannedSteps).toEqual(expect.arrayContaining([

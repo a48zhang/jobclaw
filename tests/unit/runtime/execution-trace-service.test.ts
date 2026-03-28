@@ -210,4 +210,88 @@ describe('ExecutionTraceService', () => {
       artifactCount: 1,
     })
   })
+
+  test('task traces only include learning records linked to the task itself', async () => {
+    const service = new ExecutionTraceService({
+      workspaceRoot: '/tmp/unused',
+      applicationService: {
+        get: async () => undefined,
+        findByTaskId: async () => [{
+          id: 'application-1',
+          company: 'Acme',
+          jobTitle: 'Platform Engineer',
+          jobId: 'job-1',
+          status: 'applied',
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:00.000Z',
+          notes: [],
+          timeline: [],
+          reminders: [],
+          linkedTasks: [],
+        }],
+      },
+      learningService: {
+        findLinked: async (input) => input.taskId
+          ? [{
+              id: 'learning-task',
+              kind: 'improvement_plan',
+              status: 'open',
+              title: 'Task-scoped follow up',
+              summary: 'Only this task should appear.',
+              createdAt: '2026-03-28T00:00:00.000Z',
+              updatedAt: '2026-03-28T00:00:00.000Z',
+              source: 'agent',
+              actor: 'review-agent',
+              tags: [],
+              links: { taskId: input.taskId, artifactPaths: [] },
+              findings: [],
+              actionItems: [],
+            }]
+          : [],
+      },
+      recommendationService: {
+        get: async () => undefined,
+      },
+      taskResultsService: {
+        getTaskDetail: async () => ({
+          task: {
+            id: 'run-2',
+            kind: 'delegation',
+            profile: 'delivery',
+            sessionId: 'main',
+            agentName: 'delivery-agent',
+            title: 'Apply to Acme',
+            state: 'running',
+            lifecycle: 'running',
+            status: 'running',
+            statusLabel: 'Running',
+            createdAt: '2026-03-28T00:00:00.000Z',
+            updatedAt: '2026-03-28T00:05:00.000Z',
+            activityAt: '2026-03-28T00:05:00.000Z',
+            summary: 'Running',
+            interventionCounts: { pending: 0, resolved: 0, timeout: 0, cancelled: 0 },
+            artifactCount: 0,
+            retryHint: {
+              supported: false,
+              mode: 'none',
+              reason: 'No structured retry path is available for this task state.',
+            },
+            detail: {
+              rawState: 'running',
+              instruction: 'Apply to Acme',
+              interventionCounts: { pending: 0, resolved: 0, timeout: 0, cancelled: 0 },
+              artifactCount: 0,
+            },
+          },
+          interventions: [],
+          artifacts: [],
+          failures: [],
+          nextActions: [],
+        }),
+      },
+    })
+
+    const trace = await service.getByTaskId('delegation:run-2')
+    expect(trace?.learningRecords.map((item) => item.id)).toEqual(['learning-task'])
+  })
 })

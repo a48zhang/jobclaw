@@ -191,7 +191,7 @@ function applyOnboardingState({ baseReady, targetsComplete, userinfoComplete }) 
   updateDocStatusMarker('userinfo', normalizedUserinfo)
 
   const completedSteps = [normalizedBase, normalizedTargets, normalizedUserinfo].filter(Boolean).length
-  banner.classList.toggle('hidden', normalizedBase)
+  banner.classList.toggle('hidden', normalizedBase && normalizedTargets && normalizedUserinfo)
   updateOnboardingDisclosure(completedSteps)
 
   updateChatDisabledHint()

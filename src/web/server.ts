@@ -319,7 +319,14 @@ function isNotFoundError(error: unknown): boolean {
   return error instanceof Error && /not found/i.test(error.message)
 }
 
+function isValidationError(error: unknown): boolean {
+  return error instanceof Error && /(is required|must be)/i.test(error.message)
+}
+
 function respondWithDomainError(c: Context, error: unknown) {
+  if (isValidationError(error)) {
+    return c.json({ ok: false, error: (error as Error).message }, 400)
+  }
   if (isNotFoundError(error)) {
     return c.json({ ok: false, error: (error as Error).message }, 404)
   }
@@ -914,6 +921,64 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     }
   }
 
+  function mapTaskDetailForApi(detail: Awaited<ReturnType<typeof runtimeTaskResultsService.getTaskDetail>>) {
+    if (!detail) return null
+    return {
+      ...detail,
+      task: mapTaskForApi(detail.task),
+      interventions: detail.interventions.map((intervention) => ({
+        ...intervention,
+        ownerId: toApiTaskId(detail.task.kind, intervention.ownerId),
+      })),
+      artifacts: detail.artifacts.map((artifact) => mapArtifactForApi(artifact)),
+      failures: detail.failures.map((failure) => ({
+        ...failure,
+        ownerId:
+          failure.kind === 'session'
+            ? toApiTaskId('session', failure.ownerId)
+            : toApiTaskId(detail.task.kind, failure.ownerId),
+      })),
+    }
+  }
+
+  function mapExecutionTraceForApi(trace: Awaited<ReturnType<typeof executionTraceService.getByApplicationId>>) {
+    if (!trace) return null
+    const taskDetails = [
+      ...(trace.task ? [trace.task] : []),
+      ...(trace.relatedTasks ?? []),
+    ]
+    const interventionOwnerKinds = new Map<string, 'session' | 'delegation'>()
+    for (const detail of taskDetails) {
+      for (const intervention of detail.interventions) {
+        interventionOwnerKinds.set(intervention.id, detail.task.kind)
+      }
+    }
+    const prefixedTask = trace.task ? mapTaskDetailForApi(trace.task) : null
+    const prefixedRelatedTasks = (trace.relatedTasks ?? [])
+      .map((detail) => mapTaskDetailForApi(detail))
+      .filter((detail): detail is NonNullable<ReturnType<typeof mapTaskDetailForApi>> => Boolean(detail))
+    return {
+      ...trace,
+      focus: trace.focus.type === 'task' && prefixedTask
+        ? {
+            ...trace.focus,
+            id: prefixedTask.task.id,
+          }
+        : trace.focus,
+      task: prefixedTask,
+      relatedTasks: prefixedRelatedTasks,
+      explanation: trace.explanation
+        ? {
+            ...trace.explanation,
+            pendingAuthorizations: trace.explanation.pendingAuthorizations.map((item) => ({
+              ...item,
+              ownerId: toApiTaskId(interventionOwnerKinds.get(item.interventionId) ?? 'delegation', item.ownerId),
+            })),
+          }
+        : trace.explanation,
+    }
+  }
+
   function dispatchTrackedProfileTask(
     profile: DelegatedRun['profile'],
     instruction: string
@@ -1345,7 +1410,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
       if (!id) return c.json({ ok: false, error: 'id is required' }, 400)
       const trace = await executionTraceService.getByApplicationId(id)
       if (!trace) return c.json({ ok: false, error: 'Application not found' }, 404)
-      return c.json(trace)
+      return c.json(mapExecutionTraceForApi(trace))
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }
@@ -1668,7 +1733,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
       if (!trace) {
         return c.json({ ok: false, error: applicationId ? 'Application not found' : 'Task not found' }, 404)
       }
-      return c.json(trace)
+      return c.json(mapExecutionTraceForApi(trace))
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }

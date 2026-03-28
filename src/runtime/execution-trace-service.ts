@@ -32,7 +32,7 @@ export class ExecutionTraceService {
     const [tasks, recommendation, learningRecords] = await Promise.all([
       Promise.all(application.linkedTasks.map((link) => this.taskResultsService.getTaskDetail(link.taskId))),
       application.jobId ? this.recommendationService.get(application.jobId) : Promise.resolve(undefined),
-      this.learningService.findLinked({ applicationId: application.id, jobId: application.jobId }),
+      this.findApplicationScopedLearningRecords(application),
     ])
 
     return buildExecutionTrace({
@@ -55,11 +55,7 @@ export class ExecutionTraceService {
     const primaryApplication = applications.find((application) => application.jobId) ?? applications[0]
     const [recommendation, learningRecords] = await Promise.all([
       primaryApplication?.jobId ? this.recommendationService.get(primaryApplication.jobId) : Promise.resolve(undefined),
-      this.learningService.findLinked({
-        taskId: task.task.id,
-        applicationId: primaryApplication?.id,
-        jobId: primaryApplication?.jobId,
-      }),
+      this.learningService.findLinked({ taskId: task.task.id }),
     ])
     return buildExecutionTrace({
       focus: {
@@ -71,6 +67,14 @@ export class ExecutionTraceService {
       task,
       applications,
     })
+  }
+
+  private async findApplicationScopedLearningRecords(application: ApplicationRecord) {
+    const linkedToApplication = await this.learningService.findLinked({ applicationId: application.id })
+    if (linkedToApplication.length > 0 || !application.jobId) {
+      return linkedToApplication
+    }
+    return this.learningService.findLinked({ jobId: application.jobId })
   }
 }
 

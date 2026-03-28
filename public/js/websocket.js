@@ -14,8 +14,10 @@ function connectWS() {
     }
     clearQueueStatus()
     window.appState.reconnectCountdown = 0
-    // 加载历史消息
-    loadSessionHistory()
+    // 仅在页面首次加载时补历史，避免重连后覆盖当前可见上下文。
+    if (!hasVisibleChatHistory()) {
+      loadSessionHistory()
+    }
   })
 
   window.appState.ws.addEventListener('message', (ev) => {
@@ -69,6 +71,11 @@ function clearQueueStatus() {
   if (typeof window.setQueueStatus === 'function') {
     window.setQueueStatus(null)
   }
+}
+
+function hasVisibleChatHistory() {
+  const chatHistory = document.getElementById('chat-history')
+  return Boolean(chatHistory?.querySelector('.msg'))
 }
 
 function normalizeAgentState(state) {
@@ -175,8 +182,11 @@ async function loadSessionHistory() {
     const res = await fetch('/api/session/main')
     const json = await res.json()
     if (json.ok && Array.isArray(json.messages)) {
-      // 清空现有历史
       const chatHistory = document.getElementById('chat-history')
+      if (!chatHistory || hasVisibleChatHistory()) {
+        return
+      }
+      // 清空现有历史
       chatHistory.innerHTML = '<div class="text-center text-slate-500 text-xs my-4">--- 历史消息已加载 ---</div>'
       
       // 显示历史消息
