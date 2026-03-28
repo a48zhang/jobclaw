@@ -137,18 +137,21 @@ function updateAgentState({ agentName, state }) {
 
 function renderAgentCards() {
   const container = document.getElementById('agent-states')
+  if (!container) return
   const stateColors = {
     idle:    'bg-slate-700 text-slate-300 border-slate-600',
     running: 'bg-blue-900/50 text-blue-300 border-blue-700',
     waiting: 'bg-yellow-900/50 text-yellow-300 border-yellow-700',
     error:   'bg-red-900/50 text-red-300 border-red-700',
   }
-  container.innerHTML = Object.entries(window.appState.agentStates).map(([name, state]) => `
+  const cards = Object.entries(window.appState.agentStates).map(([name, state]) => `
     <div class="flex items-center gap-2 px-2.5 py-1 rounded border ${stateColors[state] ?? 'bg-slate-700 text-slate-300 border-slate-600'}">
       <span class="font-bold text-xs">${escHtml(name)}</span>
       <span class="text-[10px] uppercase tracking-wider opacity-80">${escHtml(getAgentStateLabel(state))}</span>
     </div>
-  `).join('') || '<span class="text-slate-500 text-xs">暂无 Agent</span>'
+  `).join('')
+  container.innerHTML = cards
+  container.classList.toggle('hidden', cards.length === 0)
 }
 
 function updateTokenUsage({ tokenCount }) {

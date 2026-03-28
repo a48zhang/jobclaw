@@ -15,12 +15,6 @@ const CHAT_TASK_STATE = {
   FAILED: 'failed',
 }
 
-const CHAT_HINTS = [
-  { text: '/new 重新开始会话', tone: 'info' },
-  { text: '/clear 清空会话历史', tone: 'info' },
-  { text: 'run search 搜索目标职位', tone: 'info' },
-]
-
 const CHAT_STATE_METADATA = {
   idle: {
     label: '等待指令',
@@ -78,11 +72,6 @@ function ensureChatStatusCard() {
   const header = document.createElement('div')
   header.className = 'flex flex-wrap items-center gap-2'
 
-  const labelBlock = document.createElement('div')
-  const title = document.createElement('p')
-  title.className = 'text-[11px] font-semibold uppercase tracking-wider text-slate-500'
-  title.textContent = '主任务状态'
-
   chatStatusPill = document.createElement('span')
   chatStatusPill.id = 'chat-status-pill'
   chatStatusPill.className = `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${CHAT_STATE_METADATA.idle.pill}`
@@ -98,9 +87,7 @@ function ensureChatStatusCard() {
   chatStatusDetail.textContent = CHAT_STATE_METADATA.idle.detail
   statusRow.appendChild(chatStatusDetail)
 
-  labelBlock.appendChild(title)
-  labelBlock.appendChild(statusRow)
-  header.appendChild(labelBlock)
+  header.appendChild(statusRow)
 
   chatQueueNote = document.createElement('p')
   chatQueueNote.id = 'chat-status-queue'

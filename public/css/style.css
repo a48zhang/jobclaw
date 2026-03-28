@@ -134,14 +134,15 @@ a {
 }
 
 .nav-btn {
-  min-height: 40px;
-  padding: 0.5rem 0.85rem;
+  min-height: 34px;
+  padding: 0.38rem 0.72rem;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .nav-btn:hover {
@@ -359,15 +360,17 @@ input:focus-visible {
   gap: var(--space-3);
 }
 
-.chat-header {
-  align-items: flex-start;
-}
-
 .chat-hints {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.15rem;
+}
+
+.chat-subtle-hint {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--text-muted);
 }
 
 .hint-chip {
@@ -474,12 +477,12 @@ input:focus-visible {
 .chat-history {
   position: relative;
   flex: 1;
-  min-height: 220px;
+  min-height: 260px;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 0.74rem;
-  padding: 1rem 1rem 1.25rem;
+  padding: 0.9rem 0.9rem 1rem;
   border-radius: var(--radius-md);
   border: 1px solid color-mix(in srgb, var(--brand-300) 24%, transparent);
   background:
@@ -838,14 +841,6 @@ input:focus-visible {
     justify-content: center;
     text-align: center;
     min-height: 44px;
-  }
-
-  .chat-hints {
-    gap: 0.4rem;
-  }
-
-  .hint-chip {
-    font-size: 0.66rem;
   }
 
   .msg {
