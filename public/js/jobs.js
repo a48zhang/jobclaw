@@ -161,18 +161,25 @@ function updateSelectionSummary(visibleKeys) {
   }
   updateBatchToolbarVisibility(selectedTotal)
   setBatchButtonsDisabled(selectedTotal === 0)
+  updateJobsOverview(normalizeRows(window.appState.jobs || []), applyFilters(sortRows(normalizeRows(window.appState.jobs || []))))
+}
+
+function setJobsRailCollapsed(collapsed) {
+  const rail = document.querySelector('.jobs-side-rail')
+  if (!rail) return
+  rail.classList.toggle('is-collapsed', Boolean(collapsed))
 }
 
 function ensureJobDetailPanel() {
   if (jobBoardState.detail.panel) return jobBoardState.detail.panel
-  const tableContainer = document.querySelector('#tab-jobs .overflow-y-auto')
-  if (!tableContainer) return null
+  const anchor = document.getElementById('job-detail-anchor')
+  if (!anchor) return null
   const panel = document.createElement('div')
   panel.id = 'job-detail-panel'
   panel.className =
-    'mt-4 rounded-xl border border-slate-700 bg-slate-900/80 p-4 text-sm text-slate-200 shadow-inner min-h-[150px]'
+    'rounded-xl border border-slate-700 bg-slate-900/80 p-4 text-sm text-slate-200 shadow-inner min-h-[150px]'
   panel.innerHTML = `
-    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">职位详情</p>
+    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">当前选中职位</p>
     <div id="job-detail-body" class="flex flex-col gap-3 text-slate-300">
       <p>点击任意职位行查看公司、角色、状态、更新时间以及可点击的原始链接。</p>
       <div class="flex flex-wrap gap-2 text-xs text-slate-400">
@@ -182,7 +189,7 @@ function ensureJobDetailPanel() {
     </div>
     <div class="flex flex-wrap gap-2 mt-3" id="job-detail-actions"></div>
   `
-  tableContainer.insertAdjacentElement('afterend', panel)
+  anchor.appendChild(panel)
   jobBoardState.detail.panel = panel
   return panel
 }
@@ -201,7 +208,7 @@ function clearJobDetailPanel() {
   const time = panel.querySelector('#job-detail-time')
   const actions = panel.querySelector('#job-detail-actions')
   if (body) {
-    body.innerHTML = '<p class="text-slate-400">当前没有可用职位，请先刷新或调整筛选。</p>'
+    body.innerHTML = '<p class="text-slate-400">先在左侧筛选并点开一条职位，这里会展示详情和快捷操作。</p>'
   }
   if (statusBadge) statusBadge.textContent = '暂无状态'
   if (time) time.textContent = '更新时间：-'
@@ -311,13 +318,12 @@ function updateJobDetailPanel(row) {
 function ensureFilterControls() {
   if (jobBoardState.controlsMounted) return
 
-  const refreshBtn = document.getElementById('refresh-jobs')
-  const jobsTab = document.getElementById('tab-jobs')
-  if (!refreshBtn || !jobsTab) return
+  const anchor = document.getElementById('jobs-filter-anchor')
+  if (!anchor) return
 
   const controls = document.createElement('div')
   controls.id = 'jobs-filter-controls'
-  controls.className = 'mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-700 bg-slate-900/80 p-3 md:grid-cols-[160px_1fr_auto]'
+  controls.className = 'grid grid-cols-1 gap-2 rounded-lg border border-slate-700 bg-slate-900/80 p-3 md:grid-cols-[160px_1fr_auto]'
   controls.innerHTML = `
     <label class="text-xs text-slate-300 flex flex-col gap-1">
       <span>状态筛选</span>
@@ -340,12 +346,7 @@ function ensureFilterControls() {
     </div>
   `
 
-  const headerRow = refreshBtn.closest('div')?.parentElement
-  if (headerRow?.parentElement) {
-    headerRow.insertAdjacentElement('afterend', controls)
-  } else {
-    jobsTab.prepend(controls)
-  }
+  anchor.appendChild(controls)
 
   const statusInput = document.getElementById('jobs-status-filter')
   const keywordInput = document.getElementById('jobs-keyword-filter')
@@ -373,6 +374,39 @@ function ensureFilterControls() {
   }
 
   jobBoardState.controlsMounted = true
+}
+
+function openConfigTab() {
+  const button = document.querySelector('[data-target="tab-config"]')
+  if (button) button.click()
+}
+
+function updateJobsOverview(rows, visibleRows) {
+  const total = document.getElementById('jobs-overview-total')
+  const discovered = document.getElementById('jobs-overview-discovered')
+  const visible = document.getElementById('jobs-overview-visible')
+  const note = document.getElementById('jobs-overview-note')
+  if (total) total.textContent = String(rows.length)
+  if (discovered) {
+    discovered.textContent = String(rows.filter((row) => row.status === 'discovered').length)
+  }
+  if (visible) visible.textContent = String(visibleRows.length)
+  if (note) {
+    if (!rows.length) {
+      note.textContent = '当前还没有职位数据。先运行职位搜索或点击“刷新”，把候选职位拉进来再开始处理。'
+    } else if (!visibleRows.length) {
+      note.textContent = '当前筛选条件下没有结果。建议先清空筛选，再回到待处理职位继续推进。'
+    } else if (jobBoardState.selectedKeys.size > 0) {
+      note.textContent = `当前已选择 ${jobBoardState.selectedKeys.size} 条职位，可以直接执行批量推进。`
+    } else if (jobBoardState.filters.status !== 'all' || jobBoardState.filters.keyword.trim()) {
+      note.textContent = `当前筛出 ${visibleRows.length} 条职位。建议先看右侧详情，再决定是否批量推进。`
+    } else {
+      const discoveredCount = rows.filter((row) => row.status === 'discovered').length
+      note.textContent = discoveredCount > 0
+        ? `当前有 ${discoveredCount} 条待处理职位。优先处理它们，能最快形成闭环。`
+        : '当前没有待处理职位。你可以按状态回看历史结果，或刷新获取新的职位列表。'
+    }
+  }
 }
 
 function updateFilterSummary(total, visible) {
@@ -454,27 +488,40 @@ function renderJobs() {
   const rows = normalizeRows(window.appState.jobs || [])
   const sortedRows = sortRows(rows)
   const filteredRows = applyFilters(sortedRows)
+  updateJobsOverview(sortedRows, filteredRows)
   jobBoardState.allRowsMap = new Map(sortedRows.map((row) => [row._key, row]))
   pruneSelection()
   updateFilterSummary(sortedRows.length, filteredRows.length)
 
   if (!sortedRows.length) {
+    setJobsRailCollapsed(true)
     tbody.innerHTML = `
       <tr>
         <td colspan="6" class="py-8 text-center text-slate-400">
           <p class="text-sm">还没有职位数据。</p>
           <p class="mt-1 text-xs text-slate-500">点击“刷新”或先运行职位搜索任务后再回来查看。</p>
           <p class="text-xs text-slate-400">建议先完善 targets.md，然后运行职位搜索获取职位列表。</p>
+          <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+            <button id="jobs-empty-refresh" type="button" class="rounded-md border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700">
+              立即刷新
+            </button>
+            <button id="jobs-empty-open-config" type="button" class="rounded-md border border-slate-600 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700">
+              去补 targets.md
+            </button>
+          </div>
         </td>
       </tr>
     `
     updateSelectionSummary([])
     window.appState.selectedJobs = { rows: [], selectedRows: () => [], keys: () => [] }
     clearJobDetailPanel()
+    document.getElementById('jobs-empty-refresh')?.addEventListener('click', fetchJobs)
+    document.getElementById('jobs-empty-open-config')?.addEventListener('click', openConfigTab)
     return
   }
 
   if (!filteredRows.length) {
+    setJobsRailCollapsed(false)
     tbody.innerHTML = `
       <tr>
         <td colspan="6" class="py-8 text-center text-slate-400">
@@ -492,6 +539,7 @@ function renderJobs() {
     return
   }
 
+  setJobsRailCollapsed(false)
   tbody.innerHTML = filteredRows.map((row) => `
     <tr class="job-row group transition-colors hover:bg-slate-700/30" data-job-key="${escHtml(row._key)}" tabindex="0">
       <td class="py-3 px-4">
@@ -864,6 +912,10 @@ function renderDonut() {
 
   const legend = document.getElementById('stats-legend')
   if (!legend) return
+  const statsCard = legend.closest('.jobs-stats-card')
+  if (statsCard) {
+    statsCard.classList.toggle('is-empty', jobs.length === 0)
+  }
 
   const rows = [
     { label: '全部', value: jobs.length, status: 'all', dot: 'bg-slate-400', valueClass: 'text-slate-100' },

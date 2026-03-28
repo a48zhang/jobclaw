@@ -8,28 +8,23 @@ const ONBOARDING_TOTAL_STEPS = 3
 function renderOnboardingFeatureList(features) {
   const container = document.getElementById('onboarding-feature-list')
   if (!container) return
-  container.innerHTML = features
-    .map((feature) => {
-      const stateClass = feature.ready ? 'text-emerald-300' : 'text-amber-300'
-      const stateLabel = feature.ready ? '已解锁' : feature.detail || '待补全'
-      return `
-        <li class="flex items-center justify-between gap-4">
-          <span>${feature.label}</span>
-          <span class="text-xs font-semibold ${stateClass}">${stateLabel}</span>
-        </li>
-      `
-    })
-    .join('')
+  const blocked = features.find((feature) => !feature.ready)
+  if (!blocked) {
+    container.innerHTML = ''
+    return
+  }
+  const detail = blocked.detail ? `：${blocked.detail}` : ''
+  container.innerHTML = `<li class="text-xs text-amber-200">当前阻塞：${blocked.label}${detail}</li>`
 }
 
 function renderOnboardingNextSteps(steps) {
   const container = document.getElementById('onboarding-next-steps')
   if (!container) return
   if (!steps.length) {
-    container.innerHTML = '<li>系统已准备就绪，可以继续探索主路径。</li>'
+    container.innerHTML = '<li>系统已准备就绪，可直接在聊天区继续任务。</li>'
     return
   }
-  container.innerHTML = steps.map((text) => `<li>${text}</li>`).join('')
+  container.innerHTML = `<li>${steps[0]}</li>`
 }
 
 function updateOnboardingProgress(completed) {
@@ -80,15 +75,22 @@ function updateDocStatusMarker(name, ready) {
   label.classList.toggle('text-amber-300', !ready)
 }
 
-function updateOnboardingDisclosure(completedSteps) {
+function compressOnboardingSurface() {
+  const banner = document.getElementById('first-run-banner')
+  if (!banner) return
+  banner.querySelectorAll('.onboarding-progress, .onboarding-status-grid, .onboarding-feature-unlocks, .onboarding-next-steps')
+    .forEach((node) => node.classList.add('hidden'))
+}
+
+function updateOnboardingDisclosure(_completedSteps) {
   const toggle = document.getElementById('onboarding-toggle')
   const details = document.getElementById('onboarding-details')
+  compressOnboardingSurface()
   if (!toggle || !details) return
 
-  const shouldCollapse = completedSteps > 0
-  details.classList.toggle('hidden', shouldCollapse)
-  toggle.setAttribute('aria-expanded', shouldCollapse ? 'false' : 'true')
-  toggle.textContent = shouldCollapse ? '展开详情' : '收起详情'
+  details.classList.add('hidden')
+  toggle.setAttribute('aria-expanded', 'false')
+  toggle.textContent = '去配置'
 }
 
 function initOnboardingDisclosure() {
@@ -97,10 +99,14 @@ function initOnboardingDisclosure() {
   if (!toggle || !details || toggle.dataset.bound === 'true') return
 
   toggle.addEventListener('click', () => {
-    const expanded = toggle.getAttribute('aria-expanded') === 'true'
-    details.classList.toggle('hidden', expanded)
-    toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true')
-    toggle.textContent = expanded ? '展开详情' : '收起详情'
+    details.classList.add('hidden')
+    toggle.setAttribute('aria-expanded', 'false')
+    if (typeof window.showTab === 'function') {
+      window.showTab('tab-config', { persist: true, userInitiated: true })
+      return
+    }
+    const configTabBtn = document.querySelector('[data-target="tab-config"]')
+    if (configTabBtn) configTabBtn.click()
   })
   toggle.dataset.bound = 'true'
 }
@@ -127,15 +133,15 @@ function applyOnboardingState({ baseReady, targetsComplete, userinfoComplete }) 
   const summary = document.getElementById('onboarding-summary')
   if (summary) {
     if (!normalizedBase) {
-      summary.textContent = `还差基础设置，补齐 ${missingFieldsText} 后即可正常对话。`
+      summary.textContent = `缺少 ${missingFieldsText}。下一步：进入“工作区配置”补齐后返回聊天。`
     } else if (!normalizedTargets || !normalizedUserinfo) {
       const missingDocs = [
         normalizedTargets ? null : 'targets.md',
         normalizedUserinfo ? null : 'userinfo.md',
       ].filter(Boolean).join('、')
-      summary.textContent = `聊天已可用，再补齐 ${missingDocs} 就能顺手进入搜索和简历主路径。`
+      summary.textContent = `聊天可用。下一步：补齐 ${missingDocs}，再执行 run search。`
     } else {
-      summary.textContent = '基础路径已就绪，可以直接对话、搜索职位或生成简历。'
+      summary.textContent = '基础路径就绪。可直接在聊天区继续主任务。'
     }
   }
 

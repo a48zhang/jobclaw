@@ -19,94 +19,95 @@ const CHAT_STATE_METADATA = {
   idle: {
     label: '等待指令',
     detail: '主 Agent 准备接收你的指令。',
-    pill: 'bg-slate-800 text-slate-300 border border-slate-700',
+    tone: 'text-slate-300',
   },
   blocked: {
     label: '功能受限',
     detail: '请先完成基础设置，主任务才会继续。',
-    pill: 'bg-amber-900 text-amber-200 border border-amber-700',
+    tone: 'text-amber-300',
   },
   submitting: {
     label: '提交中',
     detail: '消息正在提交，等待 Agent 响应。',
-    pill: 'bg-blue-900 text-blue-200 border border-blue-700',
+    tone: 'text-sky-300',
   },
   queued: {
     label: '排队中',
     detail: '当前请求已入队，稍等片刻。',
-    pill: 'bg-blue-800 text-blue-100 border border-blue-600',
+    tone: 'text-sky-300',
   },
   running: {
     label: '执行中',
     detail: 'Agent 正在执行任务，生成回复中。',
-    pill: 'bg-blue-900 text-blue-100 border border-blue-600',
+    tone: 'text-sky-300',
   },
   completed: {
     label: '已完成',
     detail: 'Agent 已生成最新回复，可以继续提问。',
-    pill: 'bg-emerald-900 text-emerald-200 border border-emerald-600',
+    tone: 'text-emerald-300',
   },
   failed: {
     label: '失败',
     detail: '请求异常，请检查网络或重新发送。',
-    pill: 'bg-rose-900 text-rose-200 border border-rose-600',
+    tone: 'text-rose-300',
   },
 }
 
 const CHAT_INPUT_PLACEHOLDER = '试试“run search”保留主任务路径（Enter 发送，Shift+Enter 换行）'
+const CHAT_INPUT_MIN_HEIGHT = 56
+const CHAT_INPUT_MAX_HEIGHT = 164
 
-let chatStatusCard = null
-let chatStatusPill = null
-let chatStatusDetail = null
-let chatQueueNote = null
+let chatRuntimeStatus = null
 
 function ensureChatStatusCard() {
-  if (chatStatusCard) return chatStatusCard
-  const container = document.querySelector('#tab-chat .chat-container')
+  if (chatRuntimeStatus) return chatRuntimeStatus
+  const container = document.getElementById('chat-status-slot') || document.querySelector('#tab-chat .chat-container')
   if (!container) return null
 
-  const card = document.createElement('div')
-  card.id = 'chat-status-card'
-  card.className = 'chat-status-card mt-3 rounded-xl border border-slate-700 bg-slate-900/72 px-3 py-2 shadow-inner'
+  const legacyCard = document.getElementById('chat-status-card')
+  if (legacyCard) legacyCard.remove()
 
-  const header = document.createElement('div')
-  header.className = 'flex flex-wrap items-center gap-2'
+  const statusLine = document.createElement('p')
+  statusLine.id = 'chat-runtime-status'
+  statusLine.className = 'text-xs text-slate-300'
+  statusLine.textContent = `${CHAT_STATE_METADATA.idle.label}：${CHAT_STATE_METADATA.idle.detail}`
+  container.replaceChildren(statusLine)
 
-  chatStatusPill = document.createElement('span')
-  chatStatusPill.id = 'chat-status-pill'
-  chatStatusPill.className = `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${CHAT_STATE_METADATA.idle.pill}`
-  chatStatusPill.textContent = CHAT_STATE_METADATA.idle.label
-
-  const statusRow = document.createElement('div')
-  statusRow.className = 'mt-1 flex flex-wrap items-center gap-2'
-  statusRow.appendChild(chatStatusPill)
-
-  chatStatusDetail = document.createElement('p')
-  chatStatusDetail.id = 'chat-status-detail'
-  chatStatusDetail.className = 'text-xs text-slate-300'
-  chatStatusDetail.textContent = CHAT_STATE_METADATA.idle.detail
-  statusRow.appendChild(chatStatusDetail)
-
-  header.appendChild(statusRow)
-
-  chatQueueNote = document.createElement('p')
-  chatQueueNote.id = 'chat-status-queue'
-  chatQueueNote.className = 'text-xs text-slate-400 hidden'
-  chatQueueNote.textContent = ''
-  header.appendChild(chatQueueNote)
-
-  card.appendChild(header)
-  container.appendChild(card)
-
-  chatStatusCard = card
+  chatRuntimeStatus = statusLine
   setUnifiedPlaceholder()
   ensureApplyFeatureWrapper()
-  return card
+  return statusLine
 }
 
 function setUnifiedPlaceholder() {
   if (!chatInput) return
   chatInput.placeholder = CHAT_INPUT_PLACEHOLDER
+}
+
+function resizeChatInput() {
+  if (!chatInput) return
+  chatInput.style.height = 'auto'
+  const nextHeight = Math.max(CHAT_INPUT_MIN_HEIGHT, Math.min(chatInput.scrollHeight, CHAT_INPUT_MAX_HEIGHT))
+  chatInput.style.height = `${nextHeight}px`
+  chatInput.style.overflowY = chatInput.scrollHeight > CHAT_INPUT_MAX_HEIGHT ? 'auto' : 'hidden'
+}
+
+function applyShortcutToInput(command) {
+  if (!chatInput || typeof command !== 'string' || !command.trim()) return
+  chatInput.value = command
+  resizeChatInput()
+  chatInput.focus()
+  chatInput.setSelectionRange(command.length, command.length)
+}
+
+function bindChatShortcuts() {
+  document.querySelectorAll('[data-chat-shortcut]').forEach((button) => {
+    if (button.dataset.bound === 'true') return
+    button.addEventListener('click', () => {
+      applyShortcutToInput(button.dataset.chatShortcut || '')
+    })
+    button.dataset.bound = 'true'
+  })
 }
 
 function ensureApplyFeatureWrapper() {
@@ -115,24 +116,26 @@ function ensureApplyFeatureWrapper() {
   window.applyFeatureAvailability = function wrappedApplyFeatureAvailability(...args) {
     const result = original.apply(this, args)
     setUnifiedPlaceholder()
+    resizeChatInput()
     return result
   }
   window.applyFeatureAvailability.__chatWrapped = true
 }
 
 function renderChatStatus(state = window.appState.chatTask.state, detailMessage = window.appState.chatTask.message) {
-  const card = ensureChatStatusCard()
-  if (!card || !chatStatusPill || !chatStatusDetail) return
+  const statusLine = ensureChatStatusCard()
+  if (!statusLine) return
   const key = state && CHAT_STATE_METADATA[state] ? state : 'idle'
   const meta = CHAT_STATE_METADATA[key]
-  chatStatusPill.textContent = detailMessage ? meta.label : meta.label
-  chatStatusPill.className = `inline-flex items-center rounded-full px-3 py-0.5 text-xs font-semibold ${meta.pill}`
-  chatStatusDetail.textContent = detailMessage || meta.detail
+  statusLine.textContent = `${meta.label}：${detailMessage || meta.detail}`
+  statusLine.className = `text-xs ${meta.tone}`
 }
 
 function bootstrapChatStatusCard() {
   ensureChatStatusCard()
   ensureApplyFeatureWrapper()
+  bindChatShortcuts()
+  resizeChatInput()
   renderChatStatus(CHAT_TASK_STATE.IDLE, CHAT_STATE_METADATA.idle.detail)
 }
 
@@ -142,32 +145,24 @@ if (document.readyState === 'loading') {
   bootstrapChatStatusCard()
 }
 
-function internalizeQueueNote(info) {
-  if (!chatQueueNote) return
-  if (!info) {
-    chatQueueNote.classList.add('hidden')
-    chatQueueNote.textContent = ''
-    return
-  }
-  chatQueueNote.classList.remove('hidden')
-  chatQueueNote.textContent = info.message
-}
-
 function setQueueStatus(info) {
   const el = document.getElementById('queue-status')
-  if (!el) return
   ensureChatStatusCard()
   if (!info) {
-    el.classList.add('hidden')
-    el.textContent = ''
+    if (el) {
+      el.classList.add('hidden')
+      el.textContent = ''
+    }
     window.appState.queueInfo = null
-    internalizeQueueNote(null)
+    renderChatStatus(window.appState.chatTask.state, window.appState.chatTask.message)
     return
   }
   window.appState.queueInfo = info
-  el.classList.remove('hidden')
-  el.textContent = info.message
-  internalizeQueueNote(info)
+  if (el) {
+    // Keep queue message for a11y only, avoid duplicated visible status blocks.
+    el.textContent = info.message
+    el.classList.add('hidden')
+  }
   renderChatStatus(window.appState.chatTask.state, info.message || window.appState.chatTask.message)
 }
 
@@ -365,6 +360,7 @@ async function sendChatMessage() {
 }
 
 chatSend.addEventListener('click', sendChatMessage)
+chatInput.addEventListener('input', resizeChatInput)
 chatInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()

@@ -72,6 +72,8 @@ body {
     radial-gradient(64% 58% at 108% -10%, color-mix(in srgb, var(--action-500) 18%, transparent) 0%, transparent 72%),
     radial-gradient(120% 120% at 50% 100%, rgba(8, 26, 35, 0.54) 0%, transparent 56%),
     linear-gradient(165deg, var(--bg-canvas) 0%, #071821 100%);
+  padding: clamp(0.5rem, 1.1vw, 0.88rem) !important;
+  gap: clamp(0.45rem, 1vh, 0.72rem) !important;
 }
 
 .font-mono {
@@ -94,6 +96,173 @@ main {
 header {
   position: relative;
   z-index: 1;
+  padding: 0.42rem 0.64rem !important;
+  border-radius: 0.8rem !important;
+  border-color: color-mix(in srgb, var(--border-strong) 62%, transparent) !important;
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--surface-1) 92%, transparent),
+    color-mix(in srgb, #0a2230 88%, transparent)
+  ) !important;
+  backdrop-filter: blur(8px);
+}
+
+header > div {
+  gap: 0.45rem !important;
+}
+
+header nav [role="tablist"] {
+  padding: 0.18rem !important;
+  gap: 0.25rem !important;
+  background: color-mix(in srgb, var(--surface-2) 66%, transparent) !important;
+}
+
+#ws-status {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+#app-main {
+  min-height: 0;
+  gap: 0.45rem;
+}
+
+.panel-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.88rem;
+  min-height: 0;
+  padding: 0.88rem;
+  border-radius: 0.92rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 88%, transparent);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--surface-2) 86%, transparent),
+    color-mix(in srgb, var(--surface-1) 90%, transparent)
+  );
+  box-shadow: var(--shadow-md);
+}
+
+.panel-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.panel-hero.compact {
+  align-items: center;
+}
+
+.panel-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.panel-title {
+  margin: 0;
+  font-size: clamp(1rem, 0.85rem + 0.7vw, 1.4rem);
+  line-height: 1.16;
+  letter-spacing: -0.02em;
+}
+
+.panel-title-sm {
+  font-size: 1rem;
+}
+
+.panel-copy {
+  margin: 0.32rem 0 0;
+  max-width: 62ch;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.shortcut-chip {
+  min-height: 38px;
+  padding: 0.4rem 0.78rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--brand-400) 34%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.shortcut-chip:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--brand-300) 46%, transparent);
+}
+
+.metric-strip,
+.config-impact-list {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-card,
+.impact-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  min-width: 112px;
+  padding: 0.72rem 0.78rem;
+  border-radius: 0.82rem;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-1) 82%, transparent);
+}
+
+.metric-label,
+.impact-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.metric-value,
+.impact-value {
+  font-size: 1rem;
+  line-height: 1.15;
+  color: var(--text-primary);
+}
+
+.pill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0.2rem 0.68rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-1) 82%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.pill-badge.success {
+  color: #b8f4d7;
+  border-color: color-mix(in srgb, var(--success-500) 46%, transparent);
+  background: color-mix(in srgb, var(--success-500) 16%, transparent);
+}
+
+.pill-badge.warn {
+  color: #ffe0ad;
+  border-color: color-mix(in srgb, var(--warning-500) 46%, transparent);
+  background: color-mix(in srgb, var(--warning-500) 16%, transparent);
 }
 
 #tab-chat,
@@ -135,7 +304,7 @@ a {
 
 .nav-btn {
   min-height: 34px;
-  padding: 0.38rem 0.72rem;
+  padding: 0.3rem 0.64rem;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
@@ -175,6 +344,7 @@ a {
 #batch-delete {
   border: 1px solid transparent;
   box-shadow: var(--shadow-sm);
+  font-weight: 700;
 }
 
 #chat-send,
@@ -222,6 +392,10 @@ a {
     color-mix(in srgb, var(--brand-500) 40%, var(--action-500) 60%),
     color-mix(in srgb, var(--action-500) 65%, var(--brand-400) 35%)
   );
+  border-color: color-mix(in srgb, var(--brand-300) 58%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--brand-300) 26%, transparent),
+    0 10px 22px rgba(3, 17, 24, 0.42);
 }
 
 #batch-delete:hover,
@@ -231,6 +405,25 @@ a {
 #gen-resume:hover,
 #modal-submit:hover {
   transform: translateY(-1px);
+}
+
+#chat-send,
+#refresh-jobs,
+#save-settings,
+#save-md,
+#gen-resume {
+  border-color: color-mix(in srgb, var(--brand-300) 44%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--brand-300) 18%, transparent),
+    var(--shadow-sm);
+}
+
+#chat-send:focus-visible,
+#gen-resume:focus-visible {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--bg-canvas) 70%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--brand-300) 74%, transparent),
+    0 10px 22px rgba(3, 17, 24, 0.4);
 }
 
 button:disabled,
@@ -279,7 +472,7 @@ input:focus-visible {
 }
 
 .config-field-group {
-  min-height: 240px;
+  min-height: 180px;
 }
 
 .config-tab-statuses {
@@ -289,6 +482,434 @@ input:focus-visible {
 .config-doc-status {
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.panel-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-height: 0;
+  padding: 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 88%, transparent);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--surface-2) 86%, transparent),
+    color-mix(in srgb, var(--surface-1) 90%, transparent)
+  );
+  box-shadow: var(--shadow-md);
+}
+
+.panel-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.panel-hero.compact {
+  gap: 0.65rem;
+}
+
+.panel-kicker {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brand-300);
+}
+
+.panel-title {
+  margin: 0.14rem 0 0;
+  font-size: clamp(1.02rem, 1.1vw + 0.74rem, 1.38rem);
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.panel-title-sm {
+  font-size: 1.04rem;
+}
+
+.panel-copy,
+.panel-note {
+  margin: 0.32rem 0 0;
+  max-width: 62ch;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.panel-note {
+  font-size: 0.84rem;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.shortcut-chip {
+  min-height: 36px;
+  padding: 0.45rem 0.78rem;
+  border: 1px solid color-mix(in srgb, var(--brand-300) 30%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.shortcut-chip:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--brand-300) 56%, transparent);
+  background: color-mix(in srgb, var(--surface-elevated) 72%, transparent);
+}
+
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.56rem;
+  min-width: min(100%, 24rem);
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding: 0.68rem 0.76rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  border-radius: 0.86rem;
+  background: color-mix(in srgb, var(--surface-1) 62%, transparent);
+}
+
+.metric-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.metric-value {
+  font-size: 1.16rem;
+  line-height: 1.1;
+  color: var(--text-primary);
+}
+
+.chat-shell {
+  gap: 0.72rem;
+}
+
+.chat-status-slot {
+  min-height: 1rem;
+  padding-inline: 0.1rem;
+}
+
+#chat-runtime-status {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.chat-composer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.58rem;
+  padding: 0.74rem;
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 84%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 68%, transparent);
+}
+
+.chat-composer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.jobs-shell,
+.config-shell,
+.resume-shell {
+  display: grid;
+  gap: 0.85rem;
+  min-height: 0;
+}
+
+.jobs-main-shell,
+.config-settings-shell,
+.config-editor-shell,
+.resume-main-shell,
+.resume-side-shell {
+  min-height: 0;
+}
+
+.jobs-command-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.74rem 0.82rem;
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 74%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 62%, transparent);
+}
+
+.jobs-command-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.62rem;
+}
+
+.jobs-command-side {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  min-width: 4.5rem;
+}
+
+.jobs-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.78fr);
+  gap: 0.85rem;
+  min-height: 0;
+  align-items: start;
+}
+
+.jobs-table-card {
+  min-height: 0;
+  display: flex;
+}
+
+.jobs-side-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.jobs-side-rail.is-collapsed {
+  display: none;
+}
+
+.jobs-detail-slot,
+.jobs-stats-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.68rem;
+  padding: 0.8rem;
+  border-radius: 0.94rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 68%, transparent);
+}
+
+.jobs-side-head h3,
+.resume-card-head h3 {
+  margin: 0;
+}
+
+.jobs-side-head p,
+.resume-card-head p {
+  margin: 0.25rem 0 0;
+}
+
+.jobs-chart-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.jobs-stats-card.is-empty .jobs-chart-wrap {
+  opacity: 0.5;
+}
+
+.config-shell {
+  grid-template-columns: minmax(0, 0.94fr) minmax(0, 1.06fr);
+  align-items: start;
+}
+
+.config-readiness-band {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.76rem 0.84rem;
+  border-radius: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 64%, transparent);
+}
+
+.config-readiness-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.pill-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  padding: 0.36rem 0.72rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.pill-badge.success {
+  background: #86efac;
+  color: #052e16;
+}
+
+.pill-badge.warn {
+  background: #fcd34d;
+  color: #451a03;
+}
+
+.pill-badge.neutral {
+  background: #7dd3fc;
+  color: #082f49;
+}
+
+.config-impact-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  min-width: min(100%, 24rem);
+}
+
+.impact-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+  padding: 0.72rem 0.8rem;
+  border-radius: 0.84rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 68%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 62%, transparent);
+}
+
+.impact-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.impact-value {
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+#config-workflow-guide {
+  padding: 0.84rem !important;
+  border-radius: 0.98rem !important;
+  border-color: color-mix(in srgb, var(--border-subtle) 78%, transparent) !important;
+  background: color-mix(in srgb, var(--surface-1) 68%, transparent) !important;
+}
+
+.config-doc-guide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.68rem;
+}
+
+.doc-guide-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 0.36rem;
+  padding: 0.84rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 76%, transparent);
+  border-radius: 0.92rem;
+  background: color-mix(in srgb, var(--surface-1) 64%, transparent);
+  text-align: left;
+}
+
+.doc-guide-card strong {
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.doc-guide-card p {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.doc-guide-kicker {
+  font-size: 0.66rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.doc-guide-card.active {
+  border-color: color-mix(in srgb, var(--brand-300) 62%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--brand-300) 22%, transparent);
+}
+
+.doc-guide-card.is-ready .config-doc-status {
+  color: #86efac;
+}
+
+.resume-shell {
+  grid-template-columns: minmax(0, 1.08fr) minmax(290px, 0.92fr);
+  align-items: start;
+}
+
+.resume-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.resume-action-card,
+.resume-side-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.72rem;
+  padding: 0.88rem;
+  border-radius: 0.94rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 72%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 66%, transparent);
+}
+
+.resume-primary-card {
+  order: -1;
+  border-color: color-mix(in srgb, var(--brand-300) 54%, transparent);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--brand-soft) 34%, transparent),
+    color-mix(in srgb, var(--surface-1) 86%, transparent)
+  );
+}
+
+.resume-side-card.subtle {
+  opacity: 0.94;
+}
+
+#resume-focus-stack,
+#resume-priority-grid {
+  gap: 0.78rem !important;
+}
+
+#resume-support-panel {
+  overflow: hidden;
+}
+
+#resume-support-panel > summary {
+  min-height: 56px;
+}
+
+#resume-support-panel[open] > summary {
+  border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 78%, transparent);
 }
 
 .ws-dot {
@@ -357,7 +978,221 @@ input:focus-visible {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  gap: var(--space-3);
+  gap: 0.56rem;
+}
+
+.chat-shell {
+  gap: 0.7rem;
+}
+
+.chat-status-slot {
+  display: contents;
+}
+
+.chat-composer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.72rem;
+  padding: 0.82rem 0.86rem 0.9rem;
+  border-radius: 0.86rem;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 84%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 74%, transparent);
+}
+
+.chat-composer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+}
+
+.jobs-shell,
+.config-shell,
+.resume-shell {
+  display: grid;
+  gap: 0.8rem;
+  min-height: 0;
+}
+
+.jobs-command-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.jobs-command-main,
+.jobs-filter-anchor {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.jobs-command-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.jobs-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.78fr);
+  gap: 0.8rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.jobs-table-card,
+.jobs-side-rail,
+.resume-side-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  min-height: 0;
+}
+
+.jobs-stats-card,
+.resume-action-card,
+.resume-side-card {
+  padding: 0.84rem;
+  border-radius: 0.86rem;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-1) 76%, transparent);
+}
+
+.jobs-side-head,
+.resume-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.24rem;
+}
+
+.jobs-chart-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 214px;
+}
+
+.config-shell {
+  grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.18fr);
+}
+
+.config-readiness-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 0.8rem;
+  padding: 0.82rem;
+  border-radius: 0.86rem;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-1) 76%, transparent);
+}
+
+.config-readiness-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.config-doc-guide {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.72rem;
+}
+
+.doc-guide-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.34rem;
+  padding: 0.84rem;
+  text-align: left;
+  border-radius: 0.84rem;
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--surface-1) 76%, transparent);
+  color: var(--text-secondary);
+}
+
+.doc-guide-card:hover,
+.doc-guide-card.active {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--brand-300) 42%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 78%, transparent);
+}
+
+.doc-guide-card.is-ready {
+  border-color: color-mix(in srgb, var(--success-500) 42%, transparent);
+}
+
+.doc-guide-kicker {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.resume-shell {
+  grid-template-columns: minmax(0, 1.22fr) minmax(300px, 0.76fr);
+  align-items: start;
+}
+
+.resume-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.94fr);
+  gap: 0.8rem;
+}
+
+.resume-primary-card {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 82%, transparent), color-mix(in srgb, var(--surface-2) 78%, transparent)),
+    radial-gradient(140% 100% at 100% 0%, color-mix(in srgb, var(--action-500) 10%, transparent), transparent 56%);
+}
+
+.resume-side-card.subtle {
+  background: color-mix(in srgb, var(--surface-1) 68%, transparent);
+}
+
+#tab-chat > div,
+#tab-config > div,
+#tab-resume > div {
+  border-radius: 0.9rem !important;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 88%, transparent);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--surface-2) 86%, transparent),
+    color-mix(in srgb, var(--surface-1) 90%, transparent)
+  );
+}
+
+#tab-chat > div {
+  padding: 0.72rem !important;
+}
+
+#tab-jobs > .grid {
+  gap: 0.68rem !important;
+}
+
+#tab-jobs > .grid > :is(div, aside) {
+  padding: 0.8rem !important;
+  border-radius: 0.9rem !important;
+  border: 1px solid color-mix(in srgb, var(--border-subtle) 84%, transparent);
+}
+
+#tab-config > div {
+  padding: 0.85rem !important;
+  gap: 0.75rem !important;
+}
+
+#tab-resume > div {
+  max-width: min(100%, 58rem);
+  margin: 0.3rem auto !important;
+  padding: 1rem !important;
+}
+
+#tab-resume > .resume-shell {
+  max-width: none;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .chat-hints {
@@ -369,8 +1204,9 @@ input:focus-visible {
 
 .chat-subtle-hint {
   margin: 0;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   color: var(--text-muted);
+  opacity: 0.85;
 }
 
 .hint-chip {
@@ -385,17 +1221,18 @@ input:focus-visible {
 
 #first-run-banner {
   border-color: color-mix(in srgb, var(--brand-300) 46%, transparent) !important;
-  background: color-mix(in srgb, var(--brand-soft) 46%, transparent) !important;
+  background: color-mix(in srgb, var(--brand-soft) 28%, transparent) !important;
+  padding: 0.65rem 0.8rem !important;
 }
 
 .queue-status {
   margin: 0;
-  padding: 0.55rem 0.8rem;
+  padding: 0.42rem 0.65rem;
   border-radius: var(--radius-sm);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   color: var(--text-secondary);
-  border: 1px dashed color-mix(in srgb, var(--brand-300) 42%, transparent);
-  background: color-mix(in srgb, var(--surface-2) 74%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--brand-300) 32%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 58%, transparent);
 }
 
 .queue-status.hidden {
@@ -403,9 +1240,9 @@ input:focus-visible {
 }
 
 .onboarding-card {
-  background: color-mix(in srgb, #0c1b26 54%, transparent);
+  background: color-mix(in srgb, #0c1b26 44%, transparent);
   backdrop-filter: blur(10px);
-  border-color: color-mix(in srgb, var(--brand-400) 64%, transparent);
+  border-color: color-mix(in srgb, var(--brand-400) 42%, transparent);
 }
 
 .onboarding-card h3 {
@@ -430,7 +1267,7 @@ input:focus-visible {
 }
 
 .onboarding-progress-track {
-  height: 4px;
+  height: 3px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--border-subtle) 80%, transparent);
   overflow: hidden;
@@ -453,9 +1290,9 @@ input:focus-visible {
 
 .onboarding-status {
   border: 1px solid color-mix(in srgb, var(--border-strong) 50%, transparent);
-  padding: 0.75rem;
+  padding: 0.55rem;
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface-2) 50%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 42%, transparent);
 }
 
 .onboarding-feature-unlocks ul,
@@ -472,17 +1309,23 @@ input:focus-visible {
 
 .chat-status-card {
   flex: 0 0 auto;
+  padding: 0.42rem 0.6rem !important;
+  border-radius: 0.68rem !important;
+  background: color-mix(in srgb, var(--surface-1) 66%, transparent) !important;
+  border-color: color-mix(in srgb, var(--border-subtle) 80%, transparent) !important;
+  margin: 0 !important;
 }
 
 .chat-history {
   position: relative;
   flex: 1;
-  min-height: 260px;
+  min-height: 220px;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 0.74rem;
-  padding: 0.9rem 0.9rem 1rem;
+  justify-content: flex-end;
+  gap: 0.56rem;
+  padding: 0.74rem 0.74rem 0.82rem;
   border-radius: var(--radius-md);
   border: 1px solid color-mix(in srgb, var(--brand-300) 24%, transparent);
   background:
@@ -569,7 +1412,7 @@ input:focus-visible {
 }
 
 .msg-meta {
-  font-size: 0.64rem;
+  font-size: 0.61rem;
   letter-spacing: 0.075em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -641,23 +1484,23 @@ input:focus-visible {
 
 .log-panel {
   margin-top: 0.2rem;
-  padding: 0.72rem 0.9rem;
+  padding: 0.52rem 0.66rem;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--surface-1) 86%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 72%, transparent);
 }
 
 .log-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.6rem;
+  margin-bottom: 0.38rem;
   gap: 0.75rem;
 }
 
 .log-title {
-  font-size: 0.74rem;
-  letter-spacing: 0.105em;
+  font-size: 0.68rem;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -686,15 +1529,15 @@ input:focus-visible {
 
 .log-list {
   display: grid;
-  gap: 0.45rem;
-  max-height: 188px;
+  gap: 0.34rem;
+  max-height: 144px;
   overflow-y: auto;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   color: var(--text-secondary);
 }
 
 .log-item {
-  padding: 0.45rem 0.62rem;
+  padding: 0.34rem 0.5rem;
   border-radius: 0.62rem;
   border: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--surface-2) 72%, transparent);
@@ -716,6 +1559,8 @@ input:focus-visible {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
+  table-layout: fixed;
+  font-size: 0.86rem;
 }
 
 #tab-jobs thead th {
@@ -731,6 +1576,37 @@ input:focus-visible {
 
 #tab-jobs tbody tr:hover {
   background: color-mix(in srgb, var(--surface-elevated) 34%, transparent);
+}
+
+#tab-jobs th,
+#tab-jobs td {
+  padding: 0.56rem 0.58rem !important;
+}
+
+#tab-jobs .overflow-y-auto {
+  overflow-x: auto;
+}
+
+#jobs-filter-controls {
+  margin-bottom: 0.55rem !important;
+  padding: 0.58rem !important;
+  border-radius: 0.76rem !important;
+  background: color-mix(in srgb, var(--surface-1) 70%, transparent) !important;
+}
+
+#jobs-filter-summary {
+  font-size: 0.72rem !important;
+  color: color-mix(in srgb, var(--text-muted) 92%, transparent) !important;
+}
+
+#jobs-batch-hint {
+  font-size: 0.7rem !important;
+}
+
+#job-detail-panel {
+  margin-top: 0 !important;
+  padding: 0.62rem !important;
+  border-radius: 0.8rem !important;
 }
 
 #tab-jobs .accent-blue-500,
@@ -755,6 +1631,7 @@ input:focus-visible {
 #tab-config .config-tab-btn {
   border-color: var(--border-subtle);
   color: var(--text-secondary);
+  min-height: 44px;
 }
 
 #tab-config .config-tab-btn:hover {
@@ -766,7 +1643,25 @@ input:focus-visible {
   color: var(--brand-300);
 }
 
+#tab-config .bg-slate-900.border {
+  padding: 0.9rem !important;
+  border-radius: 0.88rem !important;
+}
+
+#tab-config .panel-shell,
+#tab-jobs .panel-shell,
+#tab-resume .panel-shell,
+#tab-chat .panel-shell {
+  padding: 0.88rem !important;
+}
+
+#tab-config .config-field-group {
+  min-height: 0;
+  padding: 0.7rem !important;
+}
+
 #md-editor {
+  min-height: 230px;
   line-height: 1.65;
   border-color: var(--border-subtle) !important;
   background: color-mix(in srgb, var(--surface-1) 90%, transparent) !important;
@@ -774,6 +1669,8 @@ input:focus-visible {
 
 #resume-preview,
 #resume-preview-empty {
+  margin-top: 0.55rem !important;
+  padding: 0.8rem !important;
   border-color: var(--border-subtle) !important;
   background: color-mix(in srgb, var(--surface-2) 84%, transparent) !important;
 }
@@ -789,6 +1686,25 @@ input:focus-visible {
 
 #resume-upload-status {
   color: var(--text-muted);
+  font-size: 0.72rem;
+  margin-top: 0.5rem !important;
+}
+
+#resume-step-flow {
+  margin-bottom: 0 !important;
+  padding: 0.64rem !important;
+  border-radius: 0.76rem !important;
+  background: color-mix(in srgb, var(--surface-1) 68%, transparent) !important;
+}
+
+#resume-step-flow ol {
+  gap: 0.52rem !important;
+}
+
+#resume-task-card {
+  margin-top: 0.58rem !important;
+  padding: 0.66rem !important;
+  border-radius: 0.76rem !important;
 }
 
 #modal-overlay {
@@ -820,6 +1736,48 @@ input:focus-visible {
   border: 1px solid var(--border-subtle);
 }
 
+.chat-actions {
+  gap: 0.52rem !important;
+  align-items: stretch;
+}
+
+.jobs-main-shell,
+.config-settings-shell,
+.config-editor-shell,
+.resume-main-shell,
+.resume-side-shell {
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--surface-2) 86%, transparent),
+    color-mix(in srgb, var(--surface-1) 90%, transparent)
+  ) !important;
+}
+
+#tab-resume > div {
+  max-width: none;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+#tab-jobs .panel-shell,
+#tab-config .panel-shell,
+#tab-resume .panel-shell {
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--surface-2) 86%, transparent),
+    color-mix(in srgb, var(--surface-1) 90%, transparent)
+  ) !important;
+}
+
+#chat-input {
+  min-height: 58px;
+  padding: 0.62rem 0.78rem !important;
+  line-height: 1.42;
+}
+
 #chat-input,
 #md-editor,
 #modal-input {
@@ -833,60 +1791,186 @@ input:focus-visible {
   min-height: 44px;
 }
 
+#chat-send {
+  min-height: 56px;
+  height: auto !important;
+  padding: 0.56rem 0.92rem !important;
+  font-size: 0.9rem;
+}
+
+#refresh-jobs,
+#save-settings,
+#save-md,
+#upload-resume,
+#review-uploaded-resume,
+#gen-resume,
+#batch-apply,
+#batch-fail,
+#batch-favorite,
+#batch-delete,
+.log-btn,
+.onboarding-toggle {
+  min-height: 44px;
+}
+
 /* 375px baseline */
 @media (max-width: 420px) {
   body {
-    padding: 0.75rem !important;
+    padding: 0.48rem !important;
+    gap: 0.42rem !important;
   }
 
   header {
-    margin-bottom: 0.95rem !important;
+    margin-bottom: 0.4rem !important;
+    padding: 0.36rem 0.44rem !important;
+  }
+
+  header > div {
+    gap: 0.32rem !important;
   }
 
   nav {
     width: 100%;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  header nav [role="tablist"] {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
 
   .nav-btn {
-    flex: 1 1 calc(50% - 0.35rem);
+    flex: 0 0 auto;
+    min-width: 88px;
     justify-content: center;
     text-align: center;
     min-height: 44px;
+    padding-inline: 0.58rem;
+  }
+
+  #ws-status {
+    max-width: 56px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .panel-shell,
+  #config-workflow-guide {
+    padding: 0.68rem !important;
+    border-radius: 0.78rem !important;
+  }
+
+  .config-shell,
+  .resume-shell,
+  .jobs-workbench,
+  .resume-workbench,
+  .jobs-command-bar,
+  .config-readiness-band,
+  .config-impact-list,
+  .config-doc-guide {
+    grid-template-columns: 1fr !important;
+    gap: 0.56rem !important;
+  }
+
+  .panel-hero,
+  .jobs-command-bar,
+  .config-readiness-band,
+  .chat-composer-meta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .shortcut-chip {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+
+  .metric-strip {
+    min-width: 0;
   }
 
   .msg {
     max-width: 100%;
   }
 
+  #chat-input {
+    min-height: 52px;
+  }
+
   #chat-send {
     width: 100%;
     height: auto !important;
-    min-height: 52px;
-    padding: 0.85rem 0.7rem !important;
+    min-height: 48px;
+    padding: 0.62rem 0.68rem !important;
   }
 
-  #tab-jobs .flex.items-center.gap-2 {
-    flex-wrap: wrap;
-    justify-content: flex-start;
+  .jobs-shell,
+  .jobs-workbench,
+  .resume-shell,
+  .config-shell {
+    min-width: 0;
+    overflow-x: hidden;
   }
 
-  #tab-jobs .flex.items-center.gap-2 button {
-    flex: 1 1 calc(50% - 0.5rem);
-    min-width: 112px;
-    min-height: 40px;
+  #tab-jobs .overflow-y-auto {
+    overflow-x: auto;
+    max-width: 100%;
   }
 
-  #tab-resume .mx-auto {
-    margin-top: 0.3rem !important;
-    padding: 1rem !important;
+  #stats-legend {
+    gap: 0.35rem !important;
+    padding: 0.52rem !important;
+  }
+
+  #resume-step-flow ol {
+    gap: 0.42rem !important;
+  }
+
+  .tab-content button {
+    min-height: 44px !important;
+  }
+
+  .shortcut-chip,
+  #jobs-filter-reset,
+  #tab-jobs button.w-full,
+  #tab-jobs .sortable-th button {
+    min-height: 44px !important;
+  }
+
+  #tab-jobs .sortable-th button {
+    display: flex !important;
+    align-items: center;
+  }
+
+  #chat-send,
+  #refresh-jobs,
+  #save-settings,
+  #save-md,
+  #upload-resume,
+  #review-uploaded-resume,
+  #gen-resume,
+  #batch-apply,
+  #batch-fail,
+  #batch-favorite,
+  #batch-delete,
+  .log-btn,
+  .onboarding-toggle {
+    min-height: 44px !important;
   }
 }
 
 /* 768px tablet */
 @media (max-width: 768px) {
   body {
-    padding: 0.95rem !important;
+    padding: 0.66rem !important;
   }
 
   .chat-actions {
@@ -898,13 +1982,36 @@ input:focus-visible {
     min-height: 0;
   }
 
+  .panel-hero,
+  .jobs-command-bar,
+  .config-readiness-band,
+  .chat-composer-meta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hero-actions {
+    justify-content: flex-start;
+  }
+
   .chat-history {
-    min-height: 280px;
-    padding-inline: 0.85rem;
+    min-height: 240px;
+    padding-inline: 0.72rem;
   }
 
   .msg {
-    max-width: 92%;
+    max-width: 95%;
+  }
+
+  .jobs-workbench,
+  .jobs-command-bar,
+  .config-shell,
+  .resume-shell,
+  .resume-workbench,
+  .config-readiness-band,
+  .config-impact-list,
+  .config-doc-guide {
+    grid-template-columns: 1fr !important;
   }
 
   #tab-jobs .h-\[calc\(100vh-140px\)\],
@@ -922,16 +2029,14 @@ input:focus-visible {
 
 /* 1024px laptop */
 @media (max-width: 1024px) {
-  #tab-jobs > .grid {
+  .jobs-workbench,
+  .jobs-command-bar,
+  .config-shell,
+  .resume-shell,
+  .resume-workbench,
+  .config-readiness-band,
+  #resume-priority-grid {
     grid-template-columns: 1fr !important;
-  }
-
-  #tab-jobs > .grid > div {
-    min-height: 0;
-  }
-
-  #tab-jobs > .grid > div:last-child {
-    order: -1;
   }
 }
 
