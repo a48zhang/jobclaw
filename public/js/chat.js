@@ -68,28 +68,28 @@ let chatQueueNote = null
 
 function ensureChatStatusCard() {
   if (chatStatusCard) return chatStatusCard
-  const container = document.querySelector('#tab-chat .bg-slate-800.rounded-xl')
+  const container = document.querySelector('#tab-chat .chat-container')
   if (!container) return null
 
   const card = document.createElement('div')
   card.id = 'chat-status-card'
-  card.className = 'mb-3 rounded-xl border border-slate-700 bg-slate-900/80 p-4 shadow-inner flex flex-col gap-3'
+  card.className = 'chat-status-card mt-3 rounded-xl border border-slate-700 bg-slate-900/72 px-3 py-2 shadow-inner'
 
   const header = document.createElement('div')
-  header.className = 'flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between'
+  header.className = 'flex flex-wrap items-center gap-2'
 
   const labelBlock = document.createElement('div')
   const title = document.createElement('p')
-  title.className = 'text-xs font-semibold uppercase tracking-wider text-slate-400'
+  title.className = 'text-[11px] font-semibold uppercase tracking-wider text-slate-500'
   title.textContent = '主任务状态'
 
   chatStatusPill = document.createElement('span')
   chatStatusPill.id = 'chat-status-pill'
-  chatStatusPill.className = `inline-flex items-center rounded-full px-3 py-0.5 text-xs font-semibold ${CHAT_STATE_METADATA.idle.pill}`
+  chatStatusPill.className = `inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${CHAT_STATE_METADATA.idle.pill}`
   chatStatusPill.textContent = CHAT_STATE_METADATA.idle.label
 
   const statusRow = document.createElement('div')
-  statusRow.className = 'mt-1 flex flex-wrap items-center gap-3'
+  statusRow.className = 'mt-1 flex flex-wrap items-center gap-2'
   statusRow.appendChild(chatStatusPill)
 
   chatStatusDetail = document.createElement('p')
@@ -104,37 +104,12 @@ function ensureChatStatusCard() {
 
   chatQueueNote = document.createElement('p')
   chatQueueNote.id = 'chat-status-queue'
-  chatQueueNote.className = 'text-xs text-slate-200 lg:text-right lg:ml-4 hidden'
+  chatQueueNote.className = 'text-xs text-slate-400 hidden'
   chatQueueNote.textContent = ''
   header.appendChild(chatQueueNote)
 
   card.appendChild(header)
-
-  const welcome = document.createElement('p')
-  welcome.id = 'chat-status-welcome'
-  welcome.className = 'text-xs text-slate-500'
-  welcome.textContent = '欢迎回来，主 Agent 正在守护你的求职主路径。'
-  card.appendChild(welcome)
-
-  const hintWrapper = document.createElement('div')
-  hintWrapper.id = 'chat-status-hints'
-  hintWrapper.className = 'flex flex-wrap gap-2 text-xs text-slate-400'
-  for (const hint of CHAT_HINTS) {
-    const chip = document.createElement('span')
-    chip.className = 'hint-chip'
-    chip.textContent = hint.text
-    hintWrapper.appendChild(chip)
-  }
-  card.appendChild(hintWrapper)
-
-  const firstBanner = document.getElementById('first-run-banner')
-  if (firstBanner?.parentElement === container) {
-    container.insertBefore(card, firstBanner)
-  } else if (container.firstChild) {
-    container.insertBefore(card, container.firstChild)
-  } else {
-    container.appendChild(card)
-  }
+  container.appendChild(card)
 
   chatStatusCard = card
   setUnifiedPlaceholder()

@@ -359,6 +359,10 @@ input:focus-visible {
   gap: var(--space-3);
 }
 
+.chat-header {
+  align-items: flex-start;
+}
+
 .chat-hints {
   display: flex;
   flex-wrap: wrap;
@@ -367,10 +371,10 @@ input:focus-visible {
 }
 
 .hint-chip {
-  padding: 0.3rem 0.7rem;
+  padding: 0.26rem 0.62rem;
   border-radius: var(--radius-pill);
-  font-size: 0.72rem;
-  letter-spacing: 0.045em;
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--surface-2) 78%, transparent);
   border: 1px solid var(--border-subtle);
@@ -396,13 +400,30 @@ input:focus-visible {
 }
 
 .onboarding-card {
-  background: color-mix(in srgb, #0c1b26 64%, transparent);
+  background: color-mix(in srgb, #0c1b26 54%, transparent);
   backdrop-filter: blur(10px);
   border-color: color-mix(in srgb, var(--brand-400) 64%, transparent);
 }
 
 .onboarding-card h3 {
   margin: 0;
+}
+
+.onboarding-toggle {
+  min-height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  padding: 0.35rem 0.7rem;
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
+.onboarding-toggle:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.onboarding-details.hidden {
+  display: none !important;
 }
 
 .onboarding-progress-track {
@@ -443,7 +464,11 @@ input:focus-visible {
 .onboarding-disabled-text {
   font-size: 0.75rem;
   color: var(--danger-500);
-  padding-top: 0.5rem;
+  padding-top: 0.15rem;
+}
+
+.chat-status-card {
+  flex: 0 0 auto;
 }
 
 .chat-history {
@@ -828,8 +853,9 @@ input:focus-visible {
   }
 
   #chat-send {
-    width: 96px;
+    width: 100%;
     height: auto !important;
+    min-height: 52px;
     padding: 0.85rem 0.7rem !important;
   }
 
@@ -854,6 +880,11 @@ input:focus-visible {
 @media (max-width: 768px) {
   body {
     padding: 0.95rem !important;
+  }
+
+  .chat-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .chat-container {

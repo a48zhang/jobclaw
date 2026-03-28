@@ -80,6 +80,31 @@ function updateDocStatusMarker(name, ready) {
   label.classList.toggle('text-amber-300', !ready)
 }
 
+function updateOnboardingDisclosure(completedSteps) {
+  const toggle = document.getElementById('onboarding-toggle')
+  const details = document.getElementById('onboarding-details')
+  if (!toggle || !details) return
+
+  const shouldCollapse = completedSteps > 0
+  details.classList.toggle('hidden', shouldCollapse)
+  toggle.setAttribute('aria-expanded', shouldCollapse ? 'false' : 'true')
+  toggle.textContent = shouldCollapse ? '展开详情' : '收起详情'
+}
+
+function initOnboardingDisclosure() {
+  const toggle = document.getElementById('onboarding-toggle')
+  const details = document.getElementById('onboarding-details')
+  if (!toggle || !details || toggle.dataset.bound === 'true') return
+
+  toggle.addEventListener('click', () => {
+    const expanded = toggle.getAttribute('aria-expanded') === 'true'
+    details.classList.toggle('hidden', expanded)
+    toggle.setAttribute('aria-expanded', expanded ? 'false' : 'true')
+    toggle.textContent = expanded ? '展开详情' : '收起详情'
+  })
+  toggle.dataset.bound = 'true'
+}
+
 function applyOnboardingState({ baseReady, targetsComplete, userinfoComplete }) {
   const banner = document.getElementById('first-run-banner')
   if (!banner) return
@@ -97,6 +122,21 @@ function applyOnboardingState({ baseReady, targetsComplete, userinfoComplete }) 
   const baseBadge = document.getElementById('onboarding-base-status')
   if (baseBadge) {
     baseBadge.textContent = normalizedBase ? '基础就绪' : '待配置'
+  }
+
+  const summary = document.getElementById('onboarding-summary')
+  if (summary) {
+    if (!normalizedBase) {
+      summary.textContent = `还差基础设置，补齐 ${missingFieldsText} 后即可正常对话。`
+    } else if (!normalizedTargets || !normalizedUserinfo) {
+      const missingDocs = [
+        normalizedTargets ? null : 'targets.md',
+        normalizedUserinfo ? null : 'userinfo.md',
+      ].filter(Boolean).join('、')
+      summary.textContent = `聊天已可用，再补齐 ${missingDocs} 就能顺手进入搜索和简历主路径。`
+    } else {
+      summary.textContent = '基础路径已就绪，可以直接对话、搜索职位或生成简历。'
+    }
   }
 
   const settingsDetail = document.getElementById('onboarding-settings-detail')
@@ -150,6 +190,7 @@ function applyOnboardingState({ baseReady, targetsComplete, userinfoComplete }) 
   } else {
     banner.classList.add('hidden')
   }
+  updateOnboardingDisclosure(completedSteps)
 
   updateChatDisabledHint()
   updateConfigMissingHint()
@@ -255,6 +296,7 @@ async function refreshFirstRunBanner() {
 }
 
 initTabNavigation()
+initOnboardingDisclosure()
 showTab(resolveInitialTabId(), { persist: false, userInitiated: false })
 
 connectWS()
