@@ -3,40 +3,47 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>JobClaw 🦞 看板</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <title>JobClaw 控制台</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/tw-compat.css">
   <link rel="stylesheet" href="/css/style.css">
 </head>
-<body class="min-h-screen p-4 font-mono flex flex-col">
-<header class="flex flex-col md:flex-row items-start md:items-center justify-between mb-6 gap-4">
-  <div class="flex items-center gap-4">
-    <h1 class="text-2xl font-bold text-blue-400">JobClaw 🦞</h1>
-    <nav class="flex gap-2 text-sm font-semibold text-slate-400 bg-slate-800 p-1 rounded-lg">
-      <button class="nav-btn active" data-target="tab-chat">💬 智能助理</button>
-      <button class="nav-btn" data-target="tab-jobs">📊 职位看板</button>
-      <button class="nav-btn" data-target="tab-config">⚙️ 工作区配置</button>
-      <button class="nav-btn" data-target="tab-resume">📄 简历工具</button>
-    </nav>
-  </div>
-  <div class="flex flex-col items-end gap-2 text-sm">
-    <div class="flex items-center gap-2">
-      <span id="ws-dot" class="ws-dot ws-disconnected"></span>
-      <span id="ws-status" class="text-gray-400">未连接</span>
+<body class="min-h-screen p-3 md:p-4 flex flex-col gap-4">
+<a href="#app-main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:bg-slate-900 focus:text-white focus:px-3 focus:py-2 focus:rounded">
+  跳转到主内容
+</a>
+
+<header class="rounded-xl border border-slate-800/80 bg-slate-900/70 backdrop-blur-sm p-4 shadow-lg" role="banner">
+  <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-3">
+        <h1 class="text-2xl font-bold text-blue-300">JobClaw</h1>
+      </div>
+      <nav class="mt-3" aria-label="主导航">
+        <div class="flex flex-wrap gap-2 text-sm font-semibold text-slate-300 bg-slate-800/90 p-1.5 rounded-lg" role="tablist" aria-orientation="horizontal">
+          <button type="button" class="nav-btn active" data-target="tab-chat" role="tab" aria-controls="tab-chat" aria-selected="true">智能助理</button>
+          <button type="button" class="nav-btn" data-target="tab-jobs" role="tab" aria-controls="tab-jobs" aria-selected="false">职位看板</button>
+          <button type="button" class="nav-btn" data-target="tab-config" role="tab" aria-controls="tab-config" aria-selected="false">工作区配置</button>
+          <button type="button" class="nav-btn" data-target="tab-resume" role="tab" aria-controls="tab-resume" aria-selected="false">简历工具</button>
+        </div>
+      </nav>
     </div>
-    <div id="agent-states" class="flex flex-wrap gap-2 justify-end">
-      <span class="text-slate-500 text-xs">等待 Agent...</span>
-    </div>
+    <aside class="w-full lg:w-auto lg:min-w-[260px] flex flex-col gap-2 text-sm" aria-label="连接与运行状态">
+      <div class="flex items-center gap-2">
+        <span id="ws-dot" class="ws-dot ws-disconnected" aria-hidden="true"></span>
+        <span id="ws-status" class="text-gray-400" role="status" aria-live="polite">未连接</span>
+      </div>
+      <div id="agent-states" class="flex flex-wrap gap-2 lg:justify-end" role="status" aria-live="polite">
+        <span class="text-slate-500 text-xs">等待 Agent...</span>
+      </div>
+    </aside>
   </div>
 </header>
 
-<main class="flex-1 flex flex-col min-h-0">
-  <section id="tab-chat" class="tab-content active h-full flex flex-col">
+<main id="app-main" class="flex-1 min-h-0 flex flex-col">
+  <section id="tab-chat" class="tab-content active min-h-0 flex-1 flex flex-col" role="tabpanel" aria-labelledby="tab-chat-title">
     <div class="bg-slate-800 rounded-xl p-4 flex-1 flex flex-col min-h-0 shadow-lg">
-      <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">与 Agent 对话</h2>
+      <h2 id="tab-chat-title" class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">与 Agent 对话</h2>
       <div class="chat-hints" id="chat-hints">
         <span class="hint-chip">/new 新会话</span>
         <span class="hint-chip">/clear 清空会话</span>
@@ -46,17 +53,17 @@
         <div id="first-run-title" class="font-semibold text-blue-300 mb-1">欢迎使用 JobClaw</div>
         <div id="first-run-text" class="text-slate-300">请先完成基础设置，再继续填写求职资料并开始搜索职位。</div>
       </div>
-      <div class="chat-container">
+      <div class="chat-container flex-1 min-h-0" style="height: auto;">
         <div id="chat-history" class="chat-history">
           <div class="text-center text-slate-500 text-xs my-4">--- 连接已建立 ---</div>
         </div>
-        <div id="queue-status" class="queue-status hidden"></div>
+        <div id="queue-status" class="queue-status hidden" role="status" aria-live="polite"></div>
         <div class="flex gap-2 items-end">
           <textarea id="chat-input"
                     class="flex-1 bg-slate-900 text-slate-200 text-sm p-3 rounded-lg resize-none outline-none border border-slate-700 focus:border-blue-500 shadow-inner"
                     rows="3"
                     placeholder="输入指令，例如：去 BOSS 直聘搜一下前端开发岗位... (Enter 发送，Shift+Enter 换行)"></textarea>
-          <button id="chat-send"
+          <button id="chat-send" type="button"
                   class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-lg font-bold shadow-md transition-colors h-[74px]">
             发送
           </button>
@@ -66,41 +73,60 @@
         <div class="log-header">
           <div class="log-title">操作日志</div>
           <div class="log-actions">
-            <button id="log-toggle" class="log-btn">收起</button>
-            <button id="log-clear" class="log-btn">清空</button>
+            <button id="log-toggle" type="button" class="log-btn">收起</button>
+            <button id="log-clear" type="button" class="log-btn">清空</button>
           </div>
         </div>
-        <div id="tool-log-list" class="log-list"></div>
+        <div id="tool-log-list" class="log-list" role="log" aria-live="polite"></div>
       </div>
     </div>
   </section>
 
-  <section id="tab-jobs" class="tab-content h-full">
-    <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 h-full">
-      <div class="xl:col-span-3 bg-slate-800 rounded-xl p-4 flex flex-col shadow-lg h-[calc(100vh-140px)]">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">职位列表</h2>
-          <div class="flex items-center gap-2">
+  <section id="tab-jobs" class="tab-content min-h-0 flex-1" role="tabpanel" aria-labelledby="tab-jobs-title">
+    <div class="grid grid-cols-1 xl:grid-cols-4 gap-4 h-full min-h-0">
+      <div class="xl:col-span-3 bg-slate-800 rounded-xl p-4 flex flex-col shadow-lg min-h-0">
+        <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-3">
+          <h2 id="tab-jobs-title" class="text-sm font-semibold text-slate-400 uppercase tracking-wider">职位列表</h2>
+          <div class="jobs-toolbar w-full lg:w-auto">
+            <div class="jobs-toolbar-top flex flex-wrap items-center gap-2">
+              <span id="jobs-batch-hint" class="text-xs text-slate-500">未选择职位时仅保留“刷新”操作</span>
+              <button id="refresh-jobs" type="button" class="text-sm bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded shadow min-h-[44px]">刷新</button>
+            </div>
+            <div id="jobs-batch-toolbar" class="jobs-batch-toolbar hidden" aria-hidden="true">
+              <div class="jobs-batch-main flex flex-wrap items-center gap-2">
+                <button id="batch-apply" type="button" class="text-sm bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded shadow min-h-[44px]">标记已投递</button>
+                <button id="batch-favorite" type="button" class="text-sm bg-amber-600 hover:bg-amber-500 text-white px-3 py-2 rounded shadow min-h-[44px]">标记关注</button>
+                <button id="batch-fail" type="button" class="text-sm bg-rose-600 hover:bg-rose-500 text-white px-3 py-2 rounded shadow min-h-[44px]">标记失败</button>
+              </div>
+              <div class="jobs-batch-danger mt-2 flex items-center justify-between gap-2 rounded-md border border-red-700 bg-red-900/50 px-2 py-2">
+                <span class="text-xs text-amber-200">危险操作</span>
+                <button id="batch-delete" type="button" class="text-sm bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded shadow min-h-[44px]">删除</button>
+              </div>
+            </div>
             <span id="selected-count" class="text-xs text-slate-500">已选 0</span>
-            <button id="batch-apply" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded shadow">标记已投递</button>
-            <button id="batch-fail" class="text-xs bg-rose-600 hover:bg-rose-500 text-white px-3 py-1 rounded shadow">标记失败</button>
-            <button id="batch-favorite" class="text-xs bg-amber-600 hover:bg-amber-500 text-white px-3 py-1 rounded shadow">标记关注</button>
-            <button id="batch-delete" class="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded shadow">删除</button>
-            <button id="refresh-jobs" class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded shadow">刷新</button>
           </div>
         </div>
-        <div class="overflow-y-auto flex-1 bg-slate-900 rounded-lg border border-slate-700">
+        <div class="overflow-y-auto flex-1 bg-slate-900 rounded-lg border border-slate-700 min-h-0">
           <table class="w-full text-sm">
+            <caption class="sr-only">职位列表，可按公司、职位、状态和时间排序，并支持批量操作</caption>
             <thead class="sticky top-0 bg-slate-800 shadow">
               <tr class="text-slate-400 border-b border-slate-700">
-                <th class="text-left py-3 px-4 w-10">
+                <th class="text-left py-3 px-4 w-10" scope="col">
                   <input id="select-all" type="checkbox" class="accent-blue-500" />
                 </th>
-                <th class="sortable-th text-left py-3 px-4" data-col="company">公司 ⇅</th>
-                <th class="sortable-th text-left py-3 px-4" data-col="title">职位 ⇅</th>
-                <th class="text-left py-3 px-4">链接</th>
-                <th class="sortable-th text-left py-3 px-4" data-col="status">状态 ⇅</th>
-                <th class="sortable-th text-left py-3 px-4" data-col="time">时间 ⇅</th>
+                <th class="sortable-th text-left py-3 px-4" data-col="company" scope="col" aria-sort="none">
+                  <button type="button" data-sort-trigger="true" class="w-full text-left">公司 ⇅</button>
+                </th>
+                <th class="sortable-th text-left py-3 px-4" data-col="title" scope="col" aria-sort="none">
+                  <button type="button" data-sort-trigger="true" class="w-full text-left">职位 ⇅</button>
+                </th>
+                <th class="text-left py-3 px-4" scope="col">链接</th>
+                <th class="sortable-th text-left py-3 px-4" data-col="status" scope="col" aria-sort="none">
+                  <button type="button" data-sort-trigger="true" class="w-full text-left">状态 ⇅</button>
+                </th>
+                <th class="sortable-th text-left py-3 px-4" data-col="time" scope="col" aria-sort="none">
+                  <button type="button" data-sort-trigger="true" class="w-full text-left">时间 ⇅</button>
+                </th>
               </tr>
             </thead>
             <tbody id="job-tbody" class="divide-y divide-slate-800/50">
@@ -109,30 +135,30 @@
           </table>
         </div>
       </div>
-      <div class="bg-slate-800 rounded-xl p-4 flex flex-col shadow-lg">
+      <aside class="bg-slate-800 rounded-xl p-4 flex flex-col shadow-lg min-h-0" aria-label="职位状态统计">
         <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-6">投递统计</h2>
         <div class="flex justify-center flex-1 items-center">
           <div class="w-full max-w-[250px]">
             <canvas id="donut-chart" width="250" height="250"></canvas>
           </div>
         </div>
-        <div id="stats-legend" class="flex flex-col gap-2 mt-6 text-sm bg-slate-900 p-4 rounded-lg border border-slate-700"></div>
-      </div>
+        <div id="stats-legend" class="flex flex-col gap-2 mt-6 text-sm bg-slate-900 p-4 rounded-lg border border-slate-700" role="status" aria-live="polite"></div>
+      </aside>
     </div>
   </section>
 
-  <section id="tab-config" class="tab-content h-full">
-    <div class="bg-slate-800 rounded-xl p-4 h-[calc(100vh-140px)] flex flex-col gap-4 shadow-lg overflow-y-auto">
+  <section id="tab-config" class="tab-content min-h-0 flex-1" role="tabpanel" aria-labelledby="tab-config-title">
+    <div class="bg-slate-800 rounded-xl p-4 h-full min-h-0 flex flex-col gap-4 shadow-lg overflow-y-auto">
       <div class="bg-slate-900 border border-slate-700 rounded-xl p-5">
         <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
           <div>
-            <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">基础设置</h2>
+            <h2 id="tab-config-title" class="text-sm font-semibold text-slate-400 uppercase tracking-wider">基础设置</h2>
             <p id="settings-summary" class="text-sm text-slate-300 mt-2">正在加载设置...</p>
             <p id="settings-missing" class="text-xs text-slate-500 mt-2">填写后即可启用聊天与简历功能。</p>
           </div>
           <div class="flex items-center gap-3">
-            <span id="save-settings-status" class="text-sm text-slate-400"></span>
-            <button id="save-settings" class="text-sm bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg font-bold shadow">
+            <span id="save-settings-status" class="text-sm text-slate-400" role="status" aria-live="polite"></span>
+            <button id="save-settings" type="button" class="text-sm bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg font-bold shadow">
               保存设置
             </button>
           </div>
@@ -166,48 +192,48 @@
         <div class="flex items-center justify-between mb-4 px-1">
           <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider">工作区配置编辑器</h2>
           <div class="flex items-center gap-3">
-            <span id="save-status" class="text-sm text-slate-400"></span>
-            <button id="save-md" class="text-sm bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-lg font-bold shadow">
+            <span id="save-status" class="text-sm text-slate-400" role="status" aria-live="polite"></span>
+            <button id="save-md" type="button" class="text-sm bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded-lg font-bold shadow">
               保存
             </button>
           </div>
         </div>
         <div class="flex gap-2 mb-3">
-          <button class="config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-900 text-blue-400 border-t border-l border-r border-slate-700 font-bold" data-file="targets">targets.md</button>
-          <button class="config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-200 border-t border-l border-r border-transparent transition-colors" data-file="userinfo">userinfo.md</button>
+          <button type="button" class="config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-900 text-blue-400 border-t border-l border-r border-slate-700 font-bold" data-file="targets">targets.md</button>
+          <button type="button" class="config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-200 border-t border-l border-r border-transparent transition-colors" data-file="userinfo">userinfo.md</button>
         </div>
         <textarea id="md-editor" class="flex-1 w-full bg-slate-900 text-slate-200 text-sm p-4 rounded-b-lg rounded-tr-lg resize-none outline-none border border-slate-700 focus:border-blue-500 shadow-inner font-mono leading-relaxed" placeholder="加载中..."></textarea>
       </div>
     </div>
   </section>
 
-  <section id="tab-resume" class="tab-content h-full">
-    <div class="bg-slate-800 rounded-xl p-6 max-w-2xl mx-auto shadow-lg mt-10">
-      <h2 class="text-lg font-bold text-slate-200 mb-2">简历生成工具</h2>
+  <section id="tab-resume" class="tab-content min-h-0 flex-1 overflow-y-auto" role="tabpanel" aria-labelledby="tab-resume-title">
+    <div class="bg-slate-800 rounded-xl p-6 max-w-3xl mx-auto shadow-lg my-2 md:my-6">
+      <h2 id="tab-resume-title" class="text-lg font-bold text-slate-200 mb-2">简历生成工具</h2>
       <p class="text-slate-400 text-sm mb-6">基于工作区中的模板和用户信息，调用 Agent 自动编译生成最新版本的 PDF 简历。</p>
       <div class="flex flex-col gap-4">
         <div class="bg-slate-900 border border-slate-700 p-4 rounded-lg">
           <p class="text-slate-300 text-sm mb-3">上传现有 PDF 简历，供后续评价或改写使用</p>
           <div class="flex flex-col md:flex-row gap-3">
             <input id="resume-upload-file" type="file" accept=".pdf,application/pdf" class="flex-1 bg-slate-950 text-slate-300 text-sm p-3 rounded border border-slate-700" />
-            <button id="upload-resume" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-lg font-bold shadow">
+            <button id="upload-resume" type="button" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-3 rounded-lg font-bold shadow">
               上传 PDF
             </button>
           </div>
-          <button id="review-uploaded-resume" class="mt-3 w-full bg-amber-600 hover:bg-amber-500 text-white px-5 py-3 rounded-lg font-bold shadow">
+          <button id="review-uploaded-resume" type="button" class="mt-3 w-full bg-amber-600 hover:bg-amber-500 text-white px-5 py-3 rounded-lg font-bold shadow">
             评价已上传简历
           </button>
-          <p id="resume-upload-status" class="text-xs text-slate-400 mt-3"></p>
+          <p id="resume-upload-status" class="text-xs text-slate-400 mt-3" role="status" aria-live="polite"></p>
         </div>
 
-        <button id="gen-resume" class="w-full text-base font-bold bg-purple-600 hover:bg-purple-500 text-white py-4 rounded-lg shadow-md transition-colors flex justify-center items-center gap-2">
-          <span>⚙️</span> 生成简历 PDF
+        <button id="gen-resume" type="button" class="w-full text-base font-bold bg-purple-600 hover:bg-purple-500 text-white py-4 rounded-lg shadow-md transition-colors flex justify-center items-center gap-2">
+          生成简历 PDF
         </button>
 
         <div id="resume-preview" class="mt-4 bg-slate-900 border border-slate-700 p-4 rounded-lg text-center hidden">
           <p class="text-green-400 mb-2 text-sm">✓ 生成成功</p>
           <a id="resume-link" href="/workspace/output/resume.pdf" target="_blank" class="inline-block bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded font-semibold text-sm">
-            📄 查看并下载 PDF
+            查看并下载 PDF
           </a>
         </div>
         <div id="resume-preview-empty" class="mt-4 bg-slate-900 border border-slate-700 p-4 rounded-lg text-center">
@@ -218,31 +244,31 @@
   </section>
 </main>
 
-<div id="modal-overlay" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm">
-  <div class="bg-slate-800 border-2 border-yellow-500 rounded-xl p-6 w-full max-w-lg shadow-2xl transform transition-all">
+<div id="modal-overlay" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 backdrop-blur-sm p-3 md:p-4">
+  <div class="bg-slate-800 border-2 border-yellow-500 rounded-xl p-5 md:p-6 w-full max-w-lg shadow-2xl transform transition-all" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-prompt">
     <div class="flex items-center gap-2 mb-4">
-      <span class="text-2xl">⚠️</span>
-      <h3 class="text-yellow-400 font-bold text-lg">Agent 需要人工干预</h3>
+      <span class="text-yellow-300 text-xs font-semibold uppercase tracking-wider">提示</span>
+      <h3 id="modal-title" class="text-yellow-400 font-bold text-lg">Agent 需要人工干预</h3>
     </div>
     <div class="bg-slate-900 p-3 rounded border border-slate-700 mb-4">
       <p id="modal-prompt" class="text-slate-300 text-sm whitespace-pre-wrap font-mono"></p>
     </div>
     <label id="modal-label" class="text-xs text-slate-400 block mb-2">请输入响应内容（按 Enter 提交）：</label>
     <div id="modal-options" class="flex flex-wrap gap-2 mb-4 hidden"></div>
-    <input id="modal-input" type="text" class="w-full bg-slate-900 border border-slate-600 text-white text-base px-4 py-3 rounded-lg outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 shadow-inner" placeholder="输入内容..." />
+    <input id="modal-input" type="text" class="w-full bg-slate-900 border border-slate-600 text-white text-base px-4 py-3 rounded-lg outline-none focus:border-yellow-400 focus:ring-1 focus:ring-yellow-400 shadow-inner" placeholder="输入内容..." aria-describedby="modal-label" />
     <div class="flex gap-3 mt-6">
-      <button id="modal-cancel" class="px-6 bg-slate-700 hover:bg-slate-600 text-slate-300 py-2.5 rounded-lg text-sm font-semibold transition-colors">
+      <button id="modal-cancel" type="button" class="px-6 bg-slate-700 hover:bg-slate-600 text-slate-300 py-2.5 rounded-lg text-sm font-semibold transition-colors">
         跳过 / 取消
       </button>
-      <button id="modal-submit" class="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2.5 rounded-lg text-sm transition-colors shadow">
+      <button id="modal-submit" type="button" class="flex-1 bg-yellow-500 hover:bg-yellow-400 text-black font-bold py-2.5 rounded-lg text-sm transition-colors shadow">
         确认提交
       </button>
     </div>
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/dompurify-lite.js"></script>
 <script src="/js/state.js"></script>
 <script src="/js/utils.js"></script>
 <script src="/js/websocket.js"></script>

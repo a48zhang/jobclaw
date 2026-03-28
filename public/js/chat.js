@@ -5,6 +5,15 @@
 const chatHistory = document.getElementById('chat-history')
 const chatInput = document.getElementById('chat-input')
 const chatSend = document.getElementById('chat-send')
+const CHAT_TASK_STATE = {
+  IDLE: 'idle',
+  BLOCKED: 'blocked',
+  SUBMITTING: 'submitting',
+  QUEUED: 'queued',
+  RUNNING: 'running',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+}
 
 function setQueueStatus(info) {
   const el = document.getElementById('queue-status')
@@ -18,6 +27,14 @@ function setQueueStatus(info) {
   window.appState.queueInfo = info
   el.classList.remove('hidden')
   el.textContent = info.message
+}
+
+function setChatTaskState(state, message = '') {
+  window.appState.chatTask = {
+    state,
+    message,
+    updatedAt: new Date().toISOString(),
+  }
 }
 
 function createMessageMeta(ts, agent) {
@@ -53,6 +70,14 @@ function appendAgentLog({ type, level, message, timestamp, agentName }) {
   scrollToBottom()
 }
 
+function appendAssistantMessage(message, agentName = 'Agent') {
+  appendAgentLog({
+    type: 'info',
+    message,
+    agentName,
+  })
+}
+
 function appendStreamingChunk({ agentName, chunk, isFirst, isFinal }) {
   if (!chunk && !isFinal && !isFirst) return
 
@@ -61,6 +86,9 @@ function appendStreamingChunk({ agentName, chunk, isFirst, isFinal }) {
   const agent = agentName ? `[${agentName}]` : ''
 
   if (isFirst || !state.active || !state.messageId) {
+    setChatTaskState(CHAT_TASK_STATE.RUNNING, 'Agent 正在生成回复...')
+    setQueueStatus({ message: 'Agent 正在生成回复...' })
+
     const div = document.createElement('div')
     div.className = 'msg msg-agent info'
     const body = document.createElement('div')
@@ -99,6 +127,8 @@ function appendStreamingChunk({ agentName, chunk, isFirst, isFinal }) {
       if (indicator) indicator.remove()
     }
     window.appState.streamingState = { active: false, messageId: null }
+    setQueueStatus(null)
+    setChatTaskState(CHAT_TASK_STATE.COMPLETED, '回复已完成')
   }
   scrollToBottom()
 }
@@ -114,17 +144,22 @@ function redirectToSettings() {
 
 async function sendChatMessage() {
   if (!window.appState.appReady) {
+    const message = `当前仍缺少基础配置：${window.appState.missingFields.join(', ') || 'API_KEY, MODEL_ID, BASE_URL'}。请先到“工作区配置”页完成设置。`
+    setChatTaskState(CHAT_TASK_STATE.BLOCKED, message)
     appendAgentLog({
       type: 'warn',
-      message: `当前仍缺少基础配置：${window.appState.missingFields.join(', ') || 'API_KEY, MODEL_ID, BASE_URL'}。请先到“工作区配置”页完成设置。`,
+      message,
       agentName: 'System',
     })
-    redirectToSettings()
     return
   }
 
   const text = chatInput.value.trim()
   if (!text) return
+
+  appendUserMessage(text)
+  setChatTaskState(CHAT_TASK_STATE.SUBMITTING, '消息提交中...')
+  setQueueStatus({ message: '消息提交中...' })
 
   chatInput.value = ''
   chatInput.focus()
@@ -140,24 +175,45 @@ async function sendChatMessage() {
     const data = await res.json()
 
     if (!data.ok) {
-      appendAgentLog({ type: 'error', message: '发送失败: ' + (data.error || '未知错误') })
+      const reason = '发送失败: ' + (data.error || '未知错误')
+      setChatTaskState(CHAT_TASK_STATE.FAILED, reason)
+      setQueueStatus({ message: reason })
+      appendAgentLog({ type: 'error', message: reason, agentName: 'System' })
       if (res.status === 409) {
         window.appState.appReady = false
         window.appState.missingFields = data.missingFields || []
         if (typeof window.applyFeatureAvailability === 'function') window.applyFeatureAvailability()
-        redirectToSettings()
+        appendAgentLog({
+          type: 'warn',
+          message: '基础配置不完整，聊天与简历功能已暂时禁用。你可以稍后手动切换到“工作区配置”页继续。',
+          agentName: 'System',
+        })
+        if (typeof window.refreshFirstRunBanner === 'function') window.refreshFirstRunBanner()
       }
     } else if (data.queued) {
-      appendUserMessage(text)
       const waiting = Math.max(0, (data.queueLength ?? 1) - 1)
-      setQueueStatus({ message: waiting > 0 ? `消息已入队，前面还有 ${waiting} 条等待处理` : '消息已入队，等待处理' })
+      const queuedMessage = waiting > 0 ? `消息已入队，前面还有 ${waiting} 条等待处理` : '消息已入队，等待处理'
+      setChatTaskState(CHAT_TASK_STATE.QUEUED, queuedMessage)
+      setQueueStatus({ message: queuedMessage })
     } else {
-      chatHistory.innerHTML = ''
-      appendAgentLog({ type: 'info', message: data.message })
+      setQueueStatus(null)
+      setChatTaskState(CHAT_TASK_STATE.COMPLETED, '回复已完成')
+      if (typeof data.message === 'string' && data.message.trim()) {
+        appendAssistantMessage(data.message, 'Agent')
+      } else {
+        appendAgentLog({
+          type: 'warn',
+          message: '服务端已处理请求，但没有返回可展示的消息。',
+          agentName: 'System',
+        })
+      }
     }
   } catch (err) {
     const msg = err && err.message ? err.message : '未知错误'
-    appendAgentLog({ type: 'error', message: `网络错误：${msg}。请检查服务是否在运行。` })
+    const reason = `网络错误：${msg}。请检查服务是否在运行。`
+    setChatTaskState(CHAT_TASK_STATE.FAILED, reason)
+    setQueueStatus({ message: reason })
+    appendAgentLog({ type: 'error', message: reason, agentName: 'System' })
   } finally {
     chatSend.disabled = !window.appState.appReady
     chatSend.classList.toggle('opacity-50', !window.appState.appReady)
@@ -178,6 +234,7 @@ window.appendAgentLog = appendAgentLog
 window.scrollToBottom = scrollToBottom
 window.appendStreamingChunk = appendStreamingChunk
 window.setQueueStatus = setQueueStatus
+window.setChatTaskState = setChatTaskState
 
 function addToolLogEntry({ type, message, agentName, timestamp }) {
   const list = document.getElementById('tool-log-list')

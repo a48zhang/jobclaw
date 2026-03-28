@@ -2,7 +2,270 @@
  * 职位看板功能
  */
 
+const KNOWN_STATUSES = ['discovered', 'applied', 'failed', 'favorite']
+const STATUS_LABELS = {
+  all: '全部',
+  discovered: '待处理',
+  applied: '已投递',
+  failed: '投递失败',
+  favorite: '关注',
+  other: '其他',
+}
+
+const jobBoardState = {
+  filters: {
+    status: 'all',
+    keyword: '',
+  },
+  selectedKeys: new Set(),
+  allRowsMap: new Map(),
+  controlsMounted: false,
+  sortMounted: false,
+  donutSegments: [],
+  donutGeometry: null,
+  donutClickBound: false,
+}
+
+function notify(type, message) {
+  appendAgentLog({ type, message, agentName: 'System' })
+  if (typeof window.showToast === 'function') {
+    window.showToast({ type, message })
+  }
+}
+
+function requestConfirm(options) {
+  if (typeof window.showConfirm === 'function') {
+    return window.showConfirm(options)
+  }
+  return Promise.resolve(false)
+}
+
+function inferJobKey(row, index) {
+  if (typeof row.url === 'string' && row.url.trim()) return `url:${row.url}`
+  return `row:${index}:${row.company || ''}:${row.title || ''}:${row.time || ''}`
+}
+
+function normalizeRows(rawRows) {
+  return rawRows.map((row, index) => ({
+    ...row,
+    _key: inferJobKey(row, index),
+    _text: `${row.company || ''} ${row.title || ''}`.toLowerCase(),
+  }))
+}
+
+function sortRows(rows) {
+  const col = window.appState.sortCol || 'time'
+  const asc = Boolean(window.appState.sortAsc)
+
+  const compareByText = (a, b) => {
+    const av = String(a || '')
+    const bv = String(b || '')
+    return asc ? av.localeCompare(bv) : bv.localeCompare(av)
+  }
+
+  return [...rows].sort((a, b) => {
+    if (col === 'time') {
+      const at = Date.parse(String(a.time || ''))
+      const bt = Date.parse(String(b.time || ''))
+      const aTime = Number.isFinite(at) ? at : 0
+      const bTime = Number.isFinite(bt) ? bt : 0
+      return asc ? aTime - bTime : bTime - aTime
+    }
+    return compareByText(a[col], b[col])
+  })
+}
+
+function applyFilters(rows) {
+  const status = jobBoardState.filters.status
+  const keyword = jobBoardState.filters.keyword.trim().toLowerCase()
+
+  return rows.filter((row) => {
+    const statusMatch =
+      status === 'all'
+        ? true
+        : status === 'other'
+        ? !KNOWN_STATUSES.includes(String(row.status || ''))
+        : String(row.status || '') === status
+
+    if (!statusMatch) return false
+    if (!keyword) return true
+    return row._text.includes(keyword)
+  })
+}
+
+function pruneSelection() {
+  for (const key of [...jobBoardState.selectedKeys]) {
+    if (!jobBoardState.allRowsMap.has(key)) {
+      jobBoardState.selectedKeys.delete(key)
+    }
+  }
+}
+
+function getSelectedRows() {
+  pruneSelection()
+  return [...jobBoardState.selectedKeys]
+    .map((key) => jobBoardState.allRowsMap.get(key))
+    .filter(Boolean)
+}
+
+function setBatchButtonsDisabled(disabled) {
+  const buttonIds = ['batch-apply', 'batch-fail', 'batch-favorite', 'batch-delete']
+  for (const id of buttonIds) {
+    const button = document.getElementById(id)
+    if (!button) continue
+    button.disabled = disabled
+    button.classList.toggle('opacity-50', disabled)
+    button.classList.toggle('cursor-not-allowed', disabled)
+  }
+}
+
+function updateBatchToolbarVisibility(selectedTotal) {
+  const toolbar = document.getElementById('jobs-batch-toolbar')
+  const selectedHint = document.getElementById('jobs-batch-hint')
+  const hasSelection = selectedTotal > 0
+  if (selectedHint) {
+    selectedHint.textContent = hasSelection
+      ? `已选择 ${selectedTotal} 条职位`
+      : '未选择职位时仅保留“刷新”操作'
+  }
+  if (!toolbar) return
+  toolbar.classList.toggle('hidden', !hasSelection)
+  toolbar.setAttribute('aria-hidden', hasSelection ? 'false' : 'true')
+}
+
+function updateSelectionSummary(visibleKeys) {
+  const selectedCount = document.getElementById('selected-count')
+  const selectAll = document.getElementById('select-all')
+  const visibleTotal = visibleKeys.length
+  let selectedVisible = 0
+  let selectedTotal = 0
+
+  for (const key of jobBoardState.selectedKeys) {
+    if (jobBoardState.allRowsMap.has(key)) selectedTotal += 1
+  }
+  for (const key of visibleKeys) {
+    if (jobBoardState.selectedKeys.has(key)) selectedVisible += 1
+  }
+
+  if (selectedCount) {
+    selectedCount.textContent = `已选 ${selectedTotal}`
+  }
+  if (selectAll) {
+    selectAll.checked = visibleTotal > 0 && selectedVisible === visibleTotal
+    selectAll.indeterminate = selectedVisible > 0 && selectedVisible < visibleTotal
+    selectAll.disabled = visibleTotal === 0
+  }
+  updateBatchToolbarVisibility(selectedTotal)
+  setBatchButtonsDisabled(selectedTotal === 0)
+}
+
+function ensureFilterControls() {
+  if (jobBoardState.controlsMounted) return
+
+  const refreshBtn = document.getElementById('refresh-jobs')
+  const jobsTab = document.getElementById('tab-jobs')
+  if (!refreshBtn || !jobsTab) return
+
+  const controls = document.createElement('div')
+  controls.id = 'jobs-filter-controls'
+  controls.className = 'mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-700 bg-slate-900/80 p-3 md:grid-cols-[160px_1fr_auto]'
+  controls.innerHTML = `
+    <label class="text-xs text-slate-300 flex flex-col gap-1">
+      <span>状态筛选</span>
+      <select id="jobs-status-filter" class="rounded-md border border-slate-600 bg-slate-950 px-2 py-2 text-sm text-slate-100">
+        <option value="all">全部</option>
+        <option value="discovered">待处理</option>
+        <option value="applied">已投递</option>
+        <option value="failed">投递失败</option>
+        <option value="favorite">关注</option>
+        <option value="other">其他</option>
+      </select>
+    </label>
+    <label class="text-xs text-slate-300 flex flex-col gap-1">
+      <span>关键词</span>
+      <input id="jobs-keyword-filter" type="search" class="rounded-md border border-slate-600 bg-slate-950 px-3 py-2 text-sm text-slate-100" placeholder="按公司或职位搜索" />
+    </label>
+    <div class="flex items-end gap-2">
+      <button id="jobs-filter-reset" type="button" class="rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700">清空筛选</button>
+      <span id="jobs-filter-summary" class="text-xs text-slate-400"></span>
+    </div>
+  `
+
+  const headerRow = refreshBtn.closest('div')?.parentElement
+  if (headerRow?.parentElement) {
+    headerRow.insertAdjacentElement('afterend', controls)
+  } else {
+    jobsTab.prepend(controls)
+  }
+
+  const statusInput = document.getElementById('jobs-status-filter')
+  const keywordInput = document.getElementById('jobs-keyword-filter')
+  const resetBtn = document.getElementById('jobs-filter-reset')
+
+  if (statusInput) {
+    statusInput.value = jobBoardState.filters.status
+    statusInput.addEventListener('change', () => {
+      jobBoardState.filters.status = statusInput.value || 'all'
+      renderJobs()
+      renderDonut()
+    })
+  }
+
+  if (keywordInput) {
+    keywordInput.value = jobBoardState.filters.keyword
+    keywordInput.addEventListener('input', () => {
+      jobBoardState.filters.keyword = keywordInput.value || ''
+      renderJobs()
+    })
+  }
+
+  if (resetBtn) {
+    resetBtn.addEventListener('click', resetFilters)
+  }
+
+  jobBoardState.controlsMounted = true
+}
+
+function updateFilterSummary(total, visible) {
+  const summary = document.getElementById('jobs-filter-summary')
+  if (!summary) return
+  if (!total) {
+    summary.textContent = '当前没有职位数据'
+    return
+  }
+  if (visible === total) {
+    summary.textContent = `共 ${total} 条`
+    return
+  }
+  summary.textContent = `筛出 ${visible}/${total} 条`
+}
+
+function syncFilterInputs() {
+  const statusInput = document.getElementById('jobs-status-filter')
+  const keywordInput = document.getElementById('jobs-keyword-filter')
+  if (statusInput) statusInput.value = jobBoardState.filters.status
+  if (keywordInput) keywordInput.value = jobBoardState.filters.keyword
+}
+
+function resetFilters() {
+  jobBoardState.filters.status = 'all'
+  jobBoardState.filters.keyword = ''
+  syncFilterInputs()
+  renderJobs()
+  renderDonut()
+}
+
+function applyStatusFilter(status) {
+  const next = status || 'all'
+  jobBoardState.filters.status = next
+  syncFilterInputs()
+  renderJobs()
+  renderDonut()
+}
+
 async function fetchJobs() {
+  ensureFilterControls()
+
   const btn = document.getElementById('refresh-jobs')
   try {
     if (btn) {
@@ -10,14 +273,17 @@ async function fetchJobs() {
       btn.textContent = '刷新中...'
       btn.classList.add('opacity-70', 'cursor-not-allowed')
     }
+
     const res = await fetch('/api/jobs')
-    window.appState.jobs = await res.json()
+    const json = await res.json()
+    window.appState.jobs = Array.isArray(json) ? json : []
     renderJobs()
-    if (document.getElementById('tab-jobs').classList.contains('active')) {
+
+    if (document.getElementById('tab-jobs')?.classList.contains('active')) {
       renderDonut()
     }
   } catch {
-    appendAgentLog({ type: 'error', message: '职位刷新失败，请检查网络或服务状态。', agentName: 'System' })
+    notify('error', '职位刷新失败，请检查网络或服务状态。')
   } finally {
     if (btn) {
       btn.disabled = false
@@ -28,60 +294,112 @@ async function fetchJobs() {
 }
 
 function renderJobs() {
-  const jobs = window.appState.jobs
-  const sorted = [...jobs].sort((a, b) => {
-    const av = a[window.appState.sortCol] ?? ''
-    const bv = b[window.appState.sortCol] ?? ''
-    return window.appState.sortAsc ? av.localeCompare(bv) : bv.localeCompare(av)
-  })
+  ensureFilterControls()
+
   const tbody = document.getElementById('job-tbody')
-  if (!sorted.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="py-6 text-slate-500 text-center">暂无数据</td></tr>'
+  if (!tbody) return
+
+  const rows = normalizeRows(window.appState.jobs || [])
+  const sortedRows = sortRows(rows)
+  const filteredRows = applyFilters(sortedRows)
+  jobBoardState.allRowsMap = new Map(sortedRows.map((row) => [row._key, row]))
+  pruneSelection()
+  updateFilterSummary(sortedRows.length, filteredRows.length)
+
+  if (!sortedRows.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="py-8 text-center text-slate-400">
+          <p class="text-sm">还没有职位数据。</p>
+          <p class="mt-1 text-xs text-slate-500">点击“刷新”或先运行职位搜索任务。</p>
+        </td>
+      </tr>
+    `
+    updateSelectionSummary([])
+    window.appState.selectedJobs = { rows: [], selectedRows: () => [], keys: () => [] }
     return
   }
-  tbody.innerHTML = sorted.map((r, idx) => `
-    <tr class="hover:bg-slate-700/30 transition-colors group">
-      <td class="py-3 px-4">
-        <input type="checkbox" class="job-select accent-blue-500" data-index="${idx}" />
-      </td>
-      <td class="py-3 px-4 font-semibold text-slate-300">${escHtml(r.company)}</td>
-      <td class="py-3 px-4 text-slate-300">${escHtml(r.title)}</td>
-      <td class="py-3 px-4">
-        ${r.url ? `<a href="${escHtml(r.url)}" target="_blank" class="text-blue-400 hover:text-blue-300 underline opacity-80 group-hover:opacity-100">查看</a>` : '<span class="text-slate-600">—</span>'}
-      </td>
-      <td class="py-3 px-4">
-        <span class="px-2 py-1 rounded text-xs font-medium bg-slate-800 border ${statusStyle(r.status)}">${escHtml(r.status)}</span>
-      </td>
-      <td class="py-3 px-4 text-slate-400 text-xs">${escHtml(r.time)}</td>
-    </tr>
-  `).join('')
-  bindSelectionHandlers(sorted)
-}
 
-function bindSelectionHandlers(sorted) {
-  const selectAll = document.getElementById('select-all')
-  const selectedCount = document.getElementById('selected-count')
-  const selects = document.querySelectorAll('.job-select')
-
-  const updateCount = () => {
-    const checked = [...selects].filter(i => i.checked).length
-    if (selectedCount) selectedCount.textContent = `已选 ${checked}`
-    if (selectAll) selectAll.checked = checked > 0 && checked === selects.length
+  if (!filteredRows.length) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="py-8 text-center text-slate-400">
+          <p class="text-sm">当前筛选条件下无结果。</p>
+          <button id="jobs-empty-reset" type="button" class="mt-2 rounded-md border border-slate-600 bg-slate-800 px-3 py-1 text-xs text-slate-200 hover:bg-slate-700">
+            清空筛选
+          </button>
+        </td>
+      </tr>
+    `
+    document.getElementById('jobs-empty-reset')?.addEventListener('click', resetFilters)
+    updateSelectionSummary([])
+    window.appState.selectedJobs = { rows: sortedRows, selectedRows: () => getSelectedRows(), keys: () => [...jobBoardState.selectedKeys] }
+    return
   }
 
-  selects.forEach(input => {
-    input.addEventListener('change', updateCount)
-  })
+  tbody.innerHTML = filteredRows.map((row) => `
+    <tr class="group transition-colors hover:bg-slate-700/30">
+      <td class="py-3 px-4">
+        <input type="checkbox" class="job-select accent-blue-500" data-key="${escHtml(row._key)}" ${jobBoardState.selectedKeys.has(row._key) ? 'checked' : ''} />
+      </td>
+      <td class="py-3 px-4 font-semibold text-slate-300">${escHtml(row.company || '')}</td>
+      <td class="py-3 px-4 text-slate-300">${escHtml(row.title || '')}</td>
+      <td class="py-3 px-4">
+        ${row.url
+          ? `<a href="${escHtml(row.url)}" target="_blank" rel="noopener noreferrer" class="underline text-blue-400 opacity-80 hover:text-blue-300 group-hover:opacity-100">查看</a>`
+          : '<span class="text-slate-600">—</span>'}
+      </td>
+      <td class="py-3 px-4">
+        <span class="rounded border bg-slate-800 px-2 py-1 text-xs font-medium ${statusStyle(row.status)}">${escHtml(row.status || 'unknown')}</span>
+      </td>
+      <td class="py-3 px-4 text-xs text-slate-400">${escHtml(row.time || '')}</td>
+    </tr>
+  `).join('')
 
-  if (selectAll) {
-    selectAll.addEventListener('change', () => {
-      selects.forEach(input => { input.checked = selectAll.checked })
-      updateCount()
+  bindSelectionHandlers(filteredRows)
+  window.appState.selectedJobs = {
+    rows: sortedRows,
+    selectedRows: () => getSelectedRows(),
+    keys: () => [...jobBoardState.selectedKeys],
+  }
+}
+
+function bindSelectionHandlers(visibleRows) {
+  const selectAll = document.getElementById('select-all')
+  const selects = [...document.querySelectorAll('.job-select')]
+  const visibleKeys = visibleRows.map((row) => row._key)
+
+  for (const input of selects) {
+    input.addEventListener('change', () => {
+      const key = String(input.dataset.key || '')
+      if (!key) return
+      if (input.checked) {
+        jobBoardState.selectedKeys.add(key)
+      } else {
+        jobBoardState.selectedKeys.delete(key)
+      }
+      updateSelectionSummary(visibleKeys)
     })
   }
 
-  updateCount()
-  window.appState.selectedJobs = { rows: sorted, indices: () => [...selects].filter(i => i.checked).map(i => Number(i.dataset.index)) }
+  if (selectAll) {
+    selectAll.onchange = () => {
+      const checked = Boolean(selectAll.checked)
+      for (const key of visibleKeys) {
+        if (checked) {
+          jobBoardState.selectedKeys.add(key)
+        } else {
+          jobBoardState.selectedKeys.delete(key)
+        }
+      }
+      for (const input of selects) {
+        input.checked = checked
+      }
+      updateSelectionSummary(visibleKeys)
+    }
+  }
+
+  updateSelectionSummary(visibleKeys)
 }
 
 async function submitJobMutation(url, payload) {
@@ -98,147 +416,305 @@ async function submitJobMutation(url, payload) {
 }
 
 async function batchUpdateStatus(status) {
-  const selected = window.appState.selectedJobs
-  if (!selected) return
-  const indices = selected.indices()
-  if (!indices.length) {
-    appendAgentLog({ type: 'warn', message: '请先选择要操作的职位。', agentName: 'System' })
+  const selectedRows = getSelectedRows()
+  if (!selectedRows.length) {
+    notify('warn', '请先选择要操作的职位。')
     return
   }
-  const updates = indices.map((idx) => {
-    const row = selected.rows[idx]
-    return { url: row.url, status }
-  }).filter((item) => item.url)
+
+  const updates = selectedRows
+    .map((row) => ({ url: row.url, status }))
+    .filter((item) => typeof item.url === 'string' && item.url)
 
   if (!updates.length) {
-    appendAgentLog({ type: 'warn', message: '选中的职位缺少可用链接，无法更新。', agentName: 'System' })
+    notify('warn', '选中的职位缺少可用链接，无法更新。')
     return
   }
 
   try {
     const result = await submitJobMutation('/api/jobs/status', { updates })
-    appendAgentLog({
-      type: 'info',
-      message: `已更新 ${result.changed} 条职位状态为 ${status}。`,
-      agentName: 'System',
-    })
+    notify('success', `已更新 ${result.changed} 条职位状态为 ${STATUS_LABELS[status] || status}。`)
+    jobBoardState.selectedKeys.clear()
     await fetchJobs()
-  } catch (err) {
-    appendAgentLog({ type: 'error', message: `批量状态更新失败：${err.message || '未知错误'}`, agentName: 'System' })
+  } catch (error) {
+    notify('error', `批量状态更新失败：${error.message || '未知错误'}`)
   }
 }
 
 async function batchDelete() {
-  const selected = window.appState.selectedJobs
-  if (!selected) return
-  const indices = selected.indices()
-  if (!indices.length) {
-    appendAgentLog({ type: 'warn', message: '请先选择要删除的职位。', agentName: 'System' })
+  const selectedRows = getSelectedRows()
+  if (!selectedRows.length) {
+    notify('warn', '请先选择要删除的职位。')
     return
   }
-  const urls = indices.map((idx) => selected.rows[idx]?.url).filter(Boolean)
+
+  const urls = selectedRows.map((row) => row.url).filter((url) => typeof url === 'string' && url)
   if (!urls.length) {
-    appendAgentLog({ type: 'warn', message: '选中的职位缺少可用链接，无法删除。', agentName: 'System' })
+    notify('warn', '选中的职位缺少可用链接，无法删除。')
     return
   }
-  if (!window.confirm(`确定删除选中的 ${urls.length} 条职位记录吗？`)) {
-    return
-  }
+
+  const confirmed = await requestConfirm({
+    title: '删除职位记录',
+    message: `确定删除选中的 ${urls.length} 条职位记录吗？该操作不可撤销。`,
+    confirmText: '确认删除',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!confirmed) return
 
   try {
     const result = await submitJobMutation('/api/jobs/delete', { urls })
-    appendAgentLog({
-      type: 'info',
-      message: `已删除 ${result.deleted} 条职位记录。`,
-      agentName: 'System',
-    })
+    notify('success', `已删除 ${result.deleted} 条职位记录。`)
+    jobBoardState.selectedKeys.clear()
     await fetchJobs()
-  } catch (err) {
-    appendAgentLog({ type: 'error', message: `批量删除失败：${err.message || '未知错误'}`, agentName: 'System' })
+  } catch (error) {
+    notify('error', `批量删除失败：${error.message || '未知错误'}`)
   }
 }
 
-// 排序事件绑定
-document.querySelectorAll('.sortable-th').forEach(th => {
-  th.addEventListener('click', () => {
-    const col = th.dataset.col
-    if (window.appState.sortCol === col) { 
-      window.appState.sortAsc = !window.appState.sortAsc 
-    } else { 
-      window.appState.sortCol = col
-      window.appState.sortAsc = true 
-    }
-    // 更新视觉指示器
-    document.querySelectorAll('.sortable-th').forEach(t => t.textContent = t.textContent.replace(/[↑↓⇅]/, '⇅'))
-    th.textContent = th.textContent.replace('⇅', window.appState.sortAsc ? '↑' : '↓')
-    renderJobs()
-  })
-})
+function getSortableHeaderCells() {
+  return [...document.querySelectorAll('thead th.sortable-th')]
+    .filter((th) => Boolean(th.dataset.col))
+}
 
-// 刷新按钮
-document.getElementById('refresh-jobs').addEventListener('click', fetchJobs)
-document.getElementById('batch-apply').addEventListener('click', () => batchUpdateStatus('applied'))
-document.getElementById('batch-fail').addEventListener('click', () => batchUpdateStatus('failed'))
-document.getElementById('batch-favorite').addEventListener('click', () => batchUpdateStatus('favorite'))
-document.getElementById('batch-delete').addEventListener('click', batchDelete)
+function getSortTriggerButton(th) {
+  return th.querySelector('button[data-sort-trigger]') || th.querySelector('button')
+}
+
+function updateSortIndicators() {
+  const activeCol = window.appState.sortCol
+  const asc = Boolean(window.appState.sortAsc)
+  for (const th of getSortableHeaderCells()) {
+    const trigger = getSortTriggerButton(th)
+    const triggerText = trigger?.textContent || ''
+    const fallbackText = th.textContent || ''
+    const baseLabel = th.dataset.baseLabel || triggerText.replace(/[↑↓⇅]/g, '').trim() || fallbackText.replace(/[↑↓⇅]/g, '').trim()
+    th.dataset.baseLabel = baseLabel
+
+    const isActive = th.dataset.col === activeCol
+    const icon = isActive ? (asc ? '↑' : '↓') : '⇅'
+    th.setAttribute('aria-sort', isActive ? (asc ? 'ascending' : 'descending') : 'none')
+
+    if (trigger) {
+      trigger.dataset.baseLabel = baseLabel
+      trigger.setAttribute('data-sort-trigger', 'true')
+      trigger.textContent = `${baseLabel} ${icon}`
+      trigger.setAttribute('aria-label', `${baseLabel} 排序`)
+    } else {
+      th.textContent = `${baseLabel} ${icon}`
+    }
+  }
+}
+
+function initSortableHeaders() {
+  if (jobBoardState.sortMounted) return
+
+  for (const th of getSortableHeaderCells()) {
+    const trigger = getSortTriggerButton(th)
+    const baseLabel = th.dataset.baseLabel || (trigger?.textContent || th.textContent || '').replace(/[↑↓⇅]/g, '').trim()
+    th.dataset.baseLabel = baseLabel
+    th.setAttribute('aria-sort', 'none')
+
+    if (trigger) {
+      trigger.dataset.baseLabel = baseLabel
+      trigger.setAttribute('data-sort-trigger', 'true')
+      trigger.setAttribute('type', 'button')
+      trigger.setAttribute('aria-label', `${baseLabel} 排序`)
+    }
+
+    const toggleSort = () => {
+      const col = th.dataset.col
+      if (!col) return
+      if (window.appState.sortCol === col) {
+        window.appState.sortAsc = !window.appState.sortAsc
+      } else {
+        window.appState.sortCol = col
+        window.appState.sortAsc = true
+      }
+      updateSortIndicators()
+      renderJobs()
+    }
+
+    if (trigger) {
+      trigger.addEventListener('click', toggleSort)
+    } else {
+      th.addEventListener('click', toggleSort)
+      th.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          toggleSort()
+        }
+      })
+    }
+  }
+
+  updateSortIndicators()
+  jobBoardState.sortMounted = true
+}
+
+function drawDonut(canvas, slices) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  const cssSize = Math.max(180, Math.floor(canvas.clientWidth || 250))
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = Math.floor(cssSize * dpr)
+  canvas.height = Math.floor(cssSize * dpr)
+  canvas.style.width = `${cssSize}px`
+  canvas.style.height = `${cssSize}px`
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, cssSize, cssSize)
+
+  const center = cssSize / 2
+  const outerRadius = cssSize * 0.43
+  const innerRadius = cssSize * 0.27
+  const total = slices.reduce((sum, item) => sum + item.value, 0)
+
+  const startOffset = -Math.PI / 2
+  let cursor = startOffset
+  const segments = []
+
+  if (total <= 0) {
+    ctx.beginPath()
+    ctx.arc(center, center, outerRadius, 0, Math.PI * 2)
+    ctx.arc(center, center, innerRadius, Math.PI * 2, 0, true)
+    ctx.closePath()
+    ctx.fillStyle = '#334155'
+    ctx.fill()
+  } else {
+    for (const item of slices) {
+      if (item.value <= 0) continue
+      const arc = (item.value / total) * Math.PI * 2
+      const next = cursor + arc
+
+      ctx.beginPath()
+      ctx.arc(center, center, outerRadius, cursor, next)
+      ctx.arc(center, center, innerRadius, next, cursor, true)
+      ctx.closePath()
+      ctx.fillStyle = item.color
+      ctx.fill()
+
+      segments.push({
+        status: item.status,
+        start: cursor,
+        end: next,
+      })
+      cursor = next
+    }
+  }
+
+  ctx.beginPath()
+  ctx.arc(center, center, innerRadius - 1, 0, Math.PI * 2)
+  ctx.fillStyle = '#0f172a'
+  ctx.fill()
+
+  ctx.fillStyle = '#e2e8f0'
+  ctx.font = '600 13px sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(String(total), center, center - 5)
+  ctx.fillStyle = '#94a3b8'
+  ctx.font = '500 11px sans-serif'
+  ctx.fillText('总职位', center, center + 12)
+
+  jobBoardState.donutSegments = segments
+  jobBoardState.donutGeometry = { center, innerRadius, outerRadius }
+}
+
+function normalizeAngleForDonut(value) {
+  let angle = value
+  while (angle < -Math.PI / 2) angle += Math.PI * 2
+  while (angle >= Math.PI * 1.5) angle -= Math.PI * 2
+  return angle
+}
+
+function ensureDonutClickHandler(canvas) {
+  if (jobBoardState.donutClickBound) return
+  canvas.addEventListener('click', (event) => {
+    const geometry = jobBoardState.donutGeometry
+    if (!geometry || !jobBoardState.donutSegments.length) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    const dx = x - geometry.center
+    const dy = y - geometry.center
+    const radius = Math.hypot(dx, dy)
+    if (radius < geometry.innerRadius || radius > geometry.outerRadius) return
+
+    const angle = normalizeAngleForDonut(Math.atan2(dy, dx))
+    const segment = jobBoardState.donutSegments.find((item) => angle >= item.start && angle < item.end)
+    if (!segment) return
+    applyStatusFilter(segment.status || 'all')
+  })
+  jobBoardState.donutClickBound = true
+}
 
 function renderDonut() {
-  const jobs = window.appState.jobs
-  const applied    = jobs.filter(j => j.status === 'applied').length
-  const discovered = jobs.filter(j => j.status === 'discovered').length
-  const failed     = jobs.filter(j => j.status === 'failed').length
-  const favorite   = jobs.filter(j => j.status === 'favorite').length
-  const other      = jobs.length - applied - discovered - failed - favorite
-
-  const data = {
-    labels: ['已投递', '待处理(发现)', '投递失败', '关注', '其他'],
-    datasets: [{
-      data: [applied, discovered, failed, favorite, other],
-      backgroundColor: ['#22c55e', '#3b82f6', '#ef4444', '#f59e0b', '#64748b'],
-      borderWidth: 0,
-      hoverOffset: 4
-    }]
-  }
+  const jobs = Array.isArray(window.appState.jobs) ? window.appState.jobs : []
+  const applied = jobs.filter((job) => job.status === 'applied').length
+  const discovered = jobs.filter((job) => job.status === 'discovered').length
+  const failed = jobs.filter((job) => job.status === 'failed').length
+  const favorite = jobs.filter((job) => job.status === 'favorite').length
+  const other = jobs.length - applied - discovered - failed - favorite
 
   const canvas = document.getElementById('donut-chart')
-  // Chart.js 需要 canvas 可见才能正确渲染
-  if (canvas.offsetParent === null) return
-
-  if (window.appState.donutChart) {
-    window.appState.donutChart.data = data
-    window.appState.donutChart.update()
-  } else {
-    const ctx = canvas.getContext('2d')
-    window.appState.donutChart = new Chart(ctx, {
-      type: 'doughnut',
-      data,
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '70%',
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: '#1e293b',
-            titleColor: '#f8fafc',
-            bodyColor: '#cbd5e1',
-            borderColor: '#334155',
-            borderWidth: 1,
-            callbacks: { label: (ctx) => ` ${ctx.label}: ${ctx.parsed} 个` }
-          }
-        }
-      }
-    })
+  if (canvas && canvas.offsetParent !== null) {
+    drawDonut(canvas, [
+      { status: 'applied', value: applied, color: '#22c55e' },
+      { status: 'discovered', value: discovered, color: '#3b82f6' },
+      { status: 'failed', value: failed, color: '#ef4444' },
+      { status: 'favorite', value: favorite, color: '#f59e0b' },
+      { status: 'other', value: other, color: '#64748b' },
+    ])
+    ensureDonutClickHandler(canvas)
   }
 
-  document.getElementById('stats-legend').innerHTML = `
-    <div class="flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-green-500"></div><span class="text-slate-300">已投递</span></div><span class="font-bold text-green-400">${applied}</span></div>
-    <div class="flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-blue-500"></div><span class="text-slate-300">待处理</span></div><span class="font-bold text-blue-400">${discovered}</span></div>
-    <div class="flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-red-500"></div><span class="text-slate-300">投递失败</span></div><span class="font-bold text-red-400">${failed}</span></div>
-    <div class="flex justify-between items-center"><div class="flex items-center gap-2"><div class="w-3 h-3 rounded-full bg-amber-500"></div><span class="text-slate-300">关注</span></div><span class="font-bold text-amber-400">${favorite}</span></div>
-    <div class="flex justify-between items-center pt-2 border-t border-slate-700"><span class="text-slate-400">总计岗位</span><span class="font-bold text-white">${jobs.length}</span></div>
-  `
+  const legend = document.getElementById('stats-legend')
+  if (!legend) return
+
+  const rows = [
+    { label: '全部', value: jobs.length, status: 'all', dot: 'bg-slate-400', valueClass: 'text-slate-100' },
+    { label: '已投递', value: applied, status: 'applied', dot: 'bg-green-500', valueClass: 'text-green-400' },
+    { label: '待处理', value: discovered, status: 'discovered', dot: 'bg-blue-500', valueClass: 'text-blue-400' },
+    { label: '投递失败', value: failed, status: 'failed', dot: 'bg-red-500', valueClass: 'text-red-400' },
+    { label: '关注', value: favorite, status: 'favorite', dot: 'bg-amber-500', valueClass: 'text-amber-400' },
+    { label: '其他', value: other, status: 'other', dot: 'bg-slate-500', valueClass: 'text-slate-300' },
+  ]
+
+  legend.innerHTML = rows.map((item) => {
+    const active = jobBoardState.filters.status === item.status
+    const activeClass = active ? 'border-blue-500/60 bg-slate-800' : 'border-transparent bg-transparent'
+    return `
+      <button type="button" data-status="${item.status}" class="w-full rounded-md border px-2 py-1.5 text-left transition-colors hover:bg-slate-800/70 ${activeClass}">
+        <span class="flex items-center justify-between">
+          <span class="flex items-center gap-2">
+            <span class="h-3 w-3 rounded-full ${item.dot}"></span>
+            <span class="text-slate-300">${item.label}</span>
+          </span>
+          <span class="font-bold ${item.valueClass}">${item.value}</span>
+        </span>
+      </button>
+    `
+  }).join('')
+
+  for (const button of legend.querySelectorAll('button[data-status]')) {
+    button.addEventListener('click', () => {
+      applyStatusFilter(button.dataset.status || 'all')
+    })
+  }
 }
+
+initSortableHeaders()
+ensureFilterControls()
+
+document.getElementById('refresh-jobs')?.addEventListener('click', fetchJobs)
+document.getElementById('batch-apply')?.addEventListener('click', () => batchUpdateStatus('applied'))
+document.getElementById('batch-fail')?.addEventListener('click', () => batchUpdateStatus('failed'))
+document.getElementById('batch-favorite')?.addEventListener('click', () => batchUpdateStatus('favorite'))
+document.getElementById('batch-delete')?.addEventListener('click', batchDelete)
 
 // 导出到全局
 window.fetchJobs = fetchJobs

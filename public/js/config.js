@@ -2,6 +2,120 @@
  * 配置编辑器与基础设置
  */
 
+const configEditorRuntime = {
+  suppressInput: false,
+  clearStatusTimer: null,
+}
+
+function setSaveStatus(message, tone = 'neutral', autoClearMs = 0) {
+  const status = document.getElementById('save-status')
+  if (!status) return
+
+  if (configEditorRuntime.clearStatusTimer) {
+    clearTimeout(configEditorRuntime.clearStatusTimer)
+    configEditorRuntime.clearStatusTimer = null
+  }
+
+  const classByTone = {
+    neutral: 'text-sm text-slate-400',
+    dirty: 'text-sm text-amber-300',
+    saving: 'text-sm text-yellow-400',
+    success: 'text-sm text-green-400',
+    error: 'text-sm text-red-400',
+    warn: 'text-sm text-amber-300',
+  }
+
+  status.textContent = message
+  status.className = classByTone[tone] || classByTone.neutral
+
+  if (autoClearMs > 0) {
+    configEditorRuntime.clearStatusTimer = setTimeout(() => {
+      status.textContent = ''
+      status.className = classByTone.neutral
+    }, autoClearMs)
+  }
+}
+
+function setConfigTabVisualState(fileName) {
+  document.querySelectorAll('.config-tab-btn').forEach((btn) => {
+    const active = btn.dataset.file === fileName
+    btn.className = active
+      ? 'config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-900 text-blue-400 border-t border-l border-r border-slate-700 font-bold'
+      : 'config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-200 border-t border-l border-r border-transparent transition-colors'
+  })
+}
+
+function getMarkdownEditor() {
+  return document.getElementById('md-editor')
+}
+
+function syncEditorDirtyState({ showStatus = true } = {}) {
+  const editor = getMarkdownEditor()
+  if (!editor) return false
+
+  const baseline = String(window.appState.configEditor?.baselineContent || '')
+  const isDirty = editor.value !== baseline
+
+  window.appState.configEditor = { dirty: isDirty }
+
+  if (!showStatus) return isDirty
+  if (window.appState.configEditor?.saving) return isDirty
+
+  if (isDirty) {
+    setSaveStatus('● 未保存更改', 'dirty')
+  } else {
+    setSaveStatus('', 'neutral')
+  }
+  return isDirty
+}
+
+function setEditorLoadedState(fileName, content) {
+  const editor = getMarkdownEditor()
+  if (!editor) return
+
+  configEditorRuntime.suppressInput = true
+  editor.value = content
+  configEditorRuntime.suppressInput = false
+
+  window.appState.configEditor = {
+    file: fileName,
+    baselineContent: content,
+    dirty: false,
+    saving: false,
+  }
+  setSaveStatus('', 'neutral')
+}
+
+async function confirmDiscardUnsavedChanges(nextFileName) {
+  const dirty = Boolean(window.appState.configEditor?.dirty)
+  const saving = Boolean(window.appState.configEditor?.saving)
+  if (!dirty) return true
+  if (saving) {
+    setSaveStatus('正在保存中，请稍候...', 'warn', 2500)
+    return false
+  }
+
+  if (typeof window.showConfirm === 'function') {
+    const confirmed = await window.showConfirm({
+      title: '未保存更改',
+      message: `切换到 ${nextFileName}.md 会丢失当前未保存内容，是否继续？`,
+      confirmText: '仍然切换',
+      cancelText: '留在当前页',
+      danger: true,
+    })
+    if (!confirmed) {
+      setSaveStatus('已取消切换，当前内容尚未保存。', 'warn', 2600)
+    }
+    return confirmed
+  }
+
+  const confirmed = window.confirm('当前内容尚未保存，切换会丢失修改，是否继续？')
+  if (!confirmed) {
+    setSaveStatus('已取消切换，当前内容尚未保存。', 'warn', 2600)
+  }
+  return confirmed
+}
+
 function renderSetupSummary() {
   const summary = document.getElementById('settings-summary')
   const missing = document.getElementById('settings-missing')
@@ -83,63 +197,80 @@ async function loadSettings() {
 }
 
 async function loadFile(name) {
-  window.appState.currentFile = name
-  document.querySelectorAll('.config-tab-btn').forEach((btn) => {
-    const active = btn.dataset.file === name
-    btn.className = active
-      ? 'config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-900 text-blue-400 border-t border-l border-r border-slate-700 font-bold'
-      : 'config-tab-btn text-sm px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-200 border-t border-l border-r border-transparent transition-colors'
-  })
+  const nextFile = typeof name === 'string' && name ? name : 'targets'
+  const shouldConfirmDiscard = Boolean(window.appState.configEditor?.dirty)
+  if (shouldConfirmDiscard) {
+    const canSwitch = await confirmDiscardUnsavedChanges(nextFile)
+    if (!canSwitch) {
+      setConfigTabVisualState(window.appState.currentFile)
+      return false
+    }
+  }
+
+  window.appState.currentFile = nextFile
+  setConfigTabVisualState(nextFile)
+
   try {
-    const res = await fetch(`/api/config/${name}`)
+    const res = await fetch(`/api/config/${nextFile}`)
     const json = await res.json()
-    document.getElementById('md-editor').value = json.content ?? ''
-    document.getElementById('save-status').textContent = ''
+    setEditorLoadedState(nextFile, json.content ?? '')
+    return true
   } catch {
-    document.getElementById('md-editor').value = ''
-    document.getElementById('save-status').textContent = '✗ 加载失败'
-    document.getElementById('save-status').className = 'text-sm text-red-400'
+    setEditorLoadedState(nextFile, '')
+    setSaveStatus('✗ 加载失败', 'error')
     appendAgentLog({ type: 'error', message: '配置加载失败，请检查服务是否正常。', agentName: 'System' })
+    return false
   }
 }
 
 document.querySelectorAll('.config-tab-btn').forEach((btn) => {
-  btn.addEventListener('click', () => loadFile(btn.dataset.file))
+  btn.addEventListener('click', async () => {
+    await loadFile(btn.dataset.file)
+  })
+})
+
+document.getElementById('md-editor')?.addEventListener('input', () => {
+  if (configEditorRuntime.suppressInput) return
+  syncEditorDirtyState({ showStatus: true })
 })
 
 document.getElementById('save-md').addEventListener('click', async () => {
-  const status = document.getElementById('save-status')
   const btn = document.getElementById('save-md')
+  const editor = getMarkdownEditor()
+  if (!editor) return
 
-  status.textContent = '保存中...'
-  status.className = 'text-sm text-yellow-400'
+  setSaveStatus('保存中...', 'saving')
   btn.disabled = true
   btn.classList.add('opacity-70')
+  window.appState.configEditor = { saving: true }
 
   try {
-    const content = document.getElementById('md-editor').value
+    const content = editor.value
     const res = await fetch(`/api/config/${window.appState.currentFile}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),
     })
     const json = await res.json()
-    if (json.ok) {
-      status.textContent = '✓ 保存成功'
-      status.className = 'text-sm text-green-400'
-    } else {
-      status.textContent = `✗ ${json.error}`
-      status.className = 'text-sm text-red-400'
+    if (!json.ok) {
+      throw new Error(json.error || '保存失败')
     }
-  } catch {
-    status.textContent = '✗ 网络错误'
-    status.className = 'text-sm text-red-400'
+
+    window.appState.configEditor = {
+      file: window.appState.currentFile,
+      baselineContent: content,
+      dirty: false,
+      saving: false,
+    }
+    setSaveStatus('✓ 保存成功', 'success', 3000)
+  } catch (error) {
+    window.appState.configEditor = { saving: false }
+    syncEditorDirtyState({ showStatus: false })
+    const message = error?.message || '网络错误'
+    setSaveStatus(`✗ ${message}`, 'error')
   } finally {
     btn.disabled = false
     btn.classList.remove('opacity-70')
-    setTimeout(() => {
-      if (status.textContent === '✓ 保存成功') status.textContent = ''
-    }, 3000)
   }
 })
 
@@ -190,6 +321,13 @@ document.getElementById('save-settings').addEventListener('click', async () => {
   }
 })
 
+window.addEventListener('beforeunload', (event) => {
+  if (!window.appState.configEditor?.dirty) return
+  event.preventDefault()
+  event.returnValue = ''
+})
+
+window.hasUnsavedConfigEditorChanges = () => Boolean(window.appState.configEditor?.dirty)
 window.loadFile = loadFile
 window.loadSettings = loadSettings
 window.applyFeatureAvailability = applyFeatureAvailability

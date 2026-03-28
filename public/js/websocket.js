@@ -71,6 +71,21 @@ function clearQueueStatus() {
   }
 }
 
+function normalizeAgentState(state) {
+  if (state === 'waiting_input') return 'waiting'
+  return state
+}
+
+function getAgentStateLabel(state) {
+  const labels = {
+    idle: '空闲',
+    running: '执行中',
+    waiting: '等待输入',
+    error: '异常',
+  }
+  return labels[state] || String(state || 'unknown')
+}
+
 function handleWsEvent(event, data) {
   switch (event) {
     case 'snapshot':
@@ -116,7 +131,7 @@ function handleWsEvent(event, data) {
 }
 
 function updateAgentState({ agentName, state }) {
-  window.appState.agentStates[agentName] = state
+  window.appState.agentStates[agentName] = normalizeAgentState(state)
   renderAgentCards()
 }
 
@@ -131,7 +146,7 @@ function renderAgentCards() {
   container.innerHTML = Object.entries(window.appState.agentStates).map(([name, state]) => `
     <div class="flex items-center gap-2 px-2.5 py-1 rounded border ${stateColors[state] ?? 'bg-slate-700 text-slate-300 border-slate-600'}">
       <span class="font-bold text-xs">${escHtml(name)}</span>
-      <span class="text-[10px] uppercase tracking-wider opacity-80">${escHtml(state)}</span>
+      <span class="text-[10px] uppercase tracking-wider opacity-80">${escHtml(getAgentStateLabel(state))}</span>
     </div>
   `).join('') || '<span class="text-slate-500 text-xs">暂无 Agent</span>'
 }

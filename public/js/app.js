@@ -2,31 +2,79 @@
  * 应用初始化入口
  */
 
-function showTab(targetId) {
+const ACTIVE_TAB_STORAGE_KEY = 'jobclaw.active-tab'
+
+function getNavButtonForTab(targetId) {
+  return document.querySelector(`.nav-btn[data-target="${targetId}"]`)
+}
+
+function getDefaultTabId() {
+  const activeBtn = document.querySelector('.nav-btn.active')
+  return activeBtn?.dataset?.target || 'tab-chat'
+}
+
+function readStoredTabId() {
+  try {
+    return localStorage.getItem(ACTIVE_TAB_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function persistTabId(tabId) {
+  try {
+    localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, tabId)
+  } catch {
+    // ignore localStorage errors
+  }
+}
+
+function normalizeTabId(targetId) {
+  if (typeof targetId !== 'string') return getDefaultTabId()
+  return getNavButtonForTab(targetId) ? targetId : getDefaultTabId()
+}
+
+function resolveInitialTabId() {
+  return normalizeTabId(readStoredTabId() || getDefaultTabId())
+}
+
+function showTab(targetId, options = {}) {
+  const tabId = normalizeTabId(targetId)
+  const { persist = true, userInitiated = false } = options
+
   document.querySelectorAll('.nav-btn').forEach((b) => {
-    const active = b.dataset.target === targetId
+    const active = b.dataset.target === tabId
     b.classList.toggle('active', active)
     b.classList.toggle('bg-blue-600', active)
     b.classList.toggle('text-white', active)
     b.classList.toggle('text-slate-400', !active)
+    b.setAttribute('aria-selected', active ? 'true' : 'false')
   })
 
-  document.querySelectorAll('.tab-content').forEach((tc) => tc.classList.remove('active'))
-  document.getElementById(targetId).classList.add('active')
+  document.querySelectorAll('.tab-content').forEach((tc) => {
+    const active = tc.id === tabId
+    tc.classList.toggle('active', active)
+    tc.toggleAttribute('hidden', !active)
+  })
 
-  if (targetId === 'tab-jobs') {
+  if (persist) persistTabId(tabId)
+  window.appState.activeTabId = tabId
+  if (userInitiated) window.appState.userHasNavigated = true
+
+  if (tabId === 'tab-jobs') {
     renderDonut()
   }
 }
 
-document.querySelectorAll('.nav-btn').forEach((btn) => {
-  btn.addEventListener('click', () => showTab(btn.dataset.target))
-})
+function initTabNavigation() {
+  document.querySelectorAll('.nav-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      showTab(btn.dataset.target, { persist: true, userInitiated: true })
+    })
+  })
+}
 
-document.querySelector('.nav-btn.active').classList.add('bg-blue-600', 'text-white')
-document.querySelector('.nav-btn.active').classList.remove('text-slate-400')
-
-async function checkFirstRun() {
+async function refreshFirstRunBanner() {
   try {
     const [targetsRes, userinfoRes] = await Promise.all([
       fetch('/api/config/targets'),
@@ -47,7 +95,7 @@ async function checkFirstRun() {
     if (!window.appState.appReady) {
       banner.classList.remove('hidden')
       bannerTitle.textContent = '先完成基础设置'
-      bannerText.textContent = `请先在“工作区配置”页填写 API_KEY、MODEL_ID、BASE_URL。当前缺少：${window.appState.missingFields.join(', ') || 'API_KEY, MODEL_ID, BASE_URL'}。保存后即可启用聊天和简历功能。`
+      bannerText.textContent = `请在“工作区配置”页填写 API_KEY、MODEL_ID、BASE_URL。当前缺少：${window.appState.missingFields.join(', ') || 'API_KEY, MODEL_ID, BASE_URL'}。配置完成后聊天与简历功能会自动恢复。`
       return
     }
 
@@ -64,6 +112,9 @@ async function checkFirstRun() {
   }
 }
 
+initTabNavigation()
+showTab(resolveInitialTabId(), { persist: false, userInitiated: false })
+
 connectWS()
 fetchJobs()
 loadFile('targets')
@@ -71,8 +122,8 @@ if (typeof window.loadResumeStatus === 'function') {
   window.loadResumeStatus()
 }
 loadSettings().then(() => {
-  checkFirstRun()
-  if (!window.appState.appReady) {
-    showTab('tab-config')
-  }
+  refreshFirstRunBanner()
 })
+
+window.showTab = showTab
+window.refreshFirstRunBanner = refreshFirstRunBanner

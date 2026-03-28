@@ -11,5 +11,5 @@ dist
 /tmp/vitest_cache
 .vitest-cache
 test-results/
-
-
+.claude
+.codex*
