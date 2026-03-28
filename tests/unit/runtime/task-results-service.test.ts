@@ -114,6 +114,7 @@ describe('RuntimeTaskResultsService', () => {
     expect(mainTask).toMatchObject({
       kind: 'session',
       lifecycle: 'waiting',
+      status: 'requires_input',
       artifactCount: 1,
     })
     expect(mainTask?.summary).toContain('Waiting for input')
@@ -124,6 +125,7 @@ describe('RuntimeTaskResultsService', () => {
     expect(failedRun).toMatchObject({
       kind: 'delegation',
       lifecycle: 'failed',
+      status: 'failed',
       error: 'Apply blocked by captcha',
       artifactCount: 1,
     })
@@ -140,7 +142,9 @@ describe('RuntimeTaskResultsService', () => {
       totalTasks: 3,
       sessionTasks: 1,
       delegatedTasks: 2,
+      queuedTasks: 0,
       waitingTasks: 1,
+      requiresInputTasks: 1,
       failedTasks: 1,
       completedTasks: 1,
       pendingInterventions: 1,
@@ -228,6 +232,49 @@ describe('RuntimeTaskResultsService', () => {
         sessionId: 'main',
         delegatedRunId: 'run-123',
       },
+    })
+  })
+
+  test('builds task detail with next actions, failures, interventions, and artifacts', async () => {
+    const workspace = createWorkspace()
+    const delegationStore = new DelegationStore(workspace)
+    const interventionStore = new InterventionStore(workspace)
+    const artifactStore = new ArtifactStore(workspace)
+
+    await delegationStore.save(delegation('run-review', {
+      profile: 'review',
+      state: 'waiting_input',
+      instruction: 'Review uploaded resume',
+      updatedAt: '2026-03-28T11:00:00.000Z',
+    }))
+
+    await interventionStore.save(intervention('ivr-review', {
+      ownerType: 'delegated_run',
+      ownerId: 'run-review',
+      status: 'pending',
+      prompt: 'Need the target JD URL',
+      updatedAt: '2026-03-28T11:01:00.000Z',
+    }))
+
+    await artifactStore.save(artifact('art-review', {
+      name: 'resume-review.md',
+      path: 'output/resume-review.md',
+      createdAt: '2026-03-28T11:02:00.000Z',
+      meta: { delegatedRunId: 'run-review' },
+    }))
+
+    const service = new RuntimeTaskResultsService(workspace)
+    const detail = await service.getTaskDetail('delegation:run-review')
+
+    expect(detail?.task).toMatchObject({
+      id: 'run-review',
+      status: 'requires_input',
+    })
+    expect(detail?.interventions.map((item) => item.id)).toEqual(['ivr-review'])
+    expect(detail?.artifacts.map((item) => item.id)).toEqual(['art-review'])
+    expect(detail?.nextActions[0]).toMatchObject({
+      code: 'provide_input',
+      label: 'Provide input',
     })
   })
 })

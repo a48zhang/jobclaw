@@ -3,15 +3,17 @@ import type { Channel } from '../channel/base.js'
 import { AgentFactory } from '../agents/factory.js'
 import { MainAgent } from '../agents/main/index.js'
 import { getConfigStatus, loadConfig, type ConfigStatus } from '../config.js'
-import { createMCPClient, type MCPClientStatus } from '../mcp.js'
 import { bindRuntimeEventStream } from '../eventBus.js'
+import { createMCPClient, type MCPClientStatus } from '../mcp.js'
+import { ArtifactStore } from '../memory/artifactStore.js'
 import { ConversationStore } from '../memory/conversationStore.js'
 import { DelegationStore } from '../memory/delegationStore.js'
 import { InMemoryEventStream } from './event-stream.js'
 import { InterventionManager } from './intervention-manager.js'
 import { cancelActiveDelegations } from './recovery.js'
 import { JsonSessionStore } from './session-store.js'
-import { ensureRuntimeStateDirs, nowIso } from './utils.js'
+import { RuntimeTaskResultsService } from './task-results-service.js'
+import { createRuntimeId, ensureRuntimeStateDirs, nowIso } from './utils.js'
 import type { AgentSession, DelegatedRun, DelegatedRunState, EventStream } from './contracts.js'
 
 type ClosableMCPClient = Awaited<ReturnType<typeof createMCPClient>>['client']
@@ -41,6 +43,8 @@ export class RuntimeKernel {
   private readonly interventionManager: InterventionManager
   private readonly delegationStore: DelegationStore
   private readonly conversationStore: ConversationStore
+  private readonly artifactStore: ArtifactStore
+  private readonly taskResultsService: RuntimeTaskResultsService
 
   private mcpClient: ClosableMCPClient = null
   private mcpStatus: MCPClientStatus = {
@@ -66,6 +70,15 @@ export class RuntimeKernel {
     this.interventionManager = new InterventionManager(this.workspaceRoot, this.eventStream)
     this.delegationStore = new DelegationStore(this.workspaceRoot)
     this.conversationStore = new ConversationStore(this.workspaceRoot)
+    this.artifactStore = new ArtifactStore(this.workspaceRoot)
+    this.taskResultsService = new RuntimeTaskResultsService({
+      workspaceRoot: this.workspaceRoot,
+      sessionStore: this.sessionStore,
+      delegationStore: this.delegationStore,
+      interventionStore: this.interventionManager,
+      artifactStore: this.artifactStore,
+      conversationStore: this.conversationStore,
+    })
   }
 
   async start(): Promise<void> {
@@ -232,6 +245,86 @@ export class RuntimeKernel {
 
   getConversationStore(): ConversationStore {
     return this.conversationStore
+  }
+
+  getTaskResultsService(): RuntimeTaskResultsService {
+    return this.taskResultsService
+  }
+
+  dispatchProfileTask(
+    profile: Exclude<DelegatedRun['profile'], 'main'>,
+    instruction: string,
+    options: { parentSessionId?: string } = {}
+  ): { runId: string; dispatch: 'profile_agent' } | null {
+    if (!this.factory) return null
+
+    const parentSessionId = options.parentSessionId ?? this.mainAgentName
+    const taskAgent = this.factory.createAgent({ persistent: false, profileName: profile })
+    const createdAt = nowIso()
+    const runId = createRuntimeId('delegation')
+    const basePayload = {
+      profile,
+      instruction,
+      createdAt,
+      updatedAt: createdAt,
+    }
+
+    this.eventStream.publish({
+      type: 'delegation.created',
+      sessionId: parentSessionId,
+      delegatedRunId: runId,
+      agentName: taskAgent.agentName,
+      payload: {
+        ...basePayload,
+        state: 'queued',
+      },
+    })
+
+    void (async () => {
+      const runningAt = nowIso()
+      this.eventStream.publish({
+        type: 'delegation.state_changed',
+        sessionId: parentSessionId,
+        delegatedRunId: runId,
+        agentName: taskAgent.agentName,
+        payload: {
+          ...basePayload,
+          state: 'running',
+          updatedAt: runningAt,
+        },
+      })
+
+      try {
+        const result = await taskAgent.run(instruction)
+        this.eventStream.publish({
+          type: 'delegation.completed',
+          sessionId: parentSessionId,
+          delegatedRunId: runId,
+          agentName: taskAgent.agentName,
+          payload: {
+            ...basePayload,
+            state: 'completed',
+            updatedAt: nowIso(),
+            resultSummary: summarizeDelegatedResult(result),
+          },
+        })
+      } catch (error) {
+        this.eventStream.publish({
+          type: 'delegation.failed',
+          sessionId: parentSessionId,
+          delegatedRunId: runId,
+          agentName: taskAgent.agentName,
+          payload: {
+            ...basePayload,
+            state: 'failed',
+            updatedAt: nowIso(),
+            error: (error as Error).message,
+          },
+        })
+      }
+    })()
+
+    return { runId, dispatch: 'profile_agent' }
   }
 
   private startMaintenanceLoop(): void {
@@ -429,4 +522,10 @@ export class RuntimeKernel {
     }
     return 'queued'
   }
+}
+
+function summarizeDelegatedResult(result: string): string {
+  const normalized = result.replace(/\s+/g, ' ').trim()
+  if (normalized.length <= 180) return normalized
+  return `${normalized.slice(0, 177)}...`
 }

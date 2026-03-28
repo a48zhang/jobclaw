@@ -496,7 +496,7 @@ describe('/api/runtime/*', () => {
 
       const tasksJson = await tasksRes.json() as {
         ok: boolean
-        tasks: Array<{ id: string; kind: string; state: string }>
+        tasks: Array<{ id: string; kind: string; state: string; status: string }>
       }
       const resultsJson = await resultsRes.json() as {
         ok: boolean
@@ -514,6 +514,10 @@ describe('/api/runtime/*', () => {
         'failed',
         'waiting',
       ])
+      expect(tasksJson.tasks.map((task) => task.status)).toEqual([
+        'failed',
+        'requires_input',
+      ])
 
       expect(resultsJson.ok).toBe(true)
       expect(resultsJson.resultSummary.totalTasks).toBe(2)
@@ -522,6 +526,63 @@ describe('/api/runtime/*', () => {
         'data/uploads/resume-upload.pdf',
         'output/resume.pdf',
       ])
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('returns runtime task detail with next-action hints', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-runtime-task-detail-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'delegation'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'interventions'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'output'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'delegation', 'run-1.json'),
+      JSON.stringify({
+        id: 'run-1',
+        parentSessionId: 'main',
+        profile: 'review',
+        state: 'waiting_input',
+        instruction: 'Review resume',
+        createdAt: '2026-03-27T00:00:01.000Z',
+        updatedAt: '2026-03-27T00:00:11.000Z',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'interventions', 'ivr-1.json'),
+      JSON.stringify({
+        id: 'ivr-1',
+        ownerType: 'delegated_run',
+        ownerId: 'run-1',
+        kind: 'text',
+        prompt: 'Need target JD URL',
+        status: 'pending',
+        createdAt: '2026-03-27T00:00:02.000Z',
+        updatedAt: '2026-03-27T00:00:12.000Z',
+      }),
+      'utf-8'
+    )
+    fs.writeFileSync(path.join(workspace, 'output', 'resume-review.md'), '# review')
+
+    const app = createApp(workspace)
+
+    try {
+      const res = await app.request('/api/runtime/tasks/detail?id=delegation:run-1')
+      expect(res.status).toBe(200)
+      const json = await res.json() as {
+        ok: boolean
+        detail: {
+          task: { id: string; status: string }
+          interventions: Array<{ id: string }>
+          nextActions: Array<{ code: string }>
+        }
+      }
+      expect(json.ok).toBe(true)
+      expect(json.detail.task.id).toBe('run-1')
+      expect(json.detail.task.status).toBe('requires_input')
+      expect(json.detail.interventions.map((item) => item.id)).toEqual(['ivr-1'])
+      expect(json.detail.nextActions[0]?.code).toBe('provide_input')
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
@@ -743,6 +804,37 @@ describe('/api/resume/review', () => {
 })
 
 describe('/api/resume/build', () => {
+  test('prefers runtime task dispatch when available', async () => {
+    const dispatchProfileTask = vi.fn(() => ({ runId: 'delegation-runtime', dispatch: 'profile_agent' as const }))
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      dispatchProfileTask,
+    }
+
+    const app = createApp(TEST_WORKSPACE, runtime as any)
+    const res = await app.request('/api/resume/build', { method: 'POST' })
+
+    expect(res.status).toBe(200)
+    const json = await res.json() as { ok: boolean; runId: string; dispatch: string }
+    expect(json.ok).toBe(true)
+    expect(json.runId).toBe('delegation-runtime')
+    expect(json.dispatch).toBe('profile_agent')
+    expect(dispatchProfileTask).toHaveBeenCalledWith('resume', '生成简历')
+  })
+
   test('dispatches a tracked profile task when factory is available', async () => {
     const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-resume-build-'))
     const run = vi.fn(async () => 'Resume generated successfully')

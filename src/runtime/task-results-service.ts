@@ -20,6 +20,20 @@ import { nowIso } from './utils.js'
 
 export type UnifiedTaskKind = 'session' | 'delegation'
 export type UnifiedTaskLifecycle = 'idle' | 'running' | 'waiting' | 'failed' | 'completed' | 'cancelled'
+export type UnifiedTaskStatus = 'idle' | 'queued' | 'running' | 'requires_input' | 'completed' | 'failed' | 'cancelled'
+
+export interface UnifiedTaskActionHint {
+  code: 'provide_input' | 'retry' | 'review_failure' | 'inspect_artifact' | 'monitor' | 'send_message'
+  label: string
+  reason: string
+}
+
+export interface UnifiedTaskRetryHint {
+  supported: boolean
+  mode: 'rerun_delegation' | 'resubmit_session' | 'none'
+  reason: string
+  instruction?: string
+}
 
 export interface TaskResultsAggregateOptions {
   sessionId?: string
@@ -58,6 +72,8 @@ export interface UnifiedTaskRecord {
   title: string
   state: AgentSessionState | DelegatedRunState
   lifecycle: UnifiedTaskLifecycle
+  status: UnifiedTaskStatus
+  statusLabel: string
   createdAt: string
   updatedAt: string
   activityAt: string
@@ -70,6 +86,20 @@ export interface UnifiedTaskRecord {
   interventionCounts: Record<InterventionStatus, number>
   artifactCount: number
   latestArtifact?: UnifiedTaskArtifactSummary
+  nextAction?: UnifiedTaskActionHint
+  retryHint: UnifiedTaskRetryHint
+  detail: {
+    rawState: AgentSessionState | DelegatedRunState
+    instruction?: string
+    conversationSummary?: string
+    lastMessageAt?: string
+    resultSummary?: string
+    failureReason?: string
+    pendingIntervention?: UnifiedTaskInterventionSummary
+    interventionCounts: Record<InterventionStatus, number>
+    artifactCount: number
+    latestArtifact?: UnifiedTaskArtifactSummary
+  }
 }
 
 export interface UnifiedFailureRecord {
@@ -100,8 +130,10 @@ export interface TaskResultsSummary {
   sessionTasks: number
   delegatedTasks: number
   idleTasks: number
+  queuedTasks: number
   runningTasks: number
   waitingTasks: number
+  requiresInputTasks: number
   failedTasks: number
   completedTasks: number
   cancelledTasks: number
@@ -116,6 +148,14 @@ export interface TaskResultsAggregate {
   recentFailures: UnifiedFailureRecord[]
   recentArtifacts: UnifiedArtifactRecord[]
   resultSummary: TaskResultsSummary
+}
+
+export interface UnifiedTaskDetail {
+  task: UnifiedTaskRecord
+  interventions: InterventionRecord[]
+  artifacts: UnifiedArtifactRecord[]
+  failures: UnifiedFailureRecord[]
+  nextActions: UnifiedTaskActionHint[]
 }
 
 interface TaskAggregationData {
@@ -215,6 +255,28 @@ export class RuntimeTaskResultsService {
     }
   }
 
+  async getTaskDetail(taskId: string): Promise<UnifiedTaskDetail | null> {
+    const normalizedTaskId = normalizeTaskId(taskId)
+    const data = await this.loadAggregationData()
+    const tasks = this.buildTasks(data)
+    const task = tasks.find((item) => item.id === normalizedTaskId)
+    if (!task) return null
+
+    const visibleTaskIds = new Set([task.id])
+    const artifacts = filterArtifactsByTaskIds(this.buildRecentArtifacts(data.artifacts), visibleTaskIds)
+    const failures = this.buildRecentFailures(data, [task], visibleTaskIds)
+    const interventions = filterInterventionsByTaskIds(data.interventions, visibleTaskIds)
+    const nextActions = buildTaskActionHints(task)
+
+    return {
+      task,
+      interventions,
+      artifacts,
+      failures,
+      nextActions,
+    }
+  }
+
   private async loadAggregationData(): Promise<TaskAggregationData> {
     const [sessions, delegations, interventions, artifacts] = await Promise.all([
       this.sessionStore.list(),
@@ -302,6 +364,19 @@ export class RuntimeTaskResultsService {
       )
       const latestArtifact = relatedArtifacts.at(0)
       const lifecycle = deriveSessionLifecycle(session.state, pendingIntervention)
+      const status = deriveSessionStatus(session.state, pendingIntervention)
+      const conversationSummary = nonEmptyString(conversation?.summary)
+      const interventionCounts = countInterventions(relatedInterventions)
+      const pendingInterventionSummary = toInterventionSummary(pendingIntervention)
+      const detail = {
+        rawState: session.state,
+        conversationSummary,
+        lastMessageAt: session.lastMessageAt,
+        pendingIntervention: pendingInterventionSummary,
+        interventionCounts,
+        artifactCount: relatedArtifacts.length,
+        latestArtifact,
+      }
       tasks.push({
         id: session.id,
         kind: 'session',
@@ -311,6 +386,8 @@ export class RuntimeTaskResultsService {
         title: session.agentName === 'main' ? 'Main Session' : `Session ${session.agentName}`,
         state: session.state,
         lifecycle,
+        status,
+        statusLabel: describeTaskStatus(status),
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
         activityAt: maxIso(
@@ -328,11 +405,23 @@ export class RuntimeTaskResultsService {
           conversation,
           pendingIntervention,
         }),
-        conversationSummary: nonEmptyString(conversation?.summary),
-        pendingIntervention: toInterventionSummary(pendingIntervention),
-        interventionCounts: countInterventions(relatedInterventions),
+        conversationSummary,
+        pendingIntervention: pendingInterventionSummary,
+        interventionCounts,
         artifactCount: relatedArtifacts.length,
         latestArtifact,
+        nextAction: buildTaskActionHintsFromState({
+          kind: 'session',
+          lifecycle,
+          status,
+          pendingIntervention,
+          latestArtifact,
+        })[0],
+        retryHint: buildRetryHint({
+          kind: 'session',
+          status,
+        }),
+        detail,
       })
     }
 
@@ -346,6 +435,23 @@ export class RuntimeTaskResultsService {
       )
       const latestArtifact = relatedArtifacts.at(0)
       const lifecycle = deriveDelegationLifecycle(delegation.state, pendingIntervention)
+      const status = deriveDelegationStatus(delegation.state, pendingIntervention)
+      const conversationSummary = nonEmptyString(conversation?.summary)
+      const resultSummary = nonEmptyString(delegation.resultSummary)
+      const error = nonEmptyString(delegation.error)
+      const interventionCounts = countInterventions(relatedInterventions)
+      const pendingInterventionSummary = toInterventionSummary(pendingIntervention)
+      const detail = {
+        rawState: delegation.state,
+        instruction: delegation.instruction,
+        conversationSummary,
+        resultSummary,
+        failureReason: error,
+        pendingIntervention: pendingInterventionSummary,
+        interventionCounts,
+        artifactCount: relatedArtifacts.length,
+        latestArtifact,
+      }
       tasks.push({
         id: delegation.id,
         kind: 'delegation',
@@ -355,6 +461,8 @@ export class RuntimeTaskResultsService {
         title: delegation.instruction,
         state: delegation.state,
         lifecycle,
+        status,
+        statusLabel: describeTaskStatus(status),
         createdAt: delegation.createdAt,
         updatedAt: delegation.updatedAt,
         activityAt: maxIso(
@@ -372,13 +480,27 @@ export class RuntimeTaskResultsService {
           resultSummary: delegation.resultSummary,
           error: delegation.error,
         }),
-        conversationSummary: nonEmptyString(conversation?.summary),
-        resultSummary: nonEmptyString(delegation.resultSummary),
-        error: nonEmptyString(delegation.error),
-        pendingIntervention: toInterventionSummary(pendingIntervention),
-        interventionCounts: countInterventions(relatedInterventions),
+        conversationSummary,
+        resultSummary,
+        error,
+        pendingIntervention: pendingInterventionSummary,
+        interventionCounts,
         artifactCount: relatedArtifacts.length,
         latestArtifact,
+        nextAction: buildTaskActionHintsFromState({
+          kind: 'delegation',
+          lifecycle,
+          status,
+          pendingIntervention,
+          latestArtifact,
+          error: delegation.error,
+        })[0],
+        retryHint: buildRetryHint({
+          kind: 'delegation',
+          status,
+          instruction: delegation.instruction,
+        }),
+        detail,
       })
     }
 
@@ -479,8 +601,10 @@ export class RuntimeTaskResultsService {
       sessionTasks: tasks.filter((task) => task.kind === 'session').length,
       delegatedTasks: tasks.filter((task) => task.kind === 'delegation').length,
       idleTasks: tasks.filter((task) => task.lifecycle === 'idle').length,
+      queuedTasks: tasks.filter((task) => task.status === 'queued').length,
       runningTasks: tasks.filter((task) => task.lifecycle === 'running').length,
       waitingTasks: tasks.filter((task) => task.lifecycle === 'waiting').length,
+      requiresInputTasks: tasks.filter((task) => task.status === 'requires_input').length,
       failedTasks: tasks.filter((task) => task.lifecycle === 'failed').length,
       completedTasks: tasks.filter((task) => task.lifecycle === 'completed').length,
       cancelledTasks: tasks.filter((task) => task.lifecycle === 'cancelled').length,
@@ -599,6 +723,16 @@ function deriveSessionLifecycle(
   return 'idle'
 }
 
+function deriveSessionStatus(
+  state: AgentSessionState,
+  pendingIntervention?: InterventionRecord
+): UnifiedTaskStatus {
+  if (pendingIntervention || state === 'waiting_input') return 'requires_input'
+  if (state === 'running') return 'running'
+  if (state === 'error') return 'failed'
+  return 'idle'
+}
+
 function deriveDelegationLifecycle(
   state: DelegatedRunState,
   pendingIntervention?: InterventionRecord
@@ -608,6 +742,38 @@ function deriveDelegationLifecycle(
   if (state === 'completed') return 'completed'
   if (state === 'cancelled') return 'cancelled'
   return 'running'
+}
+
+function deriveDelegationStatus(
+  state: DelegatedRunState,
+  pendingIntervention?: InterventionRecord
+): UnifiedTaskStatus {
+  if (pendingIntervention || state === 'waiting_input') return 'requires_input'
+  if (state === 'queued') return 'queued'
+  if (state === 'failed') return 'failed'
+  if (state === 'completed') return 'completed'
+  if (state === 'cancelled') return 'cancelled'
+  return 'running'
+}
+
+function describeTaskStatus(status: UnifiedTaskStatus): string {
+  switch (status) {
+    case 'queued':
+      return 'Queued'
+    case 'running':
+      return 'Running'
+    case 'requires_input':
+      return 'Needs Input'
+    case 'completed':
+      return 'Completed'
+    case 'failed':
+      return 'Failed'
+    case 'cancelled':
+      return 'Cancelled'
+    case 'idle':
+    default:
+      return 'Idle'
+  }
 }
 
 function buildTaskSummary(input: {
@@ -645,6 +811,92 @@ function buildTaskSummary(input: {
   return `${capitalize(input.lifecycle)} session: ${input.title}`
 }
 
+function buildTaskActionHints(task: UnifiedTaskRecord): UnifiedTaskActionHint[] {
+  return buildTaskActionHintsFromState({
+    kind: task.kind,
+    lifecycle: task.lifecycle,
+    status: task.status,
+    pendingIntervention: task.pendingIntervention,
+    latestArtifact: task.latestArtifact,
+    error: task.error,
+  })
+}
+
+function buildTaskActionHintsFromState(input: {
+  kind: UnifiedTaskKind
+  lifecycle: UnifiedTaskLifecycle
+  status: UnifiedTaskStatus
+  pendingIntervention?: Pick<UnifiedTaskInterventionSummary, 'prompt'>
+  latestArtifact?: Pick<UnifiedTaskArtifactSummary, 'name' | 'path'>
+  error?: string
+}): UnifiedTaskActionHint[] {
+  if (input.status === 'requires_input') {
+    return [{
+      code: 'provide_input',
+      label: 'Provide input',
+      reason: input.pendingIntervention?.prompt ?? 'Task is blocked on user input.',
+    }]
+  }
+  if (input.status === 'failed' || input.status === 'cancelled') {
+    return [{
+      code: 'retry',
+      label: 'Retry task',
+      reason: input.error ?? 'Review failure details before retrying this task.',
+    }]
+  }
+  if (input.status === 'queued' || input.status === 'running') {
+    return [{
+      code: 'monitor',
+      label: 'Monitor task',
+      reason: 'Task is still in progress.',
+    }]
+  }
+  if (input.status === 'completed' && input.latestArtifact) {
+    return [{
+      code: 'inspect_artifact',
+      label: 'Inspect artifact',
+      reason: `Latest artifact: ${input.latestArtifact.name} (${input.latestArtifact.path})`,
+    }]
+  }
+  if (input.lifecycle === 'idle') {
+    return [{
+      code: input.kind === 'session' ? 'send_message' : 'monitor',
+      label: input.kind === 'session' ? 'Send next message' : 'Review latest state',
+      reason: input.kind === 'session'
+        ? 'No active work is running; send the next instruction to continue.'
+        : 'No active work is running for this task.',
+    }]
+  }
+  return []
+}
+
+function buildRetryHint(input: {
+  kind: UnifiedTaskKind
+  status: UnifiedTaskStatus
+  instruction?: string
+}): UnifiedTaskRetryHint {
+  if (input.kind === 'delegation' && (input.status === 'failed' || input.status === 'cancelled') && input.instruction) {
+    return {
+      supported: true,
+      mode: 'rerun_delegation',
+      reason: 'Retry the delegated task with the previous instruction.',
+      instruction: input.instruction,
+    }
+  }
+  if (input.kind === 'session' && input.status === 'failed') {
+    return {
+      supported: false,
+      mode: 'resubmit_session',
+      reason: 'Main session retries are not replayable from structured state yet; send a new message instead.',
+    }
+  }
+  return {
+    supported: false,
+    mode: 'none',
+    reason: 'No structured retry path is available for this task state.',
+  }
+}
+
 function extractArtifactOwnerHints(meta: Record<string, unknown>): ArtifactOwnerHints {
   return {
     sessionId: firstString(meta, ['sessionId', 'session_id']),
@@ -676,6 +928,13 @@ function nonEmptyString(value: string | undefined): string | undefined {
 function capitalize(value: string): string {
   if (!value) return value
   return value[0].toUpperCase() + value.slice(1)
+}
+
+function normalizeTaskId(taskId: string): string {
+  const trimmed = taskId.trim()
+  if (trimmed.startsWith('session:')) return trimmed.slice('session:'.length)
+  if (trimmed.startsWith('delegation:')) return trimmed.slice('delegation:'.length)
+  return trimmed
 }
 
 export class TaskResultsService extends RuntimeTaskResultsService {}

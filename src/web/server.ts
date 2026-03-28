@@ -81,6 +81,11 @@ export interface ServerRuntime {
   getDelegationStore?(): RuntimeDelegationStore | undefined
   getInterventionManager?(): RuntimeInterventionManager | undefined
   getConversationStore?(): ConversationStore | undefined
+  getTaskResultsService?(): RuntimeTaskResultsService | undefined
+  dispatchProfileTask?(
+    profile: DelegatedRun['profile'],
+    instruction: string
+  ): { runId: string; dispatch: 'profile_agent' } | null
 }
 
 export function registerAgent(agent: BaseAgent): void {
@@ -784,6 +789,8 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         getDelegationStore: () => undefined,
         getInterventionManager: () => undefined,
         getConversationStore: () => undefined,
+        getTaskResultsService: () => undefined,
+        dispatchProfileTask: () => null,
       }
 
   const app = new Hono()
@@ -796,13 +803,59 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
   const delegationStore = new DelegationStore(workspaceRoot)
   const interventionStore = new InterventionStore(workspaceRoot)
   const artifactStore = new ArtifactStore(workspaceRoot)
+  const runtimeTaskResultsService = runtime.getTaskResultsService?.() ?? new RuntimeTaskResultsService(workspaceRoot)
   const uploadedResumeRelPath = 'data/uploads/resume-upload.pdf'
   const uploadedResumeAbsPath = path.resolve(workspaceRoot, uploadedResumeRelPath)
+
+  function toApiTaskId(kind: 'session' | 'delegation', id: string): string {
+    return `${kind}:${id}`
+  }
+
+  function mapTaskForApi(task: Awaited<ReturnType<typeof runtimeTaskResultsService.aggregate>>['tasks'][number]) {
+    return {
+      id: toApiTaskId(task.kind, task.id),
+      kind: task.kind,
+      profile: task.profile,
+      title: task.title,
+      state: task.lifecycle,
+      status: task.status,
+      statusLabel: task.statusLabel,
+      rawState: task.state,
+      sessionId: task.sessionId,
+      agentName: task.agentName,
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      summary: task.summary,
+      resultSummary: task.resultSummary,
+      error: task.error,
+      nextAction: task.nextAction,
+      nextStep: task.nextAction,
+      retryHint: task.retryHint,
+      detail: task.detail,
+    }
+  }
+
+  function mapArtifactForApi(artifact: Awaited<ReturnType<typeof runtimeTaskResultsService.aggregate>>['recentArtifacts'][number]) {
+    const relatedTaskIds = Array.from(new Set([
+      ...(artifact.ownerHints.sessionId ? [toApiTaskId('session', artifact.ownerHints.sessionId)] : []),
+      ...(artifact.ownerHints.delegatedRunId ? [toApiTaskId('delegation', artifact.ownerHints.delegatedRunId)] : []),
+      ...artifact.relatedTaskIds
+        .filter((taskId) => taskId !== artifact.ownerHints.sessionId && taskId !== artifact.ownerHints.delegatedRunId)
+        .map((taskId) => taskId === 'main' ? toApiTaskId('session', taskId) : toApiTaskId('delegation', taskId)),
+    ]))
+    return {
+      ...artifact,
+      relatedTaskIds,
+    }
+  }
 
   function dispatchTrackedProfileTask(
     profile: DelegatedRun['profile'],
     instruction: string
   ): { runId: string; dispatch: 'profile_agent' } | null {
+    const runtimeDispatch = runtime.dispatchProfileTask?.(profile, instruction)
+    if (runtimeDispatch) return runtimeDispatch
+
     const factory = runtime.getFactory()
     if (!factory) return null
 
@@ -909,24 +962,33 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
   app.get('/api/runtime/tasks', async (c) => {
     try {
       const sessionId = c.req.query('sessionId') || undefined
-      const service = new RuntimeTaskResultsService(workspaceRoot)
-      const snapshot = await service.aggregate({ sessionId })
-      const tasks = snapshot.tasks.map((task) => ({
-        id: `${task.kind}:${task.id}`,
-        kind: task.kind,
-        profile: task.profile,
-        title: task.title,
-        state: task.lifecycle,
-        rawState: task.state,
-        sessionId: task.sessionId,
-        agentName: task.agentName,
-        createdAt: task.createdAt,
-        updatedAt: task.updatedAt,
-        summary: task.summary,
-        resultSummary: task.resultSummary,
-        error: task.error,
-      }))
+      const snapshot = await runtimeTaskResultsService.aggregate({ sessionId })
+      const tasks = snapshot.tasks.map((task) => mapTaskForApi(task))
       return c.json({ ok: true, tasks })
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message }, 500)
+    }
+  })
+
+  app.get('/api/runtime/tasks/detail', async (c) => {
+    try {
+      const id = c.req.query('id')?.trim()
+      if (!id) return c.json({ ok: false, error: 'id is required' }, 400)
+      const detail = await runtimeTaskResultsService.getTaskDetail(id)
+      if (!detail) return c.json({ ok: false, error: 'Task not found' }, 404)
+      return c.json({
+        ok: true,
+        detail: {
+          task: mapTaskForApi(detail.task),
+          interventions: detail.interventions,
+          artifacts: detail.artifacts.map((artifact) => mapArtifactForApi(artifact)),
+          failures: detail.failures.map((failure) => ({
+            ...failure,
+            id: `${failure.kind}:${failure.id}`,
+          })),
+          nextActions: detail.nextActions,
+        },
+      })
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
     }
@@ -935,8 +997,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
   app.get('/api/runtime/results', async (c) => {
     try {
       const sessionId = c.req.query('sessionId') || undefined
-      const service = new RuntimeTaskResultsService(workspaceRoot)
-      const snapshot = await service.aggregate({ sessionId })
+      const snapshot = await runtimeTaskResultsService.aggregate({ sessionId })
       return c.json({
         ok: true,
         generatedAt: snapshot.generatedAt,
@@ -945,7 +1006,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
           ...failure,
           id: `${failure.kind}:${failure.id}`,
         })),
-        recentArtifacts: snapshot.recentArtifacts,
+        recentArtifacts: snapshot.recentArtifacts.map((artifact) => mapArtifactForApi(artifact)),
       })
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message }, 500)
@@ -959,6 +1020,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         configStatus: runtime.getConfigStatus(),
         runtimeStatus: runtime.getRuntimeStatus?.(),
         artifactStore,
+        taskResultsService: runtimeTaskResultsService,
       })
       const overview = await service.getOverview({
         sessionId: c.req.query('sessionId') || undefined,
@@ -977,6 +1039,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         configStatus: runtime.getConfigStatus(),
         runtimeStatus: runtime.getRuntimeStatus?.(),
         artifactStore,
+        taskResultsService: runtimeTaskResultsService,
       })
       const artifacts = await service.listArtifacts(limit)
       return c.json({ ok: true, total: artifacts.length, artifacts })
@@ -1335,6 +1398,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         workspaceRoot,
         configStatus: runtime.getConfigStatus(),
         runtimeStatus: runtime.getRuntimeStatus?.(),
+        taskResultsService: runtimeTaskResultsService,
       })
       return c.json(await service.getInsights({ sessionId: c.req.query('sessionId') || undefined }))
     } catch (err) {
