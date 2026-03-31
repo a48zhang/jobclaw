@@ -30,4 +30,16 @@ describe('DefaultCapabilityPolicy', () => {
     expect(defaultCapabilityPolicy.canDelegate(profile as any, 'delivery').allowed).toBe(true)
     expect(defaultCapabilityPolicy.canDelegate(profile as any, 'main').allowed).toBe(false)
   })
+
+  test('delivery profile cannot write workspace context files', () => {
+    const profile = getProfileByName('delivery')
+    expect(defaultCapabilityPolicy.canWritePath(profile as any, 'data/targets.md').allowed).toBe(false)
+    expect(defaultCapabilityPolicy.canWritePath(profile as any, 'data/userinfo.md').allowed).toBe(false)
+  })
+
+  test('resume profile cannot write workspace context files', () => {
+    const profile = getProfileByName('resume')
+    expect(defaultCapabilityPolicy.canWritePath(profile as any, 'data/targets.md').allowed).toBe(false)
+    expect(defaultCapabilityPolicy.canWritePath(profile as any, 'data/userinfo.md').allowed).toBe(false)
+  })
 })

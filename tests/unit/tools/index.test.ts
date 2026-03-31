@@ -16,14 +16,15 @@ describe('TOOL_NAMES 常量', () => {
     expect(TOOL_NAMES.RUN_SHELL_COMMAND).toBe('run_shell_command')
     expect(TOOL_NAMES.READ_PDF).toBe('read_pdf')
     expect(TOOL_NAMES.GREP).toBe('grep')
+    expect(TOOL_NAMES.UPDATE_WORKSPACE_CONTEXT).toBe('update_workspace_context')
     expect(TOOL_NAMES.GET_TIME).toBe('get_time')
     expect(TOOL_NAMES.RUN_AGENT).toBe('run_agent')
   })
 })
 
 describe('TOOLS 数组', () => {
-  test('包含 14 个工具', () => {
-    expect(TOOLS).toHaveLength(14)
+  test('包含 15 个工具', () => {
+    expect(TOOLS).toHaveLength(15)
   })
 
   test('每个工具都有正确的类型', () => {
@@ -68,6 +69,7 @@ describe('TOOLS 数组', () => {
     expect(names).toContain('typst_compile')
     expect(names).toContain('install_typst')
     expect(names).toContain('read_pdf')
+    expect(names).toContain('update_workspace_context')
     expect(names).toContain('run_shell_command')
     expect(names).toContain('run_agent')
   })
@@ -155,7 +157,7 @@ describe('JSON 序列化', () => {
     const json = JSON.stringify(TOOLS)
     const parsed = JSON.parse(json) as ChatCompletionTool[]
 
-    expect(parsed).toHaveLength(14)
+    expect(parsed).toHaveLength(15)
     parsed.forEach((tool, index) => {
       expect(tool.type).toBe('function')
       expect(tool.function.name).toBe(TOOLS[index].function.name)
@@ -189,6 +191,22 @@ describe('read_pdf 工具', () => {
   test('pages 参数是可选的数组', () => {
     expect(tool.function.parameters.properties.pages.type).toBe('array')
     expect(tool.function.parameters.properties.pages.items.type).toBe('number')
+  })
+
+  test('additionalProperties 为 false', () => {
+    expect(tool.function.parameters.additionalProperties).toBe(false)
+  })
+})
+
+describe('update_workspace_context 工具', () => {
+  const tool = TOOLS.find((t) => t.function.name === 'update_workspace_context')!
+
+  test('targets 参数是可选数组', () => {
+    expect(tool.function.parameters.properties.targets.type).toBe('array')
+  })
+
+  test('userinfo 参数是可选对象', () => {
+    expect(tool.function.parameters.properties.userinfo.type).toBe('object')
   })
 
   test('additionalProperties 为 false', () => {

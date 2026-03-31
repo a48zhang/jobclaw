@@ -6,8 +6,8 @@
 
 | 技能名称 | 文件路径 | 适用场景 |
 | :--- | :--- | :--- |
-| **系统初始化** | `skills/bootstrap.md` | 当用户首次使用或请求“初始化工作区”时使用，用于收集用户信息和配置环境。 |
-| **搜索职位** | `skills/search-jobs.md` | 当用户发出 `run search` 或要求“搜寻新岗位”时使用，用于从目标网站获取并核实职位信息。 |
+| **系统初始化** | `skills/bootstrap.md` | 当用户首次使用或请求“初始化工作区”时使用，用于完成最小运行配置，并建立可在聊天中继续维护的工作区上下文。 |
+| **搜索职位** | `skills/search-jobs.md` | 当用户发出 `run search` 或要求“搜寻新岗位”时使用，用于先判断目标信息是否足够；不足时先通过 `update_workspace_context` 起草 `targets.md`，仅在关键决策缺失时追问用户。 |
 | **投递职位** | `skills/delivery.md` | 当用户发出 `start delivery` 或要求“自动投递已发现的职位”时使用，用于执行自动化表单提交。 |
 | **日报汇总** | `skills/daily-digest.md` | 当用户要求“分析 jobs.md”或“发送日报”时使用，用于统计新增数据并通过 Channel 发送邮件。 |
 | **简历制作** | `skills/resume-mastery.md` | 当用户要求“生成简历”、“更新简历”或修改项目经历描述时使用，负责整合用户信息并编译 Typst PDF。 |
@@ -19,3 +19,4 @@
 ---
 **Agent 指导原则**：
 不要在这个文件（index）中寻找具体的执行步骤！这个文件只是一张地图。当你明确了当前任务属于上述哪个类别后，请**必须**读取 `workspace` 目录下对应的 `.md` 文件来获取完整的 SOP 流程。
+`data/targets.md` 与 `data/userinfo.md` 的最终写入由 MainAgent 统一负责；子 Agent 只提交更新建议。

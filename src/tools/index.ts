@@ -10,6 +10,7 @@ import { executeReadPdf } from './readPdf.js'
 import { executeGrep } from './grep.js'
 import { executeGetTime, GET_TIME_TOOL } from './getTime.js'
 import { executeRunAgent, RUN_AGENT_TOOL } from './runAgent.js'
+import { executeUpdateWorkspaceContext } from './updateWorkspaceContext.js'
 import { getLockFilePath } from './utils.js'
 import { TOOL_NAME_LIST, TOOL_NAMES } from './names.js'
 import type { ChatCompletionTool } from 'openai/resources/chat/completions'
@@ -35,7 +36,7 @@ export const TOOLS: ChatCompletionTool[] = [
         type: 'object',
         properties: {
           path: { type: 'string', description: '相对于 workspace 的路径' },
-          offset: { type: 'number', description: '读取起始位置（字节）' },
+          offset: { type: 'number', description: '读取起始位置（字符偏移）' },
         },
         required: ['path'],
       },
@@ -216,6 +217,38 @@ export const TOOLS: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: TOOL_NAMES.UPDATE_WORKSPACE_CONTEXT,
+      description: '合并更新工作区上下文（data/targets.md 与 data/userinfo.md），内置去重、保守写入和原子落盘。',
+      parameters: {
+        type: 'object',
+        properties: {
+          targets: {
+            type: 'array',
+            description: '可选。要合并到 targets.md 的目标条目数组。',
+            items: {
+              type: 'object',
+              properties: {
+                company: { type: 'string', description: '公司名' },
+                url: { type: 'string', description: '职位页或 careers 页 URL' },
+                notes: { type: 'string', description: '可选备注' },
+              },
+              additionalProperties: false,
+            },
+          },
+          userinfo: {
+            type: 'object',
+            description: '可选。要合并到 userinfo.md 的字段映射，例如 {"方向":"后端开发"}。',
+            additionalProperties: { type: 'string' },
+          },
+          source: { type: 'string', description: '可选。本次上下文更新来源标记。' },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
   GET_TIME_TOOL,
   RUN_AGENT_TOOL,
 ]
@@ -276,6 +309,9 @@ export async function executeTool(
       break
     case TOOL_NAMES.GREP:
       result = await executeGrep(args, context)
+      break
+    case TOOL_NAMES.UPDATE_WORKSPACE_CONTEXT:
+      result = await executeUpdateWorkspaceContext(args, context)
       break
     case TOOL_NAMES.GET_TIME:
       result = await executeGetTime(args, context)

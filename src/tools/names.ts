@@ -6,6 +6,7 @@ export const TOOL_NAMES = {
   LOCK_FILE: 'lock_file',
   UNLOCK_FILE: 'unlock_file',
   UPSERT_JOB: 'upsert_job',
+  UPDATE_WORKSPACE_CONTEXT: 'update_workspace_context',
   TYPST_COMPILE: 'typst_compile',
   INSTALL_TYPST: 'install_typst',
   RUN_SHELL_COMMAND: 'run_shell_command',

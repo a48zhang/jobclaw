@@ -53,7 +53,7 @@ export async function executeReadFile(args: Record<string, unknown>, context: To
       return {
         success: false,
         content: '',
-        error: `文件内容过大（约 ${tokens.length} tokens，${contentLength} 字符）。请使用 offset 参数分页读取，当前 offset=${startOffset}，建议使用较小的 offset 值分段读取。`,
+        error: `文件内容过大（约 ${tokens.length} tokens，${contentLength} 字符）。请使用字符偏移 offset 分页读取，当前 offset=${startOffset}。`,
       }
     }
 
