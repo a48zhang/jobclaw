@@ -28,6 +28,7 @@ BaseAgent
 - 子任务不再创建临时 `MainAgent`，而是创建对应 profile 的 `ProfileAgent`。
 - `ProfileAgent` 的能力边界由 profile 和 capability policy 共同限制。
 - `RuntimeKernel` 负责主 Agent 生命周期、配置重载、事件流和人工干预状态。
+- `MainAgent` 具备通过本地文件工具读写 `workspace/data/targets.md` 与 `workspace/data/userinfo.md` 的能力，因此这些文档可以作为对话中的工作区上下文持续维护。
 
 ## 2. BaseAgent
 
@@ -62,6 +63,10 @@ BaseAgent
 2. 内建 `request` 工具
 3. MCP 返回的浏览器工具
 
+本地工具包括：
+
+- `update_workspace_context`：增量维护 targets.md / userinfo.md。执行去重合并（基于 company + url 精确去重），保留已有笔记，source 字段记录触发来源。
+
 执行路径：
 
 - 本地工具命中 `LOCAL_TOOL_NAMES` 时，走 `executeTool()`
@@ -87,6 +92,12 @@ BaseAgent
 - `text`
 - `confirm`
 - `single_select`
+
+产品语义补充：
+
+- `request` 是正式的人工升级通道，不应替代正常的上下文推断与草拟。
+- 当 `MainAgent` 仍能基于当前对话、安全假设和工作区文档继续时，应优先更新上下文并继续执行。
+- 当缺失信息已经影响搜索范围、简历策略、自动化授权或高风险写入时，再发起 intervention。
 
 ### 2.5 持久化
 
@@ -150,6 +161,7 @@ profile 决定：
 当前 `MainAgent` 负责：
 
 - 用户主对话
+- 维护和更新工作区上下文文档（如 `targets.md`、`userinfo.md`）
 - 搜索职位
 - 简历生成
 - 简历评价

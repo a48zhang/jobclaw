@@ -68,8 +68,9 @@ ${this.mcpClient ? '' : '\n> ⚠️ **注意：MCP 未连接**。当前不可用
 - 不能投递与用户信息不匹配的职位（例如用户意向后端开发岗位，不需要搜前端、算法工程师、产品经理等）
 - 搜索职位需要阅读job description，需要与用户信息相符（技术栈等）
 - 阅读职位结束必须评价该职位是否适合用户
-- 没有用户信息或者不全则直接询问用户
-- 发现新职位后，**必须**使用 \`upsert_job\` 工具写入 \`data/jobs.md\`。
+- 优先复用聊天上下文与现有 \`targets.md\` / \`userinfo.md\`，先形成可执行草稿并持续维护工作区上下文
+- 只有当缺失信息会显著影响搜索边界、投递安全或简历真实性时，才使用 \`request\` 追问用户
+- 发现新职位后，**必须**使用 \`upsert_job\` 工具写入 \`state/jobs/jobs.json\`。
 - 通过 \`run_agent\` 工具（指定 skill="delivery"）执行简历投递。
 
 ## 可用技能索引 (Skill Index)
@@ -78,15 +79,16 @@ ${RESUME_SYSTEM_PROMPT}
 ${INTERVIEW_AND_RESUME_PROMPT}
 ## 可用工具概览
 - **upsert_job**: 更新或插入职位信息（推荐方式，内置文件锁与查重）。
+- **update_workspace_context**: 合并更新 \`targets.md\` / \`userinfo.md\`，用于把聊天中确认的信息沉淀为工作区上下文。
 - **run_agent**: 启动临时 Agent 执行子任务（如投递职位）。
 - **typst_compile**: 将 Typst 源文件编译为 PDF 简历。
 - **Playwright MCP 工具**: 浏览器操作。
 - **文件工具**: read_file, list_directory 等。
 
 ## 数据文件
-- **data/targets.md**: 监测目标列表。
-- **data/jobs.md**: 职位列表（由 upsert_job 维护）。
-- **data/userinfo.md**: 用户简历信息（只读）。
+- **data/targets.md**: 监测目标列表（由 MainAgent 在对话中持续维护，用户可手工覆写）。
+- **state/jobs/jobs.json**: 职位列表（由 upsert_job 维护）。
+- **data/userinfo.md**: 用户简历信息（由 MainAgent 在对话中持续维护，用户可手工覆写）。
 `]
   }
 
@@ -95,6 +97,23 @@ ${INTERVIEW_AND_RESUME_PROMPT}
    * typst_compile 成功时通过全局 eventBus 通知前端文件已生成
    */
   protected async onToolResult(toolName: string, result: ToolResult): Promise<void> {
+    if (toolName === 'update_workspace_context' && result.success) {
+      const updatedFiles = Array.isArray(result.data?.updatedFiles)
+        ? result.data.updatedFiles.filter((item): item is string => typeof item === 'string')
+        : []
+      eventBus.emit('workspace:context_updated', {
+        agentName: this.agentName,
+        updatedFiles,
+        summary: typeof result.summary === 'string' && result.summary.trim()
+          ? result.summary
+          : 'Agent 已同步工作区上下文。',
+        source: typeof result.data?.source === 'string' ? result.data.source : undefined,
+        requiresReview: result.data?.requiresReview === true,
+        timestamp: new Date().toISOString(),
+      })
+      return
+    }
+
     if (toolName === 'typst_compile' && result.success) {
       eventBus.emit('agent:log', {
         agentName: this.agentName,

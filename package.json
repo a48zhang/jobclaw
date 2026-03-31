@@ -6,11 +6,16 @@
     "jobclaw": "./src/index.ts"
   },
   "scripts": {
+    "frontend:build": "vite build",
+    "frontend:watch": "vite build --watch",
+    "predev": "npm run frontend:build",
     "dev": "tsx src/index.ts",
+    "prestart": "npm run frontend:build",
     "start": "tsx src/index.ts",
     "cron": "tsx src/cron.ts",
     "mcp:lightpanda": "node scripts/lightpanda-mcp.mjs",
-    "test": "sh scripts/test.sh",
+    "test": "bash scripts/test.sh",
+    "pretest:e2e": "npm run frontend:build",
     "test:e2e": "node scripts/ensure-lightpanda.mjs && playwright test"
   },
   "dependencies": {
@@ -22,8 +27,12 @@
     "cac": "^7.0.0",
     "gpt-tokenizer": "^2.0.0",
     "hono": "^4.0.0",
+    "isomorphic-dompurify": "^3.7.1",
+    "marked": "^4.3.0",
     "nodemailer": "^6.9.0",
     "openai": "^4.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "unpdf": "^1.4.0",
     "ws": "^8.0.0"
   },
@@ -33,10 +42,14 @@
     "@types/blessed": "^0.1.27",
     "@types/node": "^20.0.0",
     "@types/nodemailer": "^6.4.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.5.3",
+    "@vitejs/plugin-react": "^4.3.4",
     "@vitest/coverage-v8": "^2.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0",
+    "vite": "^5.4.21",
     "vitest": "^2.0.0"
   }
 }

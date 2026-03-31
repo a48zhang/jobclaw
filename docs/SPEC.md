@@ -7,6 +7,12 @@
 
 JobClaw 是一个默认通过 Web 控制台运行的求职自动化系统。
 
+当前产品交互原则是：
+
+- Agent 对话是主入口。
+- `workspace/data/targets.md` 与 `workspace/data/userinfo.md` 是 Agent 可在对话中持续维护的工作区上下文。
+- 用户追问应只发生在信息不足以继续可靠执行时。
+
 当前系统由 3 个核心层组成：
 
 - `RuntimeKernel`
@@ -51,6 +57,11 @@ npm run start
 3. 创建 `RuntimeKernel`
 4. 启动 Web 服务
 5. 若基础模型配置完整，则加载主 Agent；否则进入设置向导状态
+
+补充语义：
+
+- 基础模型配置是主 Agent 可用的硬前置。
+- `targets.md` / `userinfo.md` 不是启动主 Agent 的硬前置；它们可以在后续对话中由 Agent 逐步起草和更新。
 
 ### 2.2 Cron 模式
 
@@ -191,11 +202,17 @@ jobclaw/
 当前主要职责：
 
 - 用户主对话
+- 在对话中维护 `targets.md` / `userinfo.md` 等工作区上下文草稿
 - 搜索职位
 - 简历生成
 - 简历评价与模拟面试
 - 调度子 Agent
 - 汇总工具结果和子任务结果
+
+补充约束：
+
+- 当上下文已足以继续时，`MainAgent` 应优先先起草、执行并说明假设。
+- 当缺失信息已经影响搜索范围、简历策略或自动化安全时，`MainAgent` 再通过 `request` 发起追问。
 
 ### 6.3 ProfileAgent
 
@@ -233,6 +250,7 @@ profile 决定：
 本地工具注册在 `src/tools/index.ts`，当前主要包括：
 
 - `read_file`
+- `update_workspace_context` — 在对话中维护 targets.md / userinfo.md，支持增量去重合并；source 字段标注触发来源（chat / agent）。
 - `write_file`
 - `append_file`
 - `list_directory`
@@ -269,7 +287,7 @@ profile 决定：
 - 聊天面板
 - 职位看板与统计
 - 基础设置编辑
-- `targets.md` / `userinfo.md` 编辑
+- `targets.md` / `userinfo.md` 校对与人工覆写
 - 简历 PDF 生成
 - PDF 简历上传与评价
 - 人工干预弹窗
@@ -340,6 +358,7 @@ profile 决定：
 
 - 职位数据以后端结构化存储 `workspace/state/jobs/jobs.json` 为正式事实源。
 - `workspace/data/jobs.md` 保留为可读、可编辑的导入导出表示，不再作为后端唯一数据源。
+- `workspace/data/targets.md` 与 `workspace/data/userinfo.md` 是工作区上下文文档：允许用户手工编辑，也允许 Agent 在对话中持续维护。
 
 ## 10. 当前文档边界
 
