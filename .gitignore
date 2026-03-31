@@ -12,4 +12,5 @@ dist
 .vitest-cache
 test-results/
 .claude
+.worktrees
 .codex*
