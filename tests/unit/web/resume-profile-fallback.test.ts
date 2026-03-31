@@ -1,14 +1,35 @@
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import { createApp } from '../../../src/web/server.js'
 
-const workspaceRoot = '/tmp/jobclaw-resume-profile-fallback'
+let workspaceRoot = ''
+
+async function removeWorkspaceWithRetry(target: string) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await fs.promises.rm(target, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOTEMPTY' || attempt === 4) {
+        throw error
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80))
+    }
+  }
+}
 
 describe('resume endpoints fallback agent', () => {
+  beforeEach(() => {
+    workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-resume-profile-fallback-'))
+  })
+
   afterEach(async () => {
     vi.restoreAllMocks()
-    await fs.promises.rm('/tmp/jobclaw-resume-profile-fallback', { recursive: true, force: true })
+    if (workspaceRoot) {
+      await removeWorkspaceWithRetry(workspaceRoot)
+    }
   })
 
   test('/api/resume/build uses factory when main agent missing', async () => {
@@ -43,12 +64,13 @@ describe('resume endpoints fallback agent', () => {
     }
 
     const app = createApp(workspaceRoot, runtime as any)
-    const uploadDir = '/tmp/jobclaw-resume-profile-fallback/data/uploads'
+    const uploadDir = path.join(workspaceRoot, 'data', 'uploads')
     await fs.promises.mkdir(uploadDir, { recursive: true })
     await fs.promises.writeFile(path.join(uploadDir, 'resume-upload.pdf'), 'dummy')
     const res = await app.request('/api/resume/review', { method: 'POST' })
     expect(res.status).toBe(200)
     expect(factory.createAgent).toHaveBeenCalledWith({ persistent: false, profileName: 'review' })
     expect(res.ok).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 150))
   })
 })

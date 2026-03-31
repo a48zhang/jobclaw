@@ -74,7 +74,7 @@ function buildConfigSummary(configStatus: ConfigStatus): SetupConfigSummary {
   if (configStatus.ready) {
     return {
       ready: true,
-      message: '基础模型配置已完整，可启动主 Agent 和所有依赖 LLM 的任务。',
+      message: '基础模型配置已完整，可启动聊天 Agent；targets.md 和 userinfo.md 可继续在聊天中起草，并在配置页人工覆写校对。',
       missingFields: [],
       config: {
         MODEL_ID: configStatus.config.MODEL_ID,
@@ -100,11 +100,11 @@ function buildConfigSummary(configStatus: ConfigStatus): SetupConfigSummary {
     },
     apiKeyConfigured: Boolean(configStatus.config.API_KEY),
     recoverySuggestions: [
-      '在配置页补全 API_KEY、MODEL_ID、BASE_URL，完成后重新加载 runtime。',
+      '在配置页补全 API_KEY、MODEL_ID、BASE_URL，完成后重新加载 runtime；这是聊天入口的前置条件。',
       '若使用自定义网关，确认 BASE_URL 指向兼容 OpenAI Chat Completions 的端点。',
     ],
     alternativePaths: [
-      '在基础模型配置完成前，可继续整理 targets.md、userinfo.md、jobs.md，以及上传现有简历文件。',
+      '在基础模型配置完成前，可先整理 jobs.md 或现有简历文件；targets.md 和 userinfo.md 也可待聊天开启后由 Agent 逐步起草。',
     ],
   }
 }
@@ -142,17 +142,17 @@ async function inspectTargetsDocument(workspaceRoot: string): Promise<SetupDocum
     completion,
     message: ready
       ? `已发现 ${validEntryCount} 条有效监测目标，可启动职位搜索。`
-      : 'targets.md 尚未提供有效监测目标。',
+      : 'targets.md 尚未提供有效监测目标，但可在聊天中由 Agent 逐步起草。',
     requiredMissing: ready ? [] : ['至少 1 条“公司 | URL”目标'],
     recoverySuggestions: ready
       ? []
       : [
-          '在 targets.md 中按“公司名 | 网址 | 备注”格式填写至少一条有效目标。',
-          '优先补充可直接访问的招聘页或公司 careers 页面，减少搜索链路中的额外猜测。',
+          '可先在聊天中让 Agent 生成 targets.md 草稿，再到配置页按“公司名 | 网址 | 备注”人工覆写或校对至少一条有效目标。',
+          '优先确认可直接访问的招聘页或公司 careers 页面，减少搜索链路中的额外猜测。',
         ],
     alternativePaths: ready
       ? []
-      : ['若暂时没有监测目标，可先手动维护 jobs.md，再继续状态跟踪、简历生成和审查流程。'],
+      : ['若暂时没有监测目标，可先继续聊天澄清求职方向，或手动维护 jobs.md，再推进状态跟踪与后续流程。'],
     details: {
       totalBulletLines: bulletLines.length,
       candidateLines: totalEntries,
@@ -180,17 +180,17 @@ async function inspectUserinfoDocument(workspaceRoot: string): Promise<SetupDocu
     completion,
     message: ready
       ? `userinfo.md 关键字段已就绪，已填写 ${filledFieldCount}/${totalFieldCount} 个字段。`
-      : `userinfo.md 缺少关键字段：${requiredMissing.join('、')}。`,
+      : `userinfo.md 缺少关键字段：${requiredMissing.join('、')}；这些内容可在聊天中逐步起草。`,
     requiredMissing,
     recoverySuggestions: ready
       ? []
       : [
-          '优先补全姓名、邮箱、手机、方向、城市、学历/年限、关键词，确保主 Agent 能生成和改写简历。',
-          '若已有标准化简历内容，可先整理到 userinfo.md，再触发 resume 相关任务。',
+          '可先在聊天中让 Agent 起草姓名、邮箱、手机、方向、城市、学历/年限、关键词等字段，再到配置页人工覆写和校对。',
+          '若已有标准化简历内容，可先整理到 userinfo.md，作为 Agent 后续生成与改写的人工确认底稿。',
         ],
     alternativePaths: ready
       ? []
-      : ['若当前只需要做简历体检，可先上传现有 PDF 简历，再使用 review 或 mock interview 流程。'],
+      : ['若当前只需要做简历体检，可先上传现有 PDF 简历；userinfo.md 可稍后在聊天中逐步完善。'],
     details: {
       totalFieldCount,
       filledFieldCount,
@@ -453,13 +453,16 @@ function buildOverallSummary(input: {
   const ready = setupReady && degraded.length === 0
 
   if (!setupReady) {
+    const message = !input.config.ready
+      ? '基础模型配置尚未完成，聊天入口仍处于 setup 阶段；targets.md 和 userinfo.md 可待聊天开启后逐步起草。'
+      : '基础模型配置已就绪，工作区资料仍可在聊天中逐步起草，配置页用于人工覆写和校对。'
     return {
       mode: 'setup_required',
       ready: false,
       setupReady: false,
       blockers: uniq(blockers),
       degraded: uniq(degraded),
-      message: '基础配置或工作区输入尚未完成，系统仍处于 setup 阶段。',
+      message,
     }
   }
 

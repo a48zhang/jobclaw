@@ -368,6 +368,17 @@ describe('BaseAgent', () => {
       expect(messages[1].role).toBe('user')
     })
 
+    test('系统消息包含先起草再追问的核心规则', () => {
+      agent.testSetMessages([])
+      agent.testInitMessages('测试输入')
+
+      const messages = agent.testGetMessages()
+      const systemContent = (messages[0] as { content: string }).content
+      expect(systemContent).toContain('先起草再追问')
+      expect(systemContent).toContain('仅当信息不足以安全继续')
+      expect(systemContent).toContain('绝不能编造虚假事实')
+    })
+
     test('有历史消息时追加新输入', () => {
       agent.testSetMessages([
         { role: 'system', content: 'System prompt' },

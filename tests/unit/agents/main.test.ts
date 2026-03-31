@@ -16,7 +16,7 @@ function createMockOpenAI(): OpenAI {
 }
 
 describe('MainAgent', () => {
-    test('systemPrompt 包含 run_agent 且不包含 run_delivery_agent', () => {
+    test('systemPrompt 包含 run_agent / update_workspace_context 且不包含 run_delivery_agent', () => {
         const agent = new MainAgent({
             openai: createMockOpenAI(),
             agentName: 'main-test',
@@ -27,7 +27,24 @@ describe('MainAgent', () => {
 
         const prompt = (agent as any).systemPrompt as string
         expect(prompt).toContain('run_agent')
+        expect(prompt).toContain('update_workspace_context')
         expect(prompt).not.toContain('run_delivery_agent')
+    })
+
+    test('systemPrompt 使用先起草后追问策略且不再声明 userinfo 只读', () => {
+        const agent = new MainAgent({
+            openai: createMockOpenAI(),
+            agentName: 'main-test',
+            model: 'test-model',
+            workspaceRoot: TEST_WORKSPACE,
+            persistent: false,
+        })
+
+        const prompt = (agent as any).systemPrompt as string
+        expect(prompt).toContain('先形成可执行草稿并持续维护工作区上下文')
+        expect(prompt).toContain('才使用 `request` 追问用户')
+        expect(prompt).not.toContain('没有用户信息或者不全则直接询问用户')
+        expect(prompt).not.toContain('用户简历信息（只读）')
     })
 
     test('构造函数允许注入 factory', () => {

@@ -58,4 +58,44 @@ describe('InterventionManager', () => {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
   })
+
+  test('resolve enforces confirm and single-select constraints', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-intervention-manager-'))
+    const stream = new InMemoryEventStream()
+    const manager = new InterventionManager(workspace, stream)
+
+    try {
+      const confirmRecord = await manager.request({
+        ownerType: 'session',
+        ownerId: 'main',
+        prompt: 'Need yes or no',
+        kind: 'confirm',
+        allowEmpty: false,
+      })
+      await expect(
+        manager.resolve({ ownerId: 'main', requestId: confirmRecord.id, input: 'maybe' })
+      ).rejects.toThrow(/must be yes or no/)
+
+      await expect(
+        manager.resolve({ ownerId: 'main', requestId: confirmRecord.id, input: 'yes' })
+      ).resolves.toHaveProperty('status', 'resolved')
+
+      const selectRecord = await manager.request({
+        ownerType: 'session',
+        ownerId: 'main',
+        prompt: 'Pick one',
+        kind: 'single_select',
+        options: ['foo', 'bar'],
+      })
+      await expect(
+        manager.resolve({ ownerId: 'main', requestId: selectRecord.id, input: 'baz' })
+      ).rejects.toThrow(/must match one of the provided options/)
+
+      await expect(
+        manager.resolve({ ownerId: 'main', requestId: selectRecord.id, input: 'bar' })
+      ).resolves.toHaveProperty('status', 'resolved')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
 })

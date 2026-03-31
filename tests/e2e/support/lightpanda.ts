@@ -5,9 +5,12 @@ import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
 
-type Fixtures = {
+type WorkerFixtures = {
   appBaseUrl: string
   browserContext: BrowserContext
+}
+
+type Fixtures = {
   page: Page
 }
 
@@ -190,7 +193,7 @@ async function startLightpandaServer(port: number): Promise<{ proc: ChildProcess
   }
 }
 
-export const test = base.extend<Fixtures>({
+export const test = base.extend<Fixtures, WorkerFixtures>({
   appBaseUrl: [
     async ({}, use) => {
       const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'jobclaw-e2e-'))

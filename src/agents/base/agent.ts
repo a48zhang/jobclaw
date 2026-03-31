@@ -1060,7 +1060,7 @@ export abstract class BaseAgent extends EventEmitter {
   protected loadSkill(name: string): string { return utils.loadSkill(this.workspaceRoot, name) }
 
   protected initMessages(input: string): void {
-    const systemContent = `${this.systemPrompt}\n\n## 核心行为准则\n1. **严禁编造**: 遇到无法解决的技术问题或信息缺失时，必须如实告知用户或通过 \`request\` 工具请求用户补充输入。绝不能编造虚假信息。\n2. **写入前反思**: 在向 \`data/\` 写入信息前，必须核实数据真实性。\n3. **中文交流**: 始终使用中文与用户交流。`
+    const systemContent = `${this.systemPrompt}\n\n## 核心行为准则\n1. **严禁编造**: 遇到不确定信息时必须如实说明，绝不能编造虚假事实。\n2. **先起草再追问**: 信息不完整时，先复用已有聊天上下文与工作区文档形成可执行草稿；仅当信息不足以安全继续，或会显著影响结果真实性时，才使用 \`request\` 追问。\n3. **写入前反思**: 在向 \`data/\` 写入信息前，必须核实数据真实性。\n4. **中文交流**: 始终使用中文与用户交流。`
     if (this.messages.length === 0) {
       this.messages.push({ role: 'system', content: systemContent }, { role: 'user', content: input })
     } else {
