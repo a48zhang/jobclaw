@@ -90,10 +90,11 @@ export class InterventionManager {
   ): Promise<InterventionRecord | null> {
     const record = await this.findPending(input.ownerId, input.requestId)
     if (!record) return null
+    const normalizedInput = normalizeInterventionResolutionInput(record, input.input)
 
     const nextRecord: InterventionRecord = {
       ...record,
-      input: input.input,
+      input: normalizedInput,
       status: 'resolved',
       updatedAt: nowIso(),
     }
@@ -107,7 +108,7 @@ export class InterventionManager {
           delegatedRunId: options.delegatedRunId,
           agentName: options.agentName,
           payload: {
-            input: input.input,
+            input: normalizedInput,
             requestId: nextRecord.id,
           },
         },
@@ -204,7 +205,7 @@ export class InterventionManager {
     const timedOut: InterventionRecord[] = []
     for (const record of await this.list()) {
       if (record.status !== 'pending' || !record.timeoutMs) continue
-      if (Date.parse(record.createdAt) + record.timeoutMs > now) continue
+      if (now < Date.parse(record.createdAt) + record.timeoutMs) continue
       const nextRecord = await this.timeout(record.id)
       if (nextRecord) timedOut.push(nextRecord)
     }
@@ -224,4 +225,37 @@ export class InterventionManager {
       agentName: record.ownerId,
     }
   }
+}
+
+export function normalizeInterventionResolutionInput(record: InterventionRecord, rawInput: string): string {
+  const input = typeof rawInput === 'string' ? rawInput : ''
+  const trimmed = input.trim()
+
+  if (record.allowEmpty === false && trimmed.length === 0) {
+    throw new Error('Intervention input is required')
+  }
+
+  if (record.kind === 'confirm') {
+    const normalized = trimmed.toLowerCase()
+    if (normalized.length === 0) {
+      return ''
+    }
+    if (['y', 'yes', 'true', '1', '是', '确认', '同意'].includes(normalized)) {
+      return 'yes'
+    }
+    if (['n', 'no', 'false', '0', '否', '取消', '不同意'].includes(normalized)) {
+      return 'no'
+    }
+    throw new Error('Intervention confirm input must be yes or no')
+  }
+
+  if (record.kind === 'single_select' && Array.isArray(record.options) && record.options.length > 0) {
+    const matched = record.options.find((option) => option === trimmed)
+    if (!matched) {
+      throw new Error('Intervention input must match one of the provided options')
+    }
+    return matched
+  }
+
+  return input
 }
