@@ -48,8 +48,10 @@ describe('Runtime event stream contract', () => {
 
     const usageListener = vi.fn()
     const logListener = vi.fn()
+    const workspaceListener = vi.fn()
     eventBus.on('context:usage', usageListener)
     eventBus.on('agent:log', logListener)
+    eventBus.on('workspace:context_updated', workspaceListener)
 
     try {
       eventBus.emit('context:usage', { agentName: 'main', tokenCount: 1234 })
@@ -59,13 +61,22 @@ describe('Runtime event stream contract', () => {
         message: 'runtime log',
         timestamp: '2026-03-27T00:00:00.000Z',
       })
+      eventBus.emit('workspace:context_updated', {
+        agentName: 'main',
+        updatedFiles: ['data/targets.md'],
+        summary: '已同步 workspace context：targets.md 新增 1 条。',
+        requiresReview: false,
+        timestamp: '2026-03-27T00:00:00.000Z',
+      })
 
       const eventTypes = stream.getHistory().map((event) => event.type)
       expect(eventTypes).toContain('context.usage')
       expect(eventTypes).toContain('runtime.log')
+      expect(eventTypes).toContain('workspace.context_updated')
 
       usageListener.mockClear()
       logListener.mockClear()
+      workspaceListener.mockClear()
 
       stream.publish({
         type: 'context.usage',
@@ -83,6 +94,17 @@ describe('Runtime event stream contract', () => {
           timestamp: '2026-03-27T00:00:01.000Z',
         },
       })
+      stream.publish({
+        type: 'workspace.context_updated',
+        sessionId: 'main',
+        agentName: 'main',
+        payload: {
+          updatedFiles: ['data/userinfo.md'],
+          summary: '已同步 workspace context：userinfo.md 更新 2 个字段。',
+          requiresReview: true,
+          timestamp: '2026-03-27T00:00:02.000Z',
+        },
+      })
 
       expect(usageListener).toHaveBeenCalledWith({ agentName: 'main', tokenCount: 5678 })
       expect(logListener).toHaveBeenCalledWith({
@@ -92,10 +114,18 @@ describe('Runtime event stream contract', () => {
         message: 'hello from runtime',
         timestamp: '2026-03-27T00:00:01.000Z',
       })
+      expect(workspaceListener).toHaveBeenCalledWith({
+        agentName: 'main',
+        updatedFiles: ['data/userinfo.md'],
+        summary: '已同步 workspace context：userinfo.md 更新 2 个字段。',
+        requiresReview: true,
+        timestamp: '2026-03-27T00:00:02.000Z',
+      })
     } finally {
       bindRuntimeEventStream(undefined)
       eventBus.off('context:usage', usageListener)
       eventBus.off('agent:log', logListener)
+      eventBus.off('workspace:context_updated', workspaceListener)
     }
   })
 

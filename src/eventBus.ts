@@ -70,6 +70,15 @@ export interface ContextUsagePayload {
   tokenCount: number
 }
 
+export interface WorkspaceContextUpdatedPayload {
+  agentName: string
+  updatedFiles: string[]
+  summary: string
+  source?: string
+  requiresReview?: boolean
+  timestamp: string
+}
+
 export interface EventBusMap {
   'agent:state': AgentStatePayload
   'agent:log': AgentLogPayload
@@ -79,6 +88,7 @@ export interface EventBusMap {
   'intervention:required': InterventionRequiredPayload
   'intervention:resolved': InterventionResolvedPayload
   'context:usage': ContextUsagePayload
+  'workspace:context_updated': WorkspaceContextUpdatedPayload
   'session.state_changed': AgentSession
   'session.output_chunk': AgentStreamPayload
   'delegation.created': DelegatedRun
@@ -246,6 +256,21 @@ function toRuntimeEvent(
         },
       }
     }
+    case 'workspace:context_updated': {
+      const value = payload as WorkspaceContextUpdatedPayload
+      return {
+        type: 'workspace.context_updated',
+        sessionId: value.agentName,
+        agentName: value.agentName,
+        payload: {
+          updatedFiles: value.updatedFiles,
+          summary: value.summary,
+          source: value.source,
+          requiresReview: value.requiresReview,
+          timestamp: value.timestamp,
+        },
+      }
+    }
     default:
       return null
   }
@@ -379,6 +404,22 @@ function toLegacyEvent(
         payload: {
           agentName: event.agentName ?? event.sessionId ?? 'main',
           tokenCount: Number(event.payload.tokenCount ?? 0),
+        },
+      }
+    case 'workspace.context_updated':
+      return {
+        name: 'workspace:context_updated',
+        payload: {
+          agentName: event.agentName ?? event.sessionId ?? 'main',
+          updatedFiles: Array.isArray(event.payload.updatedFiles)
+            ? event.payload.updatedFiles.filter((item): item is string => typeof item === 'string')
+            : [],
+          summary: String(event.payload.summary ?? 'Agent 已同步工作区上下文。'),
+          source: typeof event.payload.source === 'string' ? event.payload.source : undefined,
+          requiresReview: typeof event.payload.requiresReview === 'boolean'
+            ? event.payload.requiresReview
+            : undefined,
+          timestamp: String(event.payload.timestamp ?? event.timestamp),
         },
       }
     default:

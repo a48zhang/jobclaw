@@ -3,6 +3,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readConfigFile } from '../../../src/config'
 import { eventBus } from '../../../src/eventBus'
 import {
   clearAgentRegistryForTests,
@@ -45,27 +46,49 @@ function writeJobsState(
 
 describe('/api/intervention', () => {
   test('forwards requestId to the event bus payload', async () => {
-    const app = createApp(TEST_WORKSPACE)
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-intervention-forward-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'interventions'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'interventions', 'req-123.json'),
+      JSON.stringify({
+        id: 'req-123',
+        ownerType: 'session',
+        ownerId: 'main',
+        kind: 'text',
+        prompt: 'need input',
+        status: 'pending',
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+      }),
+      'utf-8'
+    )
+
+    const app = createApp(workspace)
     const payloadPromise = new Promise<{ agentName: string; input: string; requestId?: string }>((resolve) => {
       eventBus.once('intervention:resolved', resolve)
     })
 
-    const res = await app.request('/api/intervention', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    try {
+      const res = await app.request('/api/intervention', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentName: 'main',
+          ownerId: 'main',
+          input: 'backend',
+          requestId: 'req-123',
+        }),
+      })
+
+      expect(res.status).toBe(200)
+      await expect(payloadPromise).resolves.toEqual({
         agentName: 'main',
         input: 'backend',
         requestId: 'req-123',
-      }),
-    })
-
-    expect(res.status).toBe(200)
-    await expect(payloadPromise).resolves.toEqual({
-      agentName: 'main',
-      input: 'backend',
-      requestId: 'req-123',
-    })
+      })
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
   })
 
   test('prefers runtime intervention manager when available', async () => {
@@ -115,6 +138,239 @@ describe('/api/intervention', () => {
       { ownerId: 'main', input: 'backend', requestId: 'req-1' },
       { sessionId: 'main', agentName: 'main' }
     )
+  })
+
+  test('returns validation error when intervention manager rejects bad input', async () => {
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'key',
+          MODEL_ID: 'model',
+          LIGHT_MODEL_ID: 'light-model',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      reloadFromConfig: async () => {},
+      getInterventionManager: () => ({
+        resolve: async () => {
+          throw new Error('Intervention confirm input must be yes or no')
+        },
+      }),
+    }
+
+    const app = createApp(TEST_WORKSPACE, runtime as any)
+    const res = await app.request('/api/intervention', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentName: 'main',
+        ownerId: 'main',
+        input: 'maybe',
+        requestId: 'req-2',
+      }),
+    })
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.ok).toBe(false)
+    expect(json.error).toContain('yes or no')
+  })
+
+  test('validates fallback intervention input against stored pending record', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-intervention-fallback-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'interventions'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'interventions', 'req-3.json'),
+      JSON.stringify({
+        id: 'req-3',
+        ownerType: 'session',
+        ownerId: 'main',
+        kind: 'single_select',
+        options: ['backend', 'frontend'],
+        prompt: 'choose one',
+        status: 'pending',
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+        allowEmpty: false,
+      }),
+      'utf-8'
+    )
+
+    const recordPath = path.join(workspace, 'state', 'interventions', 'req-3.json')
+    const beforeRecord = JSON.parse(fs.readFileSync(recordPath, 'utf-8')) as { updatedAt: string }
+    const app = createApp(workspace)
+
+    try {
+      const badRes = await app.request('/api/intervention', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentName: 'main',
+          ownerId: 'main',
+          input: 'mobile',
+          requestId: 'req-3',
+        }),
+      })
+      expect(badRes.status).toBe(400)
+      const badJson = await badRes.json() as { ok: boolean; error: string }
+      expect(badJson.ok).toBe(false)
+      expect(badJson.error).toContain('provided options')
+
+      const payloadPromise = new Promise<{ agentName: string; input: string; requestId?: string }>((resolve) => {
+        eventBus.once('intervention:resolved', resolve)
+      })
+      const goodRes = await app.request('/api/intervention', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentName: 'main',
+          ownerId: 'main',
+          input: 'backend',
+          requestId: 'req-3',
+        }),
+      })
+
+      expect(goodRes.status).toBe(200)
+      await expect(goodRes.json()).resolves.toMatchObject({ ok: true, resolved: true })
+      await expect(payloadPromise).resolves.toEqual({
+        agentName: 'main',
+        input: 'backend',
+        requestId: 'req-3',
+      })
+
+      const resolvedRecord = JSON.parse(fs.readFileSync(recordPath, 'utf-8')) as {
+        status: string
+        input?: string
+        updatedAt: string
+      }
+      expect(resolvedRecord.status).toBe('resolved')
+      expect(resolvedRecord.input).toBe('backend')
+      expect(resolvedRecord.updatedAt).not.toBe(beforeRecord.updatedAt)
+
+      const repeatRes = await app.request('/api/intervention', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentName: 'main',
+          ownerId: 'main',
+          input: 'frontend',
+          requestId: 'req-3',
+        }),
+      })
+      expect(repeatRes.status).toBe(404)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('fallback intervention returns 404 when requestId missing', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-intervention-fallback-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'interventions'), { recursive: true })
+    fs.writeFileSync(
+      path.join(workspace, 'state', 'interventions', 'req-404.json'),
+      JSON.stringify({
+        id: 'req-404',
+        ownerType: 'session',
+        ownerId: 'main',
+        kind: 'text',
+        prompt: 'test fallback',
+        status: 'pending',
+        createdAt: '2026-03-27T00:00:00.000Z',
+        updatedAt: '2026-03-27T00:00:00.000Z',
+        allowEmpty: true,
+      }),
+      'utf-8'
+    )
+
+    const app = createApp(workspace)
+    const emitSpy = vi.spyOn(eventBus, 'emit')
+
+    try {
+      const res = await app.request('/api/intervention', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentName: 'main',
+          ownerId: 'main',
+          input: 'ignored',
+          requestId: 'missing-req',
+        }),
+      })
+
+      expect(res.status).toBe(404)
+      const json = await res.json()
+      expect(json.ok).toBe(false)
+      expect(json.resolved).toBe(false)
+      expect(
+        emitSpy.mock.calls.filter(([eventName]) => eventName === 'intervention:resolved')
+      ).toHaveLength(0)
+    } finally {
+      emitSpy.mockRestore()
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('/api/settings', () => {
+  test('masks stored API keys and preserves them when omitted from updates', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-settings-'))
+    fs.writeFileSync(
+      path.join(workspace, 'config.json'),
+      JSON.stringify({
+        API_KEY: 'sk-secret',
+        MODEL_ID: 'gpt-test',
+        LIGHT_MODEL_ID: 'gpt-test-mini',
+        BASE_URL: 'https://example.com/v1',
+        SERVER_PORT: 3000,
+      }),
+      'utf-8'
+    )
+
+    const app = createApp(workspace)
+
+    try {
+      const getRes = await app.request('/api/settings')
+      expect(getRes.status).toBe(200)
+      const getJson = await getRes.json() as {
+        ok: boolean
+        settings: { API_KEY: string; MODEL_ID: string }
+        secrets: { API_KEY: { configured: boolean } }
+      }
+      expect(getJson.ok).toBe(true)
+      expect(getJson.settings.API_KEY).toBe('')
+      expect(getJson.secrets.API_KEY.configured).toBe(true)
+      expect(getJson.settings.MODEL_ID).toBe('gpt-test')
+
+      const postRes = await app.request('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          MODEL_ID: 'gpt-next',
+          LIGHT_MODEL_ID: 'gpt-next-mini',
+          BASE_URL: 'https://example.com/v1',
+          SERVER_PORT: 3100,
+        }),
+      })
+      expect(postRes.status).toBe(200)
+      const postJson = await postRes.json() as {
+        ok: boolean
+        settings: { API_KEY: string; MODEL_ID: string; SERVER_PORT: number }
+        secrets: { API_KEY: { configured: boolean } }
+      }
+      expect(postJson.ok).toBe(true)
+      expect(postJson.settings.API_KEY).toBe('')
+      expect(postJson.settings.MODEL_ID).toBe('gpt-next')
+      expect(postJson.settings.SERVER_PORT).toBe(3100)
+      expect(postJson.secrets.API_KEY.configured).toBe(true)
+      expect(readConfigFile(workspace).API_KEY).toBe('sk-secret')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
   })
 })
 
@@ -962,6 +1218,8 @@ describe('/api/settings', () => {
     expect(json.status.mcp.enabled).toBe(false)
     expect(json.status.mcp.connected).toBe(false)
     expect(json.status.mcp.message).toContain('MCP disabled')
+    expect((json as any).settings.API_KEY).toBe('')
+    expect((json as any).secrets.API_KEY.configured).toBe(true)
   })
 
   test('returns setup summary and capability hints for frontend onboarding', async () => {
@@ -1021,11 +1279,81 @@ describe('/api/settings', () => {
       expect(json.ok).toBe(true)
       expect(json.summary.ready).toBe(false)
       expect(json.summary.mode).toBe('setup_required')
+      expect(json.summary.message).toContain('聊天入口仍处于 setup 阶段')
       expect(json.summary.missingFields).toEqual(['API_KEY', 'MODEL_ID', 'BASE_URL'])
       expect(json.summary.workspace.targets.ready).toBe(false)
       expect(json.summary.workspace.userinfo.ready).toBe(false)
       expect(json.summary.capabilities.browser.available).toBe(false)
       expect(json.summary.nextSteps.length).toBeGreaterThan(0)
+      expect(json.summary.nextSteps.some((step) => step.includes('聊天入口的前置条件'))).toBe(true)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps targets and userinfo as chat-draftable inputs in setup summary narrative', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-web-settings-summary-draftable-'))
+    fs.mkdirSync(path.join(workspace, 'data'), { recursive: true })
+    fs.writeFileSync(path.join(workspace, 'data', 'targets.md'), '# 监测目标\n', 'utf-8')
+    fs.writeFileSync(path.join(workspace, 'data', 'userinfo.md'), '# 个人信息\n- 姓名：\n', 'utf-8')
+
+    const runtime = {
+      getMainAgent: () => undefined,
+      getFactory: () => undefined,
+      getConfigStatus: () => ({
+        ready: true,
+        missingFields: [],
+        config: {
+          API_KEY: 'sk-test',
+          MODEL_ID: 'gpt-test',
+          LIGHT_MODEL_ID: 'gpt-test-mini',
+          BASE_URL: 'https://example.invalid/v1',
+          SERVER_PORT: 3000,
+        },
+      }),
+      getRuntimeStatus: () => ({
+        mcp: {
+          enabled: true,
+          connected: true,
+          message: 'MCP ready',
+        },
+      }),
+      reloadFromConfig: async () => {},
+    }
+
+    try {
+      const app = createApp(workspace, runtime as any)
+      const res = await app.request('/api/runtime/capabilities')
+
+      expect(res.status).toBe(200)
+      const json = await res.json() as {
+        ok: boolean
+        summary: {
+          ready: boolean
+          mode: string
+          message: string
+          nextSteps: string[]
+          workspace: {
+            targets: { ready: boolean; message: string }
+            userinfo: { ready: boolean; message: string }
+          }
+        }
+      }
+
+      expect(json.ok).toBe(true)
+      expect(json.summary.ready).toBe(false)
+      expect(json.summary.mode).toBe('setup_required')
+      expect(json.summary.message).toContain('工作区资料仍可在聊天中逐步起草')
+      expect(json.summary.workspace.targets.ready).toBe(false)
+      expect(json.summary.workspace.targets.message).toContain('可在聊天中由 Agent 逐步起草')
+      expect(json.summary.workspace.userinfo.ready).toBe(false)
+      expect(json.summary.workspace.userinfo.message).toContain('可在聊天中逐步起草')
+      expect(
+        json.summary.nextSteps.some((step) => step.includes('聊天中让 Agent 生成 targets.md 草稿'))
+      ).toBe(true)
+      expect(
+        json.summary.nextSteps.some((step) => step.includes('聊天中让 Agent 起草姓名、邮箱、手机'))
+      ).toBe(true)
     } finally {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
@@ -2484,6 +2812,59 @@ describe('websocket runtime adapters', () => {
           type: 'warn',
           message: '输入请求已超时，系统已自动继续。',
         }),
+      },
+    ])
+  })
+
+  test('maps runtime context usage events into websocket messages', () => {
+    const messages = mapRuntimeEventToWebSocketMessages({
+      id: 'evt-context-1',
+      type: 'context.usage',
+      timestamp: '2026-03-27T00:00:01.000Z',
+      sessionId: 'main',
+      agentName: 'main',
+      payload: {
+        tokenCount: 512,
+      },
+    } as any)
+
+    expect(messages).toEqual([
+      {
+        event: 'context:usage',
+        data: {
+          agentName: 'main',
+          tokenCount: 512,
+        },
+      },
+    ])
+  })
+
+  test('maps workspace context update events into websocket messages', () => {
+    const messages = mapRuntimeEventToWebSocketMessages({
+      id: 'evt-context-2',
+      type: 'workspace.context_updated',
+      timestamp: '2026-03-27T00:00:02.000Z',
+      sessionId: 'main',
+      agentName: 'main',
+      payload: {
+        updatedFiles: ['data/targets.md', 'data/userinfo.md'],
+        summary: '已同步 workspace context：targets.md 新增 1 条，userinfo.md 更新 2 个字段。',
+        requiresReview: false,
+        source: 'chat',
+      },
+    } as any)
+
+    expect(messages).toEqual([
+      {
+        event: 'workspace:context_updated',
+        data: {
+          agentName: 'main',
+          updatedFiles: ['data/targets.md', 'data/userinfo.md'],
+          summary: '已同步 workspace context：targets.md 新增 1 条，userinfo.md 更新 2 个字段。',
+          requiresReview: false,
+          source: 'chat',
+          timestamp: '2026-03-27T00:00:02.000Z',
+        },
       },
     ])
   })

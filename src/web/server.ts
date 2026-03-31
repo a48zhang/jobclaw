@@ -39,6 +39,7 @@ import type {
 import { AutomationInsightsService } from '../runtime/automation-insights-service.js'
 import { ExecutionTraceService } from '../runtime/execution-trace-service.js'
 import { ResumeWorkflowService } from '../runtime/resume-workflow-service.js'
+import { normalizeInterventionResolutionInput } from '../runtime/intervention-manager.js'
 import { buildSetupCapabilitySummary } from '../runtime/setup-summary.js'
 import { RuntimeTaskResultsService } from '../runtime/task-results-service.js'
 import { createRuntimeId, nowIso } from '../runtime/utils.js'
@@ -695,6 +696,7 @@ const BUS_EVENTS: (keyof EventBusMap)[] = [
   'intervention:required',
   'intervention:resolved',
   'context:usage',
+  'workspace:context_updated',
 ]
 
 export async function getWebSocketSnapshots(runtime: ServerRuntime): Promise<Array<{ agentName: string; state: string }>> {
@@ -792,12 +794,19 @@ function attachRuntimeBroadcast(runtime: ServerRuntime): () => void {
   })
 }
 
+function maskSecret(value: string): string {
+  if (!value) return ''
+  if (value.length <= 8) return '•'.repeat(value.length)
+  return `${value.slice(0, 4)}${'•'.repeat(Math.max(4, value.length - 8))}${value.slice(-4)}`
+}
+
 async function buildConfigPayload(
   workspaceRoot: string,
   status: ConfigStatus,
   runtimeStatus?: RuntimeStatusPayload
 ) {
   const stored = readConfigFile(workspaceRoot)
+  const storedApiKey = String(stored.API_KEY ?? '').trim()
   const setup = await buildSetupCapabilitySummary({
     workspaceRoot,
     configStatus: status,
@@ -806,11 +815,17 @@ async function buildConfigPayload(
   return {
     ok: true,
     settings: {
-      API_KEY: String(stored.API_KEY ?? ''),
+      API_KEY: '',
       MODEL_ID: String(stored.MODEL_ID ?? ''),
       LIGHT_MODEL_ID: String(stored.LIGHT_MODEL_ID ?? ''),
       BASE_URL: String(stored.BASE_URL ?? ''),
       SERVER_PORT: status.config.SERVER_PORT,
+    },
+    secrets: {
+      API_KEY: {
+        configured: storedApiKey.length > 0,
+        maskedValue: maskSecret(storedApiKey),
+      },
     },
     status: {
       ready: status.ready,
@@ -1054,13 +1069,12 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
   app.post('/api/settings', async (c) => {
     try {
       const body = await c.req.json<Partial<Config>>()
-      const updates: Partial<Config> = {
-        API_KEY: typeof body.API_KEY === 'string' ? body.API_KEY.trim() : undefined,
-        MODEL_ID: typeof body.MODEL_ID === 'string' ? body.MODEL_ID.trim() : undefined,
-        LIGHT_MODEL_ID: typeof body.LIGHT_MODEL_ID === 'string' ? body.LIGHT_MODEL_ID.trim() : undefined,
-        BASE_URL: typeof body.BASE_URL === 'string' ? body.BASE_URL.trim() : undefined,
-        SERVER_PORT: body.SERVER_PORT,
-      }
+      const updates: Partial<Config> = {}
+      if (typeof body.API_KEY === 'string') updates.API_KEY = body.API_KEY.trim()
+      if (typeof body.MODEL_ID === 'string') updates.MODEL_ID = body.MODEL_ID.trim()
+      if (typeof body.LIGHT_MODEL_ID === 'string') updates.LIGHT_MODEL_ID = body.LIGHT_MODEL_ID.trim()
+      if (typeof body.BASE_URL === 'string') updates.BASE_URL = body.BASE_URL.trim()
+      if (typeof body.SERVER_PORT === 'number') updates.SERVER_PORT = body.SERVER_PORT
 
       saveConfigFile(workspaceRoot, updates)
       await runtime.reloadFromConfig()
@@ -1762,10 +1776,28 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         )
         return c.json({ ok: Boolean(record), resolved: Boolean(record) }, record ? 200 : 404)
       }
-      eventBus.emit('intervention:resolved', { agentName, input, requestId })
-      return c.json({ ok: true })
-    } catch {
-      return c.json({ ok: false, error: 'Invalid request' }, 400)
+      const fallbackPending = (await interventionStore.list())
+        .filter((record) => record.status === 'pending' && record.ownerId === ownerId)
+      const fallbackRecord = requestId
+        ? fallbackPending.find((record) => record.id === requestId)
+        : fallbackPending.at(-1)
+      if (!fallbackRecord) {
+        return c.json({ ok: false, error: 'Intervention request not found', resolved: false }, 404)
+      }
+
+      const normalizedInput = normalizeInterventionResolutionInput(fallbackRecord, input)
+      const nextRecord: InterventionRecord = {
+        ...fallbackRecord,
+        input: normalizedInput,
+        status: 'resolved',
+        updatedAt: nowIso(),
+      }
+      await interventionStore.update(nextRecord)
+      eventBus.emit('intervention:resolved', { agentName, input: normalizedInput, requestId: nextRecord.id })
+      return c.json({ ok: true, resolved: true })
+    } catch (err) {
+      const message = (err as Error).message || 'Invalid request'
+      return c.json({ ok: false, error: message }, 400)
     }
   })
 
