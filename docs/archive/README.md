@@ -2,6 +2,11 @@
 
 以下文档保留为历史参考，不再作为当前事实源或活跃 backlog。
 
+注意：
+
+- 归档文档可能仍保留旧阶段的产品假设，例如把 `targets.md` / `userinfo.md` 当作先手工补齐的前置步骤。
+- 当前有效原则请以 `docs/SPEC.md`、`docs/agent-design.md`、`docs/dev/plan.md` 和当前产品文档为准，尤其是“Agent 对话为主入口、工作区上下文可在聊天中持续维护”的原则。
+
 | 文件 | 说明 |
 |------|------|
 | [frontend-ui-review.md](frontend-ui-review.md) | 2026-03-27 的前端问题审查与分阶段修复计划；相关前端改造已完成，保留为历史评审记录。 |

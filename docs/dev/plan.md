@@ -7,9 +7,11 @@
 
 - Web 是默认也是主路径；TUI 只保留兼容 / 调试定位。
 - `MainAgent` 是唯一长期入口；子任务通过 `AgentFactory + run_agent` 按 profile 创建受限 `ProfileAgent`。
+- Agent 对话是主产品控制面；配置页和资料页只承担人工校对 / 覆写职责。
 - Runtime / Web 的正式读模型位于 `workspace/state/**`。
 - `workspace/agents/{agent}/session.json` 是 Agent 私有 checkpoint，不再作为 Web / API 的事实来源。
 - 职位数据以后端结构化存储 `workspace/state/jobs/jobs.json` 为事实源；`workspace/data/jobs.md` 作为可读、可编辑的导入导出视图保留。
+- `workspace/data/targets.md` 与 `workspace/data/userinfo.md` 作为共享工作区上下文保留，允许 Agent 在对话中逐步起草和更新。
 - WebSocket 已由 runtime event stream 和 structured stores 驱动，但继续输出兼容的 `snapshot` / `agent:*` / `intervention:*` 事件，避免前端协议震荡。
 - MCP / 浏览器能力是可选依赖。MCP 不可用时系统仍可启动，但浏览器搜索与投递链路会被明确降级。
 
@@ -49,3 +51,4 @@
 1. 为 MCP 不可用场景设计真正的替代搜索渠道，而不是仅做降级提示。
 2. 如果要长期保留 TUI，再单独补齐对应 UX 和回归测试。
 3. 如果将来需要真正恢复中的 delegated execution，再设计 checkpointable child-run protocol，而不是复用当前 read model。
+4. 如果将来要继续强化聊天主路径，再把“何时由 Agent 自动补全文档、何时升级为人工追问”固化成更细的 runtime policy。

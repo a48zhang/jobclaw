@@ -29,8 +29,8 @@
 | 文件 | 说明 |
 |------|------|
 | [pm/README.md](pm/README.md) | 产品文档索引。 |
-| [pm/product-direction-and-requirements.md](pm/product-direction-and-requirements.md) | 当前阶段要解决的产品问题、需求优先级和阶段目标。 |
-| [pm/product-strategy-and-operating-plan.md](pm/product-strategy-and-operating-plan.md) | 聚焦“现在做什么”和“将来做什么”的产品计划。 |
+| [pm/product-direction-and-requirements.md](pm/product-direction-and-requirements.md) | 当前阶段要解决的产品问题、需求优先级和阶段目标，已收敛到“Agent 对话优先”的产品原则。 |
+| [pm/product-strategy-and-operating-plan.md](pm/product-strategy-and-operating-plan.md) | 聚焦“现在做什么”和“将来做什么”的产品计划，强调聊天入口和 Agent 维护上下文。 |
 
 ## 历史文档
 
@@ -48,6 +48,8 @@
 - 默认启动模式是 Web 控制台，不是 TUI；TUI 只保留兼容/调试定位。
 - 代码中的真实入口是 `src/index.ts -> src/cli/index.ts -> src/tui-runner.ts`。
 - `MainAgent` 是用户唯一长期入口；子任务通过 `AgentFactory + run_agent` 按 profile 创建 `ProfileAgent`。
+- 主产品入口是 Agent 对话；配置页和资料页用于人工覆写、校对和恢复，不应替代聊天主路径。
+- `workspace/data/targets.md` 与 `workspace/data/userinfo.md` 应被视为 Agent 可在对话中持续维护的工作内存，而不是要求用户先手工填完的硬前置表单。
 - 职位数据以后端结构化存储 `workspace/state/jobs/jobs.json` 为事实来源；`workspace/data/jobs.md` 是可读、可编辑的导入导出视图。
 - `workspace/state/session` 与 `workspace/state/conversation` 是 Runtime / Web 的正式读模型；`workspace/agents/*/session.json` 是 Agent 私有 checkpoint。
 - Runtime reload / restart 后，不会伪恢复未完成子任务；系统会把无法继续的 in-flight 状态收敛到可解释终态。
