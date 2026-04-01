@@ -88,6 +88,7 @@ describe('executeRunAgent', () => {
       profileName: 'delivery',
       skillName: 'delivery',
       sessionId: 'run-123',
+      delegatedRunId: 'run-123',
     })
   })
 })
