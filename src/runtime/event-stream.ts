@@ -33,7 +33,11 @@ export class InMemoryEventStream implements EventStream {
     this.maxHistory = options.maxHistory ?? 1000
   }
 
-  publish(event: RuntimeEventInput, meta: RuntimeEventMeta = {}): RuntimeEvent {
+  // Makes publish() async so all async subscription handlers are properly awaited
+  // before returning. This ensures that rapid sequential events (e.g. queued →
+  // running → completed) see their handlers complete in order rather than racing.
+  // See Issue 6: fire-and-forget async subscription causes out-of-order event persistence.
+  async publish(event: RuntimeEventInput, meta: RuntimeEventMeta = {}): Promise<RuntimeEvent> {
     const runtimeEvent: RuntimeEvent = {
       id: event.id ?? createRuntimeId('evt'),
       type: event.type,
@@ -49,10 +53,21 @@ export class InMemoryEventStream implements EventStream {
       this.history.splice(0, this.history.length - this.maxHistory)
     }
 
+    const promises: Promise<void>[] = []
     for (const subscription of this.subscriptions) {
       if (!matchesFilter(runtimeEvent, subscription.filter)) continue
-      subscription.listener(runtimeEvent, meta)
+      try {
+        const result = subscription.listener(runtimeEvent, meta) as unknown as PromiseLike<void> | null | undefined
+        if (result && typeof result.then === 'function') {
+          promises.push(Promise.resolve(result).catch(err => {
+            console.error('[EventStream] Subscription handler error:', err)
+          }))
+        }
+      } catch (err) {
+        console.error('[EventStream] Subscription handler error:', err)
+      }
     }
+    await Promise.all(promises)
 
     return runtimeEvent
   }

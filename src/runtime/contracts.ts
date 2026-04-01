@@ -444,7 +444,7 @@ export interface MemoryEventRecord {
 }
 
 export interface EventStream {
-  publish(event: RuntimeEventInput, meta?: RuntimeEventMeta): RuntimeEvent
+  publish(event: RuntimeEventInput, meta?: RuntimeEventMeta): Promise<RuntimeEvent>
   subscribe(listener: RuntimeEventListener, filter?: RuntimeEventFilter): () => void
   replay(listener: RuntimeEventListener, filter?: RuntimeEventFilter): void
   getHistory(filter?: RuntimeEventFilter): RuntimeEvent[]

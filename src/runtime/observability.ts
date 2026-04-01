@@ -68,7 +68,7 @@ export class ObservabilityStore {
     return true
   }
 
-  public publishRuntimeEvent(input: RuntimeEventInput, meta?: RuntimeEventMeta): RuntimeEvent {
+  public async publishRuntimeEvent(input: RuntimeEventInput, meta?: RuntimeEventMeta): Promise<RuntimeEvent> {
     return this.eventStream.publish(input, meta)
   }
 

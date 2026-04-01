@@ -130,4 +130,80 @@ describe('Runtime event stream contract', () => {
   })
 
   test.todo('RuntimeKernel exposes start/shutdown lifecycle per contract')
+
+  test('async handlers are awaited in order to prevent race conditions', async () => {
+    const stream = new InMemoryEventStream()
+    const executionOrder: string[] = []
+
+    // Add async handlers that take different amounts of time
+    stream.subscribe(async (event) => {
+      executionOrder.push(`handler1-start:${event.payload.order}`)
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      executionOrder.push(`handler1-end:${event.payload.order}`)
+    })
+
+    stream.subscribe(async (event) => {
+      executionOrder.push(`handler2-start:${event.payload.order}`)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      executionOrder.push(`handler2-end:${event.payload.order}`)
+    })
+
+    // Publish events sequentially - each should complete before the next starts
+    await stream.publish({ type: 'test.event', payload: { order: 1 } })
+    await stream.publish({ type: 'test.event', payload: { order: 2 } })
+    await stream.publish({ type: 'test.event', payload: { order: 3 } })
+
+    // Verify the critical ordering guarantee:
+    // All handlers for event N must complete before handlers for event N+1 start
+    // The order within handlers of the same event doesn't matter (they run in parallel)
+
+    // Event 1 handlers start before event 2
+    const event1Start = executionOrder.findIndex((e) => e.includes(':1'))
+    const event2Start = executionOrder.findIndex((e) => e.includes(':2'))
+    expect(event1Start).toBeLessThan(event2Start)
+
+    // All event 1 handlers complete before event 2 starts
+    const event1Ends = executionOrder.filter((e) => e.endsWith(':1'))
+    const event2Starts = executionOrder.filter((e) => e.includes('-start:2'))
+    const lastEvent1Index = Math.max(...event1Ends.map((e) => executionOrder.indexOf(e)))
+    const firstEvent2Index = executionOrder.findIndex((e) => e.includes(':2'))
+    expect(lastEvent1Index).toBeLessThan(firstEvent2Index)
+
+    // All event 2 handlers complete before event 3 starts
+    const event2Ends = executionOrder.filter((e) => e.endsWith(':2'))
+    const lastEvent2Index = Math.max(...event2Ends.map((e) => executionOrder.indexOf(e)))
+    const firstEvent3Index = executionOrder.findIndex((e) => e.includes(':3'))
+    expect(lastEvent2Index).toBeLessThan(firstEvent3Index)
+
+    // Verify all handlers ran
+    expect(executionOrder).toHaveLength(12) // 3 events × 2 handlers × 2 phases (start/end)
+  })
+
+  test('mixed sync and async handlers all complete before publish returns', async () => {
+    const stream = new InMemoryEventStream()
+    const executionOrder: string[] = []
+
+    // Sync handler
+    stream.subscribe((event) => {
+      executionOrder.push(`sync:${event.payload.id}`)
+    })
+
+    // Async handler
+    stream.subscribe(async (event) => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      executionOrder.push(`async:${event.payload.id}`)
+    })
+
+    // Another sync handler
+    stream.subscribe((event) => {
+      executionOrder.push(`sync2:${event.payload.id}`)
+    })
+
+    await stream.publish({ type: 'test.event', payload: { id: 'a' } })
+
+    // All handlers (sync and async) should have completed
+    expect(executionOrder).toContain('sync:a')
+    expect(executionOrder).toContain('async:a')
+    expect(executionOrder).toContain('sync2:a')
+  })
 })
