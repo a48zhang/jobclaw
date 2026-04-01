@@ -80,32 +80,69 @@ export class ApplicationService {
   }
 
   async upsert(input: ApplicationUpsertInput, mutation: ApplicationMutationContext): Promise<ApplicationRecord> {
-    const records = await this.store.list()
-    const now = nowIso()
     const company = input.company.trim()
     const jobTitle = input.jobTitle.trim()
     const jobUrl = normalizeOptional(input.jobUrl)
     const jobId = normalizeOptional(input.jobId)
     const noteBody = normalizeOptional(input.note?.body)
-    const nextAction = normalizeNextAction(input.nextAction, mutation, now)
-    const existingIndex = records.findIndex(
-      (record) => record.id === input.id || (!input.id && jobUrl && record.jobUrl === jobUrl)
-    )
+    const nextAction = normalizeNextAction(input.nextAction, mutation, nowIso())
 
-    if (existingIndex >= 0) {
-      const current = records[existingIndex]
-      const timeline = [...current.timeline]
-      const notes = [...current.notes]
-      const status = input.status ?? current.status
-      const mergedNextAction = nextAction ?? current.nextAction
-      if (status !== current.status) {
-        timeline.push(buildTimelineEntry('status_changed', mutation, {
-          at: now,
-          summary: `Application status changed to ${status}`,
-          fromStatus: current.status,
-          toStatus: status,
-        }))
+    return this.store.mutateWithLock((records) => {
+      const now = nowIso()
+      const existingIndex = records.findIndex(
+        (record) => record.id === input.id || (!input.id && jobUrl && record.jobUrl === jobUrl)
+      )
+
+      if (existingIndex >= 0) {
+        const current = records[existingIndex]
+        const timeline = [...current.timeline]
+        const notes = [...current.notes]
+        const status = input.status ?? current.status
+        const mergedNextAction = nextAction ?? current.nextAction
+        if (status !== current.status) {
+          timeline.push(buildTimelineEntry('status_changed', mutation, {
+            at: now,
+            summary: `Application status changed to ${status}`,
+            fromStatus: current.status,
+            toStatus: status,
+          }))
+        }
+        if (noteBody) {
+          const note = buildNote(noteBody, input.note?.category ?? 'general', mutation, now)
+          notes.push(note)
+          timeline.push(buildTimelineEntry('note_added', mutation, {
+            at: now,
+            summary: 'Application note added',
+            noteId: note.id,
+          }))
+        }
+        if (nextAction) {
+          timeline.push(buildTimelineEntry('next_action_set', mutation, {
+            at: now,
+            summary: nextAction.summary,
+          }))
+        }
+
+        const updated: ApplicationRecord = {
+          ...current,
+          company,
+          jobTitle,
+          jobUrl: jobUrl ?? current.jobUrl,
+          jobId: jobId ?? current.jobId,
+          status,
+          appliedAt: input.appliedAt ?? current.appliedAt ?? (status === 'applied' ? now : undefined),
+          nextAction: mergedNextAction,
+          notes,
+          timeline,
+          updatedAt: now,
+        }
+        records[existingIndex] = updated
+        return updated
       }
+
+      const id = input.id ?? createRuntimeId('application')
+      const notes: ApplicationNote[] = []
+      const timeline: ApplicationTimelineEntry[] = []
       if (noteBody) {
         const note = buildNote(noteBody, input.note?.category ?? 'general', mutation, now)
         notes.push(note)
@@ -115,76 +152,39 @@ export class ApplicationService {
           noteId: note.id,
         }))
       }
-      if (nextAction) {
-        timeline.push(buildTimelineEntry('next_action_set', mutation, {
-          at: now,
-          summary: nextAction.summary,
-        }))
-      }
 
-      const updated: ApplicationRecord = {
-        ...current,
+      const record: ApplicationRecord = {
+        id,
         company,
         jobTitle,
-        jobUrl: jobUrl ?? current.jobUrl,
-        jobId: jobId ?? current.jobId,
-        status,
-        appliedAt: input.appliedAt ?? current.appliedAt ?? (status === 'applied' ? now : undefined),
-        nextAction: mergedNextAction,
-        notes,
-        timeline,
+        jobUrl,
+        jobId,
+        status: input.status ?? 'draft',
+        createdAt: now,
         updatedAt: now,
+        appliedAt: input.appliedAt ?? (input.status === 'applied' ? now : undefined),
+        notes,
+        timeline: [
+          buildTimelineEntry('created', mutation, {
+            at: now,
+            summary: 'Application created',
+            toStatus: input.status ?? 'draft',
+          }),
+          ...timeline,
+        ],
+        reminders: [],
+        linkedTasks: [],
+        nextAction,
       }
-      records[existingIndex] = updated
-      await this.store.write(records)
-      return updated
-    }
-
-    const id = input.id ?? createRuntimeId('application')
-    const notes: ApplicationNote[] = []
-    const timeline: ApplicationTimelineEntry[] = []
-    if (noteBody) {
-      const note = buildNote(noteBody, input.note?.category ?? 'general', mutation, now)
-      notes.push(note)
-      timeline.push(buildTimelineEntry('note_added', mutation, {
-        at: now,
-        summary: 'Application note added',
-        noteId: note.id,
-      }))
-    }
-
-    const record: ApplicationRecord = {
-      id,
-      company,
-      jobTitle,
-      jobUrl,
-      jobId,
-      status: input.status ?? 'draft',
-      createdAt: now,
-      updatedAt: now,
-      appliedAt: input.appliedAt ?? (input.status === 'applied' ? now : undefined),
-      notes,
-      timeline: [
-        buildTimelineEntry('created', mutation, {
+      if (record.nextAction) {
+        record.timeline.push(buildTimelineEntry('next_action_set', mutation, {
           at: now,
-          summary: 'Application created',
-          toStatus: input.status ?? 'draft',
-        }),
-        ...timeline,
-      ],
-      reminders: [],
-      linkedTasks: [],
-      nextAction,
-    }
-    if (record.nextAction) {
-      record.timeline.push(buildTimelineEntry('next_action_set', mutation, {
-        at: now,
-        summary: record.nextAction.summary,
-      }))
-    }
-    records.push(record)
-    await this.store.write(records)
-    return record
+          summary: record.nextAction.summary,
+        }))
+      }
+      records.push(record)
+      return record
+    })
   }
 
   async updateStatus(
@@ -193,45 +193,44 @@ export class ApplicationService {
     mutation: ApplicationMutationContext,
     options: { rejectionReason?: string; rejectionNotes?: string } = {}
   ): Promise<ApplicationRecord> {
-    const records = await this.store.list()
-    const index = records.findIndex((record) => record.id === id)
-    if (index < 0) throw new Error(`Application not found: ${id}`)
-
-    const current = records[index]
-    const now = nowIso()
-    const updated: ApplicationRecord = {
-      ...current,
-      status,
-      updatedAt: now,
-      appliedAt: current.appliedAt ?? (status === 'applied' ? now : undefined),
-      rejection: status === 'rejected'
-        ? {
-          recordedAt: now,
-          reason: options.rejectionReason,
-          notes: options.rejectionNotes,
-          source: mutation.source,
-          actor: mutation.actor,
-        }
-        : undefined,
-      timeline: [
-        ...current.timeline,
-        buildTimelineEntry('status_changed', mutation, {
-          at: now,
-          summary: `Application status changed to ${status}`,
-          fromStatus: current.status,
-          toStatus: status,
-        }),
-        ...(status === 'rejected'
-          ? [buildTimelineEntry('rejection_recorded', mutation, {
-              at: now,
-              summary: options.rejectionReason?.trim() || 'Application rejected',
-            })]
-          : []),
-      ],
-    }
-    records[index] = updated
-    await this.store.write(records)
-    return updated
+    return this.store.mutateWithLock((records) => {
+      const index = records.findIndex((record) => record.id === id)
+      if (index < 0) throw new Error(`Application not found: ${id}`)
+      const current = records[index]
+      const now = nowIso()
+      const updated: ApplicationRecord = {
+        ...current,
+        status,
+        updatedAt: now,
+        appliedAt: current.appliedAt ?? (status === 'applied' ? now : undefined),
+        rejection: status === 'rejected'
+          ? {
+            recordedAt: now,
+            reason: options.rejectionReason,
+            notes: options.rejectionNotes,
+            source: mutation.source,
+            actor: mutation.actor,
+          }
+          : undefined,
+        timeline: [
+          ...current.timeline,
+          buildTimelineEntry('status_changed', mutation, {
+            at: now,
+            summary: `Application status changed to ${status}`,
+            fromStatus: current.status,
+            toStatus: status,
+          }),
+          ...(status === 'rejected'
+            ? [buildTimelineEntry('rejection_recorded', mutation, {
+                at: now,
+                summary: options.rejectionReason?.trim() || 'Application rejected',
+              })]
+            : []),
+        ],
+      }
+      records[index] = updated
+      return updated
+    })
   }
 
   async addReminder(
@@ -424,14 +423,14 @@ export class ApplicationService {
     mutation: ApplicationMutationContext,
     update: (current: ApplicationRecord, now: string) => ApplicationRecord
   ): Promise<ApplicationRecord> {
-    const records = await this.store.list()
-    const index = records.findIndex((record) => record.id === id)
-    if (index < 0) throw new Error(`Application not found: ${id}`)
-    const now = nowIso()
-    const next = update(records[index], now)
-    records[index] = next
-    await this.store.write(records)
-    return next
+    return this.store.mutateWithLock((records) => {
+      const index = records.findIndex((record) => record.id === id)
+      if (index < 0) throw new Error(`Application not found: ${id}`)
+      const now = nowIso()
+      const next = update(records[index], now)
+      records[index] = next
+      return next
+    })
   }
 }
 
