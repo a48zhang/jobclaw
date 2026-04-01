@@ -6,7 +6,7 @@ export class ApplicationStore {
   private readonly store: JsonFileStore<ApplicationRecord[]>
 
   constructor(workspaceRoot: string) {
-    this.store = new JsonFileStore(getApplicationsPath(workspaceRoot), [])
+    this.store = new JsonFileStore(getApplicationsPath(workspaceRoot), [], workspaceRoot)
   }
 
   async list(): Promise<ApplicationRecord[]> {
@@ -21,6 +21,23 @@ export class ApplicationStore {
 
   async write(records: ApplicationRecord[]): Promise<void> {
     await this.store.write(normalizeRecords(records))
+  }
+
+  /**
+   * Atomically mutate application records with file-level locking.
+   * The updater receives normalized records and returns the result value directly;
+   * this method wraps it so the store always writes the full normalized record array.
+   * (Issue 7 fix — replaces list+write race condition.)
+   */
+  async mutateWithLock<V>(
+    updater: (records: ApplicationRecord[]) => V
+  ): Promise<V> {
+    const normalizedResult = await this.store.mutateWithLock((records) => {
+      const normalized = normalizeRecords(records)
+      const userResult = updater(normalized)
+      return { records: normalized, result: userResult }
+    })
+    return normalizedResult as V
   }
 }
 
