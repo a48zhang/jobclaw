@@ -91,7 +91,7 @@ export class RuntimeKernel {
   }
 
   async shutdown(): Promise<void> {
-    this.mainAgent?.abort('Runtime shutdown')
+    await this.gracefulAgentAbort('Runtime shutdown')
     this.mainAgent = undefined
     this.factory = undefined
 
@@ -117,6 +117,75 @@ export class RuntimeKernel {
     this.started = false
   }
 
+  /**
+   * Gracefully abort the main agent with timeout and cleanup.
+   * - Waits for agent to finish current work (with timeout)
+   * - Emits 'agent:aborted' event for observability
+   * - Clears pending message queue
+   * - Handles timeout case with force abort
+   */
+  private async gracefulAgentAbort(reason: string): Promise<void> {
+    const GRACEFUL_TIMEOUT_MS = 5_000
+
+    if (!this.mainAgent) return
+
+    // Emit abort event before aborting for observability
+    await this.eventStream.publish({
+      type: 'agent:aborted',
+      sessionId: this.mainAgentName,
+      agentName: this.mainAgent.agentName,
+      payload: {
+        reason,
+        graceful: true,
+      },
+    })
+
+    // Abort the agent (triggers AbortController in BaseAgent)
+    this.mainAgent.abort(reason)
+
+    // Wait for graceful cleanup with timeout - actually check if agent stops
+    const agentStopped = new Promise<void>((resolve) => {
+      const checkInterval = setInterval(() => {
+        const state = this.mainAgent?.getState?.()?.state
+        if (state === 'idle' || state === undefined) {
+          clearInterval(checkInterval)
+          resolve()
+        }
+      }, 100)
+    })
+
+    const timeout = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('Graceful abort timeout')), GRACEFUL_TIMEOUT_MS)
+    )
+
+    try {
+      await Promise.race([agentStopped, timeout])
+    } catch {
+      console.warn('[Kernel] Agent abort timed out after', GRACEFUL_TIMEOUT_MS, 'ms, forcing cleanup')
+    }
+
+    // Force cleanup: clear any remaining message queue
+    try {
+      (this.mainAgent as any).messageQueue?.splice(0)
+      ;(this.mainAgent as any).processing = false
+    } catch (err) {
+      console.error('[Kernel] Failed to clear message queue during force cleanup:', err)
+    }
+
+    // Emit final abort event with graceful=false to indicate timeout or cleanup complete
+    await this.eventStream.publish({
+      type: 'agent:aborted',
+      sessionId: this.mainAgentName,
+      agentName: this.mainAgent?.agentName ?? this.mainAgentName,
+      payload: {
+        reason,
+        graceful: false,
+      },
+    }).catch(err => {
+      console.warn('[Kernel] Failed to emit agent:aborted event:', err)
+    })
+  }
+
   async reloadConfig(): Promise<void> {
     await this.reloadFromConfig()
   }
@@ -125,7 +194,7 @@ export class RuntimeKernel {
     const recoveryReason = this.mainAgent || this.factory
       ? 'Runtime reloaded before delegated run completed'
       : 'Runtime restarted before delegated run completed'
-    this.mainAgent?.abort('Runtime reload')
+    await this.gracefulAgentAbort('Runtime reload')
     this.mainAgent = undefined
     this.factory = undefined
     await this.onMainAgentChanged?.(undefined)
@@ -134,7 +203,7 @@ export class RuntimeKernel {
     const status = this.getConfigStatus()
     if (!status.ready) {
       await this.ensureMainSession('idle')
-      this.eventStream.publish({
+      await this.eventStream.publish({
         type: 'runtime.warning',
         sessionId: this.mainAgentName,
         agentName: 'system',
@@ -155,7 +224,7 @@ export class RuntimeKernel {
     }
 
     if (!this.mcpStatus.connected) {
-      this.eventStream.publish({
+      await this.eventStream.publish({
         type: 'runtime.warning',
         sessionId: this.mainAgentName,
         agentName: 'system',
@@ -199,7 +268,7 @@ export class RuntimeKernel {
     await this.ensureMainSession(this.normalizeAgentState(this.mainAgent.getState().state))
     await this.onMainAgentChanged?.(this.mainAgent)
 
-    this.eventStream.publish({
+    await this.eventStream.publish({
       type: 'session.state_changed',
       sessionId: this.mainAgentName,
       agentName: this.mainAgentName,
@@ -251,14 +320,14 @@ export class RuntimeKernel {
     return this.taskResultsService
   }
 
-  dispatchProfileTask(
+  async dispatchProfileTask(
     profile: Exclude<DelegatedRun['profile'], 'main'>,
     instruction: string,
     options: { parentSessionId?: string } = {}
-  ): { runId: string; dispatch: 'profile_agent' } | null {
+  ): Promise<{ runId: string; dispatch: 'profile_agent' } | null> {
     if (!this.factory) return null
 
-    const task = this.createProfileTaskRun(profile, instruction, options)
+    const task = await this.createProfileTaskRun(profile, instruction, options)
     void task.completion.catch(() => {})
     return { runId: task.runId, dispatch: 'profile_agent' }
   }
@@ -272,18 +341,18 @@ export class RuntimeKernel {
       throw new Error('Runtime factory unavailable')
     }
 
-    const task = this.createProfileTaskRun(profile, instruction, options)
+    const task = await this.createProfileTaskRun(profile, instruction, options)
     return {
       runId: task.runId,
       result: await task.completion,
     }
   }
 
-  private createProfileTaskRun(
+  private async createProfileTaskRun(
     profile: Exclude<DelegatedRun['profile'], 'main'>,
     instruction: string,
     options: { parentSessionId?: string } = {}
-  ): { runId: string; completion: Promise<string> } {
+  ): Promise<{ runId: string; completion: Promise<string> }> {
     if (!this.factory) {
       throw new Error('Runtime factory unavailable')
     }
@@ -299,7 +368,7 @@ export class RuntimeKernel {
       updatedAt: createdAt,
     }
 
-    this.eventStream.publish({
+    await this.eventStream.publish({
       type: 'delegation.created',
       sessionId: parentSessionId,
       delegatedRunId: runId,
@@ -312,7 +381,7 @@ export class RuntimeKernel {
 
     const completion = (async () => {
       const runningAt = nowIso()
-      this.eventStream.publish({
+      await this.eventStream.publish({
         type: 'delegation.state_changed',
         sessionId: parentSessionId,
         delegatedRunId: runId,
@@ -326,7 +395,7 @@ export class RuntimeKernel {
 
       try {
         const result = await taskAgent.run(instruction)
-        this.eventStream.publish({
+        await this.eventStream.publish({
           type: 'delegation.completed',
           sessionId: parentSessionId,
           delegatedRunId: runId,
@@ -340,7 +409,7 @@ export class RuntimeKernel {
         })
         return result
       } catch (error) {
-        this.eventStream.publish({
+        await this.eventStream.publish({
           type: 'delegation.failed',
           sessionId: parentSessionId,
           delegatedRunId: runId,
@@ -363,7 +432,7 @@ export class RuntimeKernel {
     if (this.interventionSweepTimer) return
     this.interventionSweepTimer = setInterval(() => {
       void this.interventionManager.syncTimeouts().catch((error) => {
-        this.eventStream.publish({
+        void this.eventStream.publish({
           type: 'runtime.warning',
           sessionId: this.mainAgentName,
           agentName: 'system',
