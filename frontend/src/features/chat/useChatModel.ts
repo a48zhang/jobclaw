@@ -66,7 +66,7 @@ export function useChatModel(options: {
   const [statusLine, setStatusLine] = useState('可以开始安排下一件事。')
   const [queueStatus, setQueueStatus] = useState('')
   const historyLoadedRef = useRef(false)
-  const streamingIdRef = useRef<string | null>(null)
+  const streamingIdByAgent = useRef<Map<string, string>>(new Map())
 
   async function loadHistory() {
     if (historyLoadedRef.current) return
@@ -153,23 +153,25 @@ export function useChatModel(options: {
 
   function onWsEvent(event: string, data: any) {
     if (event === 'agent:stream') {
+      const agentName = data?.agentName || '助手'
       const chunk = sanitizeMessageText(String(data?.chunk || ''))
       const isFirst = Boolean(data?.isFirst)
       const isFinal = Boolean(data?.isFinal)
-      const streamId = streamingIdRef.current || `stream-${Date.now()}`
 
       setMessages((current) => {
-        if (isFirst || !streamingIdRef.current) {
-          streamingIdRef.current = streamId
+        if (isFirst || !streamingIdByAgent.current.has(agentName)) {
+          const streamId = `stream-${agentName}-${Date.now()}`
+          streamingIdByAgent.current.set(agentName, streamId)
           return [
             ...current,
-            createMessage('assistant', data?.agentName || '助手', chunk, {
+            createMessage('assistant', agentName, chunk, {
               id: streamId,
               streaming: !isFinal,
             }),
           ]
         }
 
+        const streamId = streamingIdByAgent.current.get(agentName)!
         return current.map((message) =>
           message.id === streamId
             ? { ...message, text: sanitizeMessageText(message.text + chunk), streaming: !isFinal }
@@ -180,7 +182,7 @@ export function useChatModel(options: {
       setStatusLine(isFinal ? '回复已完成。' : '正在整理回复...')
       setQueueStatus(isFinal ? '' : '正在整理回复...')
       if (isFinal) {
-        streamingIdRef.current = null
+        streamingIdByAgent.current.delete(agentName)
         setSending(false)
       }
       return
