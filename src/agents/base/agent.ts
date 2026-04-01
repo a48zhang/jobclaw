@@ -131,6 +131,10 @@ export abstract class BaseAgent extends EventEmitter {
   protected factory?: AgentFactory
   protected readonly profile?: AgentProfile
   protected readonly sessionId: string
+  /** Parent session ID for delegated runs - enables intervention identity chain */
+  protected readonly parentSessionId?: string
+  /** Delegated run ID for sub-agents - enables intervention identity chain */
+  protected readonly delegatedRunId?: string
   protected readonly delegationManager: DelegationManager
   protected readonly conversationStore: ConversationStore
 
@@ -157,6 +161,8 @@ export abstract class BaseAgent extends EventEmitter {
     this.persistent = config.persistent ?? false
     this.factory = config.factory
     this.profile = config.profile
+    this.parentSessionId = config.parentSessionId
+    this.delegatedRunId = config.delegatedRunId
     const agentIdentity = this.agentName ?? 'main'
     this.sessionId = config.sessionId ?? agentIdentity
     this.delegationManager = new DelegationManager(this.sessionId, agentIdentity)
@@ -320,6 +326,7 @@ export abstract class BaseAgent extends EventEmitter {
       agentName: this.agentName,
       prompt,
       requestId: options.requestId,
+      ownerId: this.delegatedRunId ?? this.agentName,
       kind: options.kind,
       options: options.options,
       timeoutMs: timeout,
@@ -531,7 +538,18 @@ export abstract class BaseAgent extends EventEmitter {
       if (finalToolCalls.length > 0) {
         this.lastAction = 'tool_call'
         for (const tc of finalToolCalls) {
-          if (this.channel) await this.channel.send({ type: 'tool_call', payload: { toolName: tc.function.name, args: tc.function.arguments }, timestamp: new Date() })
+          if (this.channel) {
+            await this.channel.send({
+              type: 'tool_call',
+              payload: {
+                toolName: tc.function.name,
+                args: tc.function.arguments,
+                sessionId: this.sessionId,
+                delegatedRunId: this.delegatedRunId,
+              },
+              timestamp: new Date()
+            })
+          }
         }
         const toolResults = await this.executeToolCalls(finalToolCalls)
         for (const tr of toolResults) this.messages.push(tr)
@@ -648,13 +666,19 @@ export abstract class BaseAgent extends EventEmitter {
         if (this.channel) {
           this.channel.send({
             type: 'tool_output',
-            payload: { message: line, toolName },
+            payload: {
+              message: line,
+              toolName,
+              sessionId: this.sessionId,
+              delegatedRunId: this.delegatedRunId,
+            },
             timestamp: new Date(),
           })
         }
       },
       factory: this.factory,
       signal: this.abortController.signal,
+      sessionId: this.sessionId,
     }
 
     const invokeTool = async (): Promise<ToolResult> => {
@@ -758,8 +782,8 @@ export abstract class BaseAgent extends EventEmitter {
       options: options as string[] | undefined,
       allowEmpty,
     })
-    const answered = allowEmpty ? true : input.trim().length > 0
-    const timedOut = input === ''
+    const answered = input.trim().length > 0 || allowEmpty
+    const timedOut = input === '' && !allowEmpty
     const result: ToolResult = {
       success: true,
       content: JSON.stringify({

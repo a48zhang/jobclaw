@@ -43,6 +43,8 @@ export interface AgentToolPayload {
   toolType: 'tool_call' | 'tool_output'
   message: string
   timestamp: string
+  sessionId?: string
+  delegatedRunId?: string
 }
 
 export type RequestKind = 'text' | 'confirm' | 'single_select'
@@ -148,7 +150,8 @@ function toRuntimeEvent(
       const value = payload as AgentToolPayload
       return {
         type: value.toolType === 'tool_call' ? 'tool.started' : 'tool.finished',
-        sessionId: value.agentName,
+        sessionId: value.sessionId ?? value.agentName,
+        delegatedRunId: value.delegatedRunId,
         agentName: value.agentName,
         payload: {
           message: value.message,

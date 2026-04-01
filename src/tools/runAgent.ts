@@ -63,10 +63,13 @@ export async function executeRunAgent(
       : instruction
 
     // 子 Agent 静默执行（无 channel）
+    // Pass parent session ID and delegated run ID for intervention identity chain
     const subAgent = factory.createAgent({
       profileName: profile,
       skillName: skill,
       sessionId: delegated_run_id,
+      parentSessionId: context.sessionId,
+      delegatedRunId: delegated_run_id,
     })
 
     const timeout = timeout_ms ?? 300_000

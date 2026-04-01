@@ -24,6 +24,10 @@ export interface CreateAgentOptions {
   profileName?: ProfileName
   skillName?: string
   sessionId?: string
+  /** Parent session ID for delegated runs - enables intervention identity chain */
+  parentSessionId?: string
+  /** Delegated run ID for sub-agents - enables intervention identity chain */
+  delegatedRunId?: string
 }
 
 export class AgentFactory {
@@ -43,6 +47,8 @@ export class AgentFactory {
       persistent: options.persistent ?? false,
       factory: this,
       sessionId: options.sessionId,
+      parentSessionId: options.parentSessionId,
+      delegatedRunId: options.delegatedRunId,
     }
 
     if (profileName === 'main') {

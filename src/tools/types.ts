@@ -9,6 +9,8 @@ export interface ToolContext {
   logger: (line: string) => void
   factory?: AgentFactory
   signal?: AbortSignal
+  /** Current session ID - passed to sub-agents for intervention identity chain */
+  sessionId?: string
 }
 
 export interface ToolResult {

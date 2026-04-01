@@ -36,6 +36,10 @@ export interface BaseAgentConfig {
   factory?: AgentFactory
   profile?: AgentProfile
   sessionId?: string
+  /** Parent session ID for delegated runs - enables intervention identity chain */
+  parentSessionId?: string
+  /** Delegated run ID for sub-agents - enables intervention identity chain */
+  delegatedRunId?: string
 }
 
 /** ContextCompressor 配置 */

@@ -30,6 +30,8 @@ class ServerChannel {
         toolType: message.type,
         message: message.payload?.message || `[${message.type}]`,
         timestamp: new Date().toISOString(),
+        sessionId: message.payload?.sessionId,
+        delegatedRunId: message.payload?.delegatedRunId,
       })
     }
   }
