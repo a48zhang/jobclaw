@@ -122,4 +122,155 @@ describe('tool path capability enforcement', () => {
       fs.rmSync(workspace, { recursive: true, force: true })
     }
   })
+
+  test('search profile uses upsert_job (not write_file) for job writes', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-tool-upsert-'))
+    fs.mkdirSync(path.join(workspace, 'data'), { recursive: true })
+    fs.mkdirSync(path.join(workspace, 'state', 'jobs'), { recursive: true })
+
+    try {
+      // search profile uses upsert_job to write to state/jobs/jobs.json
+      const result = await executeTool(
+        'upsert_job',
+        { company: 'Test Corp', title: 'Engineer', url: 'https://example.com', status: 'discovered' },
+        {
+          workspaceRoot: workspace,
+          agentName: 'search-agent',
+          profile: getProfileByName('search') as any,
+          capabilityPolicy: defaultCapabilityPolicy as any,
+          logger: () => {},
+        }
+      )
+
+      // upsert_job should succeed since search has upsert_job tool
+      expect(result.success).toBe(true)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('review profile cannot write to state/ directory (no write tools)', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-tool-state-review-'))
+    fs.mkdirSync(path.join(workspace, 'state'), { recursive: true })
+
+    try {
+      // Review profile has no write tools - verify it cannot write
+      const result = await executeTool(
+        'append_file',
+        { path: 'state/test.txt', content: 'test' },
+        {
+          workspaceRoot: workspace,
+          agentName: 'review-agent',
+          profile: getProfileByName('review') as any,
+          capabilityPolicy: defaultCapabilityPolicy as any,
+          logger: () => {},
+        }
+      )
+
+      // Should fail because review has no append_file in allowedTools
+      expect(result.success).toBe(false)
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('delivery profile can write to state/artifacts/', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-tool-state-artifacts-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'artifacts'), { recursive: true })
+
+    try {
+      // Use append_file instead of write_file (delivery has write_file but this is simpler)
+      const result = await executeTool(
+        'append_file',
+        { path: 'state/artifacts/test.txt', content: 'test content' },
+        {
+          workspaceRoot: workspace,
+          agentName: 'delivery-agent',
+          profile: getProfileByName('delivery') as any,
+          capabilityPolicy: defaultCapabilityPolicy as any,
+          logger: () => {},
+        }
+      )
+
+      expect(result.success).toBe(true)
+      const content = fs.readFileSync(path.join(workspace, 'state', 'artifacts', 'test.txt'), 'utf-8')
+      expect(content).toBe('test content')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('resume profile can write to state/artifacts/', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-tool-state-artifacts-resume-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'artifacts'), { recursive: true })
+
+    try {
+      const result = await executeTool(
+        'append_file',
+        { path: 'state/artifacts/resume.txt', content: 'resume content' },
+        {
+          workspaceRoot: workspace,
+          agentName: 'resume-agent',
+          profile: getProfileByName('resume') as any,
+          capabilityPolicy: defaultCapabilityPolicy as any,
+          logger: () => {},
+        }
+      )
+
+      expect(result.success).toBe(true)
+      const content = fs.readFileSync(path.join(workspace, 'state', 'artifacts', 'resume.txt'), 'utf-8')
+      expect(content).toBe('resume content')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('delivery profile cannot write to state/jobs/ (control plane)', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-tool-state-jobs-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'jobs'), { recursive: true })
+
+    try {
+      const result = await executeTool(
+        'append_file',
+        { path: 'state/jobs/test.json', content: '{}' },
+        {
+          workspaceRoot: workspace,
+          agentName: 'delivery-agent',
+          profile: getProfileByName('delivery') as any,
+          capabilityPolicy: defaultCapabilityPolicy as any,
+          logger: () => {},
+        }
+      )
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('控制平面路径禁止写入')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('main profile can write to state/ subdirectories', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'jobclaw-tool-state-main-'))
+    fs.mkdirSync(path.join(workspace, 'state', 'jobs'), { recursive: true })
+
+    try {
+      const result = await executeTool(
+        'append_file',
+        { path: 'state/jobs/test.json', content: '{"test": true}' },
+        {
+          workspaceRoot: workspace,
+          agentName: 'main',
+          profile: getProfileByName('main') as any,
+          capabilityPolicy: defaultCapabilityPolicy as any,
+          logger: () => {},
+        }
+      )
+
+      expect(result.success).toBe(true)
+      const content = fs.readFileSync(path.join(workspace, 'state', 'jobs', 'test.json'), 'utf-8')
+      expect(content).toBe('{"test": true}')
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true })
+    }
+  })
 })
