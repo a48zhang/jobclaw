@@ -6,8 +6,8 @@ export function InterventionDialog(props: {
   error: string
   submitting: boolean
   setValue: (value: string) => void
-  onClose: () => void
-  onSubmit: (value?: string) => void
+  onClose: (kind?: string) => void
+  onSubmit: (value?: string, kind?: string) => void
 }) {
   const open = Boolean(props.payload)
   return (
@@ -37,7 +37,7 @@ export function InterventionDialog(props: {
         )}
         {props.error ? <p className="field-error">{props.error}</p> : null}
         <div className="dialog-actions">
-          <button id="modal-cancel" type="button" className="secondary-button" onClick={props.onClose}>
+          <button id="modal-cancel" type="button" className="secondary-button" onClick={() => props.onClose(props.payload?.kind)}>
             取消
           </button>
           <button
@@ -45,7 +45,7 @@ export function InterventionDialog(props: {
             type="button"
             className="primary-button"
             disabled={props.submitting}
-            onClick={() => props.onSubmit()}
+            onClick={() => props.onSubmit('__confirm__', props.payload?.kind)}
           >
             {props.submitting ? '提交中...' : '确认'}
           </button>

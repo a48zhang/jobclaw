@@ -15,8 +15,13 @@ export function useInterventionDialog(addToast: (toast: Omit<ToastItem, 'id'>) =
     setSubmitting(false)
   }
 
-  function close() {
+  function close(kind?: string) {
     if (submitting) return
+    // For confirm-type dialogs, close = cancel (notify server via __cancel__ marker)
+    if (kind === 'confirm') {
+      void submit('__cancel__')
+      return
+    }
     setPayload(null)
     setValue('')
     setError('')
@@ -28,19 +33,28 @@ export function useInterventionDialog(addToast: (toast: Omit<ToastItem, 'id'>) =
     setError('')
   }
 
-  async function submit(forcedValue?: string) {
+  async function submit(forcedValue?: string, kind?: string) {
     if (!payload) return
+
+    // Handle explicit confirm/cancel action markers (Issue 9b fix)
+    const isConfirmAction = forcedValue === '__confirm__'
+    const isCancelAction = forcedValue === '__cancel__'
+
+    // Skip empty validation for explicit action markers
     const input = (forcedValue ?? value).trim()
-    if (!input && !payload.allowEmpty) {
+    if (!input && !payload.allowEmpty && !isConfirmAction && !isCancelAction) {
       setError('请先提供输入。')
       return
     }
+
+    // For confirm-type dialogs, map __confirm__ marker to backend-recognized value
+    const resolvedInput = isConfirmAction ? '__confirm__' : isCancelAction ? '__cancel__' : input
 
     setSubmitting(true)
     setError('')
     try {
       await resolveIntervention({
-        input,
+        input: resolvedInput,
         agentName: payload.agentName,
         ownerId: payload.ownerId,
         requestId: payload.requestId,

@@ -63,7 +63,7 @@ export class InterventionManager {
 
     await this.store.save(record)
     if (options.emitEvent !== false) {
-      this.eventStream.publish(
+      await this.eventStream.publish(
         {
           type: 'intervention.requested',
           sessionId: options.sessionId,
@@ -101,7 +101,7 @@ export class InterventionManager {
     await this.store.update(nextRecord)
 
     if (options.emitEvent !== false) {
-      this.eventStream.publish(
+      await this.eventStream.publish(
         {
           type: 'intervention.resolved',
           sessionId: options.sessionId,
@@ -182,7 +182,7 @@ export class InterventionManager {
 
     if (options.emitEvent !== false) {
       const ownerOptions = this.resolveOwnerOptions(nextRecord)
-      this.eventStream.publish(
+      await this.eventStream.publish(
         {
           type: status === 'timeout' ? 'intervention.timed_out' : 'intervention.cancelled',
           sessionId: options.sessionId ?? ownerOptions.sessionId,
@@ -236,6 +236,9 @@ export function normalizeInterventionResolutionInput(record: InterventionRecord,
   }
 
   if (record.kind === 'confirm') {
+    // Handle explicit action markers from frontend dialog (Issue 9a fix)
+    if (input === '__confirm__') return 'yes'
+    if (input === '__cancel__') return 'no'
     const normalized = trimmed.toLowerCase()
     if (normalized.length === 0) {
       return ''
