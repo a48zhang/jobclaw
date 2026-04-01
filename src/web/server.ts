@@ -89,7 +89,7 @@ export interface ServerRuntime {
   dispatchProfileTask?(
     profile: DelegatedRun['profile'],
     instruction: string
-  ): { runId: string; dispatch: 'profile_agent' } | null
+  ): Promise<{ runId: string; dispatch: 'profile_agent' } | null> | null
 }
 
 export function registerAgent(agent: BaseAgent): void {
@@ -526,19 +526,20 @@ async function readJobsForApi(workspaceRoot: string, jobs: JobsService): Promise
     if (Array.isArray(parsed) && parsed.length > 0) {
       return parsed as JobRecord[]
     }
-    const rows = await jobs.listRows()
-    return rows.map((row, index) => ({
-      id: `${index}:${row.url}`,
-      company: row.company,
-      title: row.title,
-      url: row.url,
-      status: isJobStatus(row.status) ? row.status : 'discovered',
-      discoveredAt: row.time,
-      updatedAt: row.time,
-    }))
   } catch {
-    return []
+    // JSON file is corrupt — fall through to markdown fallback (Issue 12 fix)
   }
+
+  const rows = await jobs.listRows()
+  return rows.map((row, index) => ({
+    id: `${index}:${row.url}`,
+    company: row.company,
+    title: row.title,
+    url: row.url,
+    status: isJobStatus(row.status) ? row.status : 'discovered',
+    discoveredAt: row.time,
+    updatedAt: row.time,
+  }))
 }
 
 function matchesApplicationQuery(
@@ -874,7 +875,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
         getInterventionManager: () => undefined,
         getConversationStore: () => undefined,
         getTaskResultsService: () => undefined,
-        dispatchProfileTask: () => null,
+        dispatchProfileTask: async () => null,
       }
 
   const app = new Hono()
@@ -999,12 +1000,15 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     }
   }
 
-  function dispatchTrackedProfileTask(
+  async function dispatchTrackedProfileTask(
     profile: DelegatedRun['profile'],
     instruction: string
-  ): { runId: string; dispatch: 'profile_agent' } | null {
-    const runtimeDispatch = runtime.dispatchProfileTask?.(profile, instruction)
-    if (runtimeDispatch) return runtimeDispatch
+  ): Promise<{ runId: string; dispatch: 'profile_agent' } | null> {
+    const dispatchResult = runtime.dispatchProfileTask?.(profile, instruction)
+    if (dispatchResult) {
+      const runtimeDispatch = await dispatchResult
+      if (runtimeDispatch) return runtimeDispatch
+    }
 
     const factory = runtime.getFactory()
     if (!factory) return null
@@ -1940,7 +1944,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
       return c.json(getUnavailableResponse(status), 409)
     }
 
-    const trackedRun = dispatchTrackedProfileTask('resume', '生成简历')
+    const trackedRun = await dispatchTrackedProfileTask('resume', '生成简历')
     if (trackedRun) {
       return c.json({ ok: true, workflow: '/api/resume/workflow', dispatch: trackedRun.dispatch, runId: trackedRun.runId })
     }
@@ -1981,7 +1985,7 @@ export function createApp(workspaceRoot: string, runtimeOrFactory?: ServerRuntim
     const prompt =
       '评价刚上传的简历。若 data/uploads/resume-upload.pdf 存在，请优先使用 read_pdf 读取内容，并严格按 resume-clinic skill 输出评价、问题分析、改写建议和可直接替换的表达。'
 
-    const trackedRun = dispatchTrackedProfileTask('review', prompt)
+    const trackedRun = await dispatchTrackedProfileTask('review', prompt)
     if (trackedRun) {
       return c.json({
         ok: true,
