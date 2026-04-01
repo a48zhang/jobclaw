@@ -54,15 +54,24 @@ export function normalizeAndValidatePath(inputPath: string, workspaceRoot: strin
   const absolutePath = path.resolve(workspaceRoot, normalized)
   const absoluteWorkspace = path.resolve(workspaceRoot)
 
-  // 确保路径在工作区内
+  // 解析符号链接并验证目标仍在工作区内（Issue 3: symlink escape prevention）
+  let realPath: string
+  try {
+    realPath = fs.realpathSync(absolutePath)
+  } catch (err: any) {
+    // ENOENT = file does not exist yet; allow the path and let the operation decide
+    if (err.code === 'ENOENT') {
+      return absolutePath // treat missing files as valid (operation will fail with its own error)
+    }
+    return null // ELOOP (symlink loop) or other errors = path unsafe
+  }
+  const normalizedRealPath = realPath.endsWith(path.sep) ? realPath : realPath + path.sep
   const normalizedAbsoluteWorkspace = absoluteWorkspace.endsWith(path.sep) ? absoluteWorkspace : absoluteWorkspace + path.sep
-  const normalizedAbsolutePath = absolutePath.endsWith(path.sep) ? absolutePath : absolutePath + path.sep
-
-  if (!normalizedAbsolutePath.startsWith(normalizedAbsoluteWorkspace) && absolutePath !== absoluteWorkspace) {
+  if (!normalizedRealPath.startsWith(normalizedAbsoluteWorkspace) && realPath !== absoluteWorkspace) {
     return null
   }
 
-  return absolutePath
+  return realPath
 }
 
 /**
@@ -142,6 +151,37 @@ export function checkPathPermission(
   const { requireSharedWriteLock = true } = options
   const absoluteWorkspace = path.resolve(workspaceRoot)
   const relativePath = path.relative(absoluteWorkspace, normalizedPath).replace(/\\/g, '/')
+
+  // Issue 5: Block non-main profiles from writing to protected system paths
+  if (operation === 'write' && context?.profile && context.profile.name !== 'main') {
+    // Block control-plane state subdirectories
+    const CONTROL_PLANE_STATE_SUBDIRS = [
+      'state/session', 'state/conversation', 'state/delegation',
+      'state/interventions', 'state/jobs', 'state/applications',
+      'state/learning', 'state/strategy', 'state/user',
+    ]
+    for (const cp of CONTROL_PLANE_STATE_SUBDIRS) {
+      if (relativePath === cp || relativePath.startsWith(cp + '/')) {
+        return { allowed: false, reason: `控制平面路径禁止写入：${relativePath}` }
+      }
+    }
+
+    // Block root state/, logs/, and .locks/ directories (unless explicitly allowed via writableRoots)
+    const PROTECTED_ROOTS = ['state', 'logs', '.locks']
+    for (const protectedRoot of PROTECTED_ROOTS) {
+      if (relativePath === protectedRoot || relativePath.startsWith(protectedRoot + '/')) {
+        // Only allow if explicitly listed in profile's writableRoots
+        const writableRoots = context.profile.writableRoots || []
+        const isExplicitlyAllowed = writableRoots.some(root => {
+          const normalizedRoot = root.replace(/\\/g, '/').replace(/\/$/, '')
+          return relativePath === normalizedRoot || relativePath.startsWith(normalizedRoot + '/')
+        })
+        if (!isExplicitlyAllowed) {
+          return { allowed: false, reason: `系统路径禁止写入：${protectedRoot}/` }
+        }
+      }
+    }
+  }
 
   if (context?.profile && context.capabilityPolicy) {
     const capabilityDecision =
